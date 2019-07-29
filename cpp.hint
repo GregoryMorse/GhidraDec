@@ -1,0 +1,2 @@
+#define GHIDRADEC_API __declspec(dllexport)
+#define GHIDRADEC_API __declspec(dllimport)

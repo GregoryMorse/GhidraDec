@@ -1,0 +1,199 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Source Files\Sleigh">
+      <UniqueIdentifier>{f633b50a-1663-4e69-9dea-295a2d0c474b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Sleigh">
+      <UniqueIdentifier>{b8ffc052-c3f9-4b4f-a193-5490fa57b664}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Core">
+      <UniqueIdentifier>{28ec370e-092e-49f4-9471-9b1c3f34b840}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Core">
+      <UniqueIdentifier>{aa4ddff2-eca2-4f30-8a2e-a7bb2b0a9758}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\LibSLA">
+      <UniqueIdentifier>{e91732f8-89b3-4e2b-b39a-a4333c96d798}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\LibSLA">
+      <UniqueIdentifier>{f4acc362-61e2-46bc-9bcf-90c642ec8d3a}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="GhidraDecIface.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="sleighinterface.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\sleigh.cc">
+      <Filter>Source Files\Sleigh</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\pcodeparse.tab.cpp">
+      <Filter>Source Files\Sleigh</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\pcodecompile.cc">
+      <Filter>Source Files\Sleigh</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\sleighbase.cc">
+      <Filter>Source Files\Sleigh</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\slghsymbol.cc">
+      <Filter>Source Files\Sleigh</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\slghpatexpress.cc">
+      <Filter>Source Files\Sleigh</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\slghpattern.cc">
+      <Filter>Source Files\Sleigh</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\semantics.cc">
+      <Filter>Source Files\Sleigh</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\context.cc">
+      <Filter>Source Files\Sleigh</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\filemanage.cc">
+      <Filter>Source Files\Sleigh</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\xml.tab.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\space.cc">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\float.cc">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\address.cc">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\pcoderaw.cc">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\translate.cc">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\opcodes.cc">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\globalcontext.cc">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\loadimage.cc">
+      <Filter>Source Files\LibSLA</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\memstate.cc">
+      <Filter>Source Files\LibSLA</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\opbehavior.cc">
+      <Filter>Source Files\LibSLA</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\emulate.cc">
+      <Filter>Source Files\LibSLA</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="sleighinterface.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\sleigh.hh">
+      <Filter>Header Files\Sleigh</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\pcodeparse.hh">
+      <Filter>Header Files\Sleigh</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\pcodecompile.hh">
+      <Filter>Header Files\Sleigh</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\sleighbase.hh">
+      <Filter>Header Files\Sleigh</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\slghsymbol.hh">
+      <Filter>Header Files\Sleigh</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\slghpatexpress.hh">
+      <Filter>Header Files\Sleigh</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\slghpattern.hh">
+      <Filter>Header Files\Sleigh</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\semantics.hh">
+      <Filter>Header Files\Sleigh</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\context.hh">
+      <Filter>Header Files\Sleigh</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\filemanage.hh">
+      <Filter>Header Files\Sleigh</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\address.hh">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\xml.tab.h">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\xml.hh">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\space.hh">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\float.hh">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\pcoderaw.hh">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\translate.hh">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\opcodes.hh">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\globalcontext.hh">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\pcodeparse.tab.h">
+      <Filter>Header Files\Sleigh</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\loadimage.hh">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\memstate.hh">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\opbehavior.hh">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\emulate.hh">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\types.h">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\partmap.hh">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\error.hh">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Bison Include="decompile\pcodeparse.y" />
+    <Bison Include="decompile\xml.y" />
+  </ItemGroup>
+</Project>
