@@ -151,7 +151,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		}
 		return res;
 	}
-	std::string IdaCallback::arglocToAddr(argloc_t al, unsigned long long* offset, std::vector<JoinEntryInfo>& joins, bool noResolveReg) {
+	std::string IdaCallback::arglocToAddr(argloc_t al, unsigned long long* offset, std::vector<SizedAddrInfo>& joins, bool noResolveReg) {
 		if (al.is_ea()) {
 			*offset = al.get_ea();
 			return "ram";
@@ -160,11 +160,11 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			return "stack";
 		} else if (al.is_scattered()) {
 			scattered_aloc_t scat;
-			for (int i = 0; i < scat.size(); i++) {
+			for (size_t i = scat.size() - 1; i >= 0; i--) { //these appear to be high to low, so need to reverse order here
 				unsigned long long offs;
-				std::vector<JoinEntryInfo> j;
+				std::vector<SizedAddrInfo> j; //can have a register reg1() as the is_mixed_scattered indicates
 				std::string spc = arglocToAddr(scat[i], &offs, j, false); //all "ram" - certainly join or reg2 would not make sense
-				joins.push_back(JoinEntryInfo{ spc, scat[i].off, scat[i].size });
+				joins.push_back(SizedAddrInfo{ spc, scat[i].off, scat[i].size });
 			}
 			return "join";
 		} else if (al.is_reg1()) {
@@ -193,8 +193,9 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			qstring qs1, qs2;
 			get_reg_name(&qs1, al.reg1(), ri1.size);
 			get_reg_name(&qs2, al.reg2(), ri2.size);
-			joins.push_back(JoinEntryInfo{ "register", noResolveReg ? -1 : (unsigned long long)regNameToIndexIda(qs1.c_str()), (unsigned long long)ri1.size });
-			joins.push_back(JoinEntryInfo{ "register", noResolveReg ? -1 : (unsigned long long)regNameToIndexIda(qs2.c_str()), (unsigned long long)ri2.size });
+			//reg2 is the high value, as in dx for pair dx:ax, so it needs to be added to the join space first
+			joins.push_back(SizedAddrInfo{ "register", noResolveReg ? -1 : (unsigned long long)regNameToIndexIda(qs2.c_str()), (unsigned long long)ri2.size });
+			joins.push_back(SizedAddrInfo{ "register", noResolveReg ? -1 : (unsigned long long)regNameToIndexIda(qs1.c_str()), (unsigned long long)ri1.size });
 			return "join";
 		} else if (al.is_rrel()) {
 			*offset = al.get_rrel().off; //some type of spacebase
@@ -221,7 +222,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	}
 	size_t IdaCallback::readDec(void* Buf, size_t MaxCharCount)
 	{
-		return _read(di->rdHandle, Buf, MaxCharCount);
+		return _read(di->rdHandle, Buf, (unsigned int)MaxCharCount);
 		//return qpipe_read(di->rdHandle, Buf, MaxCharCount);
 	}
 	size_t IdaCallback::writeDec(void const* Buf, size_t MaxCharCount)
@@ -230,7 +231,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		qfwrite(debugfp, Buf, MaxCharCount);
 		qflush(debugfp);
 #endif
-		return _write(di->wrHandle, Buf, MaxCharCount);
+		return _write(di->wrHandle, Buf, (unsigned int)MaxCharCount);
 		//return qpipe_write(di->wrHandle, Buf, MaxCharCount);
 	}
 
@@ -260,7 +261,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				regtrans = (unsigned long long)regNameToIndexIda(ph.reg_names[i + ph.reg_first_sreg]);
 				if (regtrans == -1) continue;
 				//this is a much more powerful analysis by the processor engine than the default segregs which now are not used
-				for (int k = 0; k < sregRanges[i].size(); k++) {
+				for (size_t k = 0; k < sregRanges[i].size(); k++) {
 					if (sregRanges[i][k].val == -1) continue;
 					//if (out.val == ((1 << (ph.segreg_size * 8)) - 1)) continue;
 					inits.push_back(InitStateItem{ "ram", sregRanges[i][k].start_ea, "ram", sregRanges[i][k].end_ea, "register", regtrans, (unsigned long)ph.segreg_size, (unsigned long long)sregRanges[i][k].val });
@@ -271,12 +272,12 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 		}
 	}
-	std::string IdaCallback::getPcodeInject(int type, std::string name, std::string base, unsigned long long offset, std::string fixupbase, unsigned long long fixupoffset)
+	std::string IdaCallback::getPcodeInject(int type, std::string name, AddrInfo addr, std::string fixupbase, unsigned long long fixupoffset)
 	{
 		if (type == DecompInterface::CALLMECHANISM_TYPE) {
-			if ((name == "__stdcall16far@@inject_uponreturn" || name == "__cdecl16far@@inject_uponreturn") && base == "ram") {
+			if ((name == "__stdcall16far@@inject_uponreturn" || name == "__cdecl16far@@inject_uponreturn") && addr.space == "ram") {
 				sel_t s;
-				executeOnMainThread([&s, offset]() { s = getseg(offset)->sel; });
+				executeOnMainThread([&s, addr]() { s = getseg((ea_t)addr.offset)->sel; });
 				return "CS = " + std::to_string(s) + ";";
 			} else return "";
 		} else return "";
@@ -287,10 +288,10 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 #define CACHEPAGESIZE 4096ull
 #define CACHELIMIT 128
 #define CACHECLEANUPAFTER 256
-	int IdaCallback::getBytes(unsigned char* ptr, int size, std::string base, unsigned long long offset)
+	int IdaCallback::getBytes(unsigned char* ptr, int size, AddrInfo addr)
 	{
 		int i = 0;
-		if (base == "ram") {
+		if (addr.space == "ram") {
 			if (byteCache.size() > CACHECLEANUPAFTER) {
 				for (std::map<ea_t, std::pair<unsigned long long, std::vector<unsigned short>>>::iterator it = byteCache.begin(); it != byteCache.end();) {
 					if (it->second.first < cacheCount - CACHELIMIT) it = byteCache.erase(it);
@@ -299,34 +300,34 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 			//paging strategy for easy lookup - just like the processor utilizes
 			bool bFetch = false;
-			unsigned long long page = offset & (~(CACHEPAGESIZE - 1)),
-				pgoffs = offset & (CACHEPAGESIZE - 1);
+			unsigned long long page = addr.offset & (~(CACHEPAGESIZE - 1)),
+				pgoffs = addr.offset & (CACHEPAGESIZE - 1);
 			do {
-				if (byteCache.find(page) == byteCache.end()) {
+				if (byteCache.find((ea_t)page) == byteCache.end()) {
 					bFetch = true;
 					break;
 				}
 				page += CACHEPAGESIZE;
-			} while (page < offset + size);
-			if (bFetch) executeOnMainThread([this, size, offset]() {
-					unsigned long long page = offset & (~(CACHEPAGESIZE - 1));
+			} while (page < addr.offset + size);
+			if (bFetch) executeOnMainThread([this, size, addr]() {
+					unsigned long long page = addr.offset & (~(CACHEPAGESIZE - 1));
 					do {
 						for (int i = 0; i < CACHEPAGESIZE; i++) { //i = offset & (CACHEPAGESIZE - 1);
-							byteCache[page].second.push_back(is_loaded(page + i) ? get_byte(page + i) : 256);
+							byteCache[(ea_t)page].second.push_back(is_loaded((ea_t)page + i) ? get_byte((ea_t)page + i) : 256);
 						}
 						page += CACHEPAGESIZE;
-					} while (page < offset + size);
+					} while (page < addr.offset + size);
 				});
-			page = offset & (~(CACHEPAGESIZE - 1));
-			pgoffs = offset & (CACHEPAGESIZE - 1);
-			byteCache[page].first = cacheCount++;
+			page = addr.offset & (~(CACHEPAGESIZE - 1));
+			pgoffs = addr.offset & (CACHEPAGESIZE - 1);
+			byteCache[(ea_t)page].first = cacheCount++;
 			for (i = 0; i < size; i++) {
 				if (pgoffs == CACHEPAGESIZE) {
 					page += CACHEPAGESIZE;
 					pgoffs = 0;
-					byteCache[page].first = cacheCount++;
+					byteCache[(ea_t)page].first = cacheCount++;
 				}
-				if ((byteCache[page].second[pgoffs] & 256) == 0) ptr[i] = (unsigned char)byteCache[page].second[pgoffs];
+				if ((byteCache[(ea_t)page].second[(size_t)pgoffs] & 256) == 0) ptr[i] = (unsigned char)byteCache[(ea_t)page].second[(size_t)pgoffs];
 				else break; //could do something like 0x90 for NOP on x86 - but could be data request
 				pgoffs++;
 			}
@@ -337,16 +338,21 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	}
 	std::string getSymbolName(unsigned long long offset)
 	{
-		return get_name(offset).c_str();
+		std::string str = get_name((ea_t)offset).c_str();
+		if (str.size() == 0) {
+			str = to_string(offset, std::hex);
+			str = ("ram0x" + std::string((inf.is_64bit() ? 16 : 8) - str.size(), '0') + str);
+		}
+		return str;
 	}
 	void getMemoryInfo(unsigned long long offset, bool* readonly, bool* volatil)
 	{
-		*volatil = !is_mapped(offset);
-		segment_t* s = getseg(offset);
+		*volatil = !is_mapped((ea_t)offset);
+		segment_t* s = getseg((ea_t)offset);
 		//(s->type & SEG_DATA) != 0;
 		*readonly = s != nullptr && (s->perm & SEGPERM_WRITE) == 0 && (s->perm & SEGPERM_MAXVAL) != 0;
 		xrefblk_t xr;
-		if (xr.first_to(offset, XREF_ALL)) {
+		if (xr.first_to((ea_t)offset, XREF_ALL)) {
 			do {
 				if ((xr.type & XREF_MASK) == dr_W) {
 					*readonly = false;
@@ -354,16 +360,20 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			} while (xr.next_to());
 		}
 	}
-	void IdaCallback::getFuncInfo(std::string base, ea_t offset, func_t* f, std::string & name, FuncProtoInfo & func)
+	void IdaCallback::getFuncInfo(AddrInfo addr, func_t* f, std::string & name, FuncProtoInfo & func)
 	{
 		//name = demangle_name(imports[offset].name.c_str(), MNG_SHORT_FORM).c_str();
 		//name = get_name(offset).c_str();
 		//get_ea_name(&qs, offset, GN_VISIBLE | GN_DEMANGLED | GN_SHORT);
-		name = get_short_name(offset, GN_STRICT).c_str();
-		if (name.size() != 0) name = name.substr(0, name.find("(", 0));
-		else name = getSymbolName(offset).c_str();
+		if (imports.find((ea_t)addr.offset) != imports.end() && imports[(ea_t)addr.offset].name != "")
+			name = imports[(ea_t)addr.offset].name;
+		else {
+			name = get_short_name((ea_t)addr.offset, GN_STRICT).c_str();
+			if (name.size() != 0) name = name.substr(0, name.find("(", 0));
+			else name = getSymbolName(addr.offset).c_str();
+		}
 		func.isInline = false;
-		bool bFuncTinfo = getFuncTypeInfoByAddr(f != nullptr ? f->start_ea : offset, &func.extraPop, &func.isNoReturn, &func.dotdotdot, &func.hasThis, func.model, &func.retType, func.syminfo);
+		bool bFuncTinfo = getFuncTypeInfoByAddr(f != nullptr ? f->start_ea : (ea_t)addr.offset, func);
 		func.isNoReturn = (f != nullptr) ? !f->does_return() : (bFuncTinfo ? func.isNoReturn : false);// f->flags& FUNC_NORET ? true : false;
 		//(f->flags & FUNC_USERFAR) != 0
 		//(f->flags & FUNC_LIB) != 0
@@ -396,7 +406,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					getType(ti, typeChain, false);
 					size = ti.get_size();
 					qstring qs;
-					if (get_reg_name(&qs, f->regargs[i].reg, size) == -1) offset = -1;  //for example 1 byte of DS register will fail
+					if (get_reg_name(&qs, f->regargs[i].reg, (size_t)size) == -1) offset = -1;  //for example 1 byte of DS register will fail
 					else offset = regNameToIndexIda(qs.c_str());
 					if (offset == -1) {
 						bitrange_t bits;
@@ -421,12 +431,12 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				}
 				std::vector<SymInfo>::iterator it = nm.empty() ? func.syminfo.end() : std::find_if(func.syminfo.begin(), func.syminfo.end(), [&nm](SymInfo it) { return it.pi.name == nm; });
 				if (it == func.syminfo.end()) {
-					it = std::find_if(func.syminfo.begin(), func.syminfo.end(), [offset](SymInfo it) { return it.pi.name == "" && it.space == "register" && it.offset == offset; });
+					it = std::find_if(func.syminfo.begin(), func.syminfo.end(), [offset](SymInfo it) { return it.pi.name == "" && it.addr.addr.space == "register" && it.addr.addr.offset == offset; });
 				}
 				if (it != func.syminfo.end()) {
 					if (it->pi.name == "") it->pi.name = nm;
-					it->space = "register";
-					it->offset = offset;
+					it->addr.addr.space = "register";
+					it->addr.addr.offset = offset;
 					continue;
 				}
 				if (f->regargs[i].type == nullptr) {
@@ -450,9 +460,9 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			//unsigned long long offset = frame->members[i].soff - firstarg;
 			ea_t firstarg = frame_off_args(f);
 			//generalized for any arguments not found in the frame
-			for (int i = 0; i < func.syminfo.size(); i++) {
-				if (func.syminfo[i].space == "stack") {
-					func.syminfo[i].offset += firstarg - frame_off_retaddr(f);
+			for (size_t i = 0; i < func.syminfo.size(); i++) {
+				if (func.syminfo[i].addr.addr.space == "stack") {
+					func.syminfo[i].addr.addr.offset += firstarg - frame_off_retaddr(f);
 				}
 			}
 			for (uint32 i = 0; i < frame->memqty; i++) {
@@ -472,13 +482,13 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				if (it == func.syminfo.end()) {
 					//if no name, offset is from 0, so use arg offset
 					//msg("Offset: %llX\n", offset);
-					it = std::find_if(func.syminfo.begin(), func.syminfo.end(), [offset](SymInfo it) { return it.pi.name == "" && it.space == "stack" && it.offset == offset; });
+					it = std::find_if(func.syminfo.begin(), func.syminfo.end(), [offset](SymInfo it) { return it.pi.name == "" && it.addr.addr.space == "stack" && it.addr.addr.offset == offset; });
 				}
 				//unsigned long long reloffs = frame->members[i].get_soff() - frame_off_retaddr(f); // - f->frsize - f->frregs; //frame seems to always be relative to return address
 				if (it != func.syminfo.end()) {
 					if (it->pi.name == "") it->pi.name = nm;
-					it->space = "stack";
-					it->offset = offset;
+					it->addr.addr.space = "stack";
+					it->addr.addr.offset = offset;
 					continue;
 				}
 				//if (frame->members[i].get_soff() >= f->frsize && frame->members[i].get_soff() < f->frsize + 1 + f->frregs) continue; //return address size is computed how - get_member_size() for " r"?
@@ -508,7 +518,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			else if (f == nullptr && bFuncTinfo) {
 				tinfo_t ti;
 				func_type_data_t ftd;
-				getFuncByGuess(offset, ti);
+				getFuncByGuess((ea_t)addr.offset, ti);
 				ti.get_func_details(&ftd);
 				if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm)) retSize += ph.segreg_size;
 			}
@@ -519,16 +529,16 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			//retSize += ri.size;
 			retSize += f == nullptr ? inf.is_64bit() ? 8 : (inf.is_32bit() ? 4 : 2) : get_func_bytes(f); //per documentation of get_frame_retsize
 			//type arguments need stack adjustment but there is no frame?
-			for (int i = 0; i < func.syminfo.size(); i++) {
-				if (func.syminfo[i].space == "stack") {
-					func.syminfo[i].offset += retSize;
+			for (size_t i = 0; i < func.syminfo.size(); i++) {
+				if (func.syminfo[i].addr.addr.space == "stack") {
+					func.syminfo[i].addr.addr.offset += retSize;
 				}
 			}
 			//only need to figure out return address size and adjust extraPop which depending on type info or not may affect the model
 			//it would be really nice to have context for which cref was used!
 			if (func.extraPop == -1) {
 				std::map<sval_t, int> histogram;
-				for (ea_t ea = get_first_cref_to(offset); ea != BADADDR;) {
+				for (ea_t ea = get_first_cref_to((ea_t)addr.offset); ea != BADADDR;) {
 					//if points is nullptr, IDA wont retrieve and fill it unless get_spd or the like is called with non-null pointer func_t first
 					func_t* ft = get_func(ea); //IDA will not retrieve spd information except for function head as per decompiling ida64.dll where after it uses ea2node, netnode_qgetblob and then unpack_dq to retrieve it
 					//get_spd(f, f->start_ea); //passing null unlike API documentation will not yield useful results if not already populated
@@ -540,7 +550,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 						}
 					}*/
 					histogram[get_spd(ft, get_item_end(ea)) - get_spd(ft, ea)]++;
-					ea = get_next_cref_to(offset, ea);
+					ea = get_next_cref_to((ea_t)addr.offset, ea);
 				}
 				std::map<sval_t, int>::iterator max =
 					std::max_element(histogram.begin(), histogram.end(), [](std::pair<sval_t, int> p1, std::pair<sval_t, int> p2) { return p1.second < p2.second; });
@@ -606,7 +616,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					}
 					coreTypeUsed[typ == -1 ? 1 : typ] = true; //name base is p for pointer, a for array, other wise first char of type name
 					func.syminfo.push_back(SymInfo{ {f->regvars[i].user == nullptr || f->regvars[i].user[0] == 0 ? std::string(1, typ == -1 ? 'u' : defaultCoreTypes[typ].name[0]) + "Var_" + std::string(f->regvars[i].canon) : f->regvars[i].user,typeChain },
-						"register", (unsigned long long)regNameToIndexIda(f->regvars[i].canon), (unsigned long long)ri.size, -1, RangeInfo{ base, f->regvars[i].start_ea, f->regvars[i].end_ea } });
+						"register", (unsigned long long)regNameToIndexIda(f->regvars[i].canon), (unsigned long long)ri.size, -1, RangeInfo{ addr.space, f->regvars[i].start_ea, f->regvars[i].end_ea } });
 				}
 			}
 			/*syminfo.erase(std::remove_if(syminfo.begin(), syminfo.end(), [](SymInfo it) { return it.name == ""; }), syminfo.end()); //or should give names - but often not used or necessary - dont mark in argument category at least
@@ -619,31 +629,31 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}*/
 		}
 	}
-	void IdaCallback::getMappedSymbol(std::string base, unsigned long long offset, MappedSymbolInfo& msi)
+	void IdaCallback::getMappedSymbol(AddrInfo addr, MappedSymbolInfo& msi)
 	{
-		executeOnMainThread([this, &msi, base, offset]() {
+		executeOnMainThread([this, &msi, addr]() {
 			msi.kind = KIND_HOLE;
-			if (base == "register") {} else if (base == "ram") {
-				if (imports.find(offset) != imports.end()) {
-					usedImports[offset] = true;
+			if (addr.space == "register") {} else if (addr.space == "ram") {
+				if (imports.find((ea_t)addr.offset) != imports.end()) {
+					usedImports[(ea_t)addr.offset] = true;
 					//Ghidra currently has 2 bugs one with restoring CS register if not simulating same segment fixups and the other calling back for external ref function info
 						//16-bit apps have functions defined for imports also...
-					if (isX86() && !inf.is_32bit() && !inf.is_64bit() && get_func(offset) != nullptr) msi.kind = KIND_FUNCTION;
+					if (isX86() && !inf.is_32bit() && !inf.is_64bit() && get_func((ea_t)addr.offset) != nullptr) msi.kind = KIND_FUNCTION;
 					else
 						msi.kind = KIND_EXTERNALREFERENCE;
 				} else {
-					if (get_func(offset) != nullptr) {
+					if (get_func((ea_t)addr.offset) != nullptr) {
 						msi.kind = KIND_FUNCTION;
 					} else {
-						flags_t fl = get_flags(offset);
+						flags_t fl = get_flags((ea_t)addr.offset);
 						//if (is_func(fl)) msi.kind = KIND_FUNCTION; //function start only
 						//if (exists_fixup(offset)) msi.kind = KIND_EXTERNALREFERENCE; //fixups is not really a determining criterion in exported functions
-						if (is_data(fl) || is_unknown(fl) && is_mapped(offset)) msi.kind = KIND_DATA;
+						if (is_data(fl) || is_unknown(fl) && is_mapped((ea_t)addr.offset)) msi.kind = KIND_DATA;
 						else if (has_name(fl) || has_dummy_name(fl)) msi.kind = KIND_LABEL; //dummy name/label for code only is_code(fl)...
 						//if (is_unknown(fl) && !is_mapped(offset))
 					}
 				}
-			} else if (base == "stack") {}
+			} else if (addr.space == "stack") {}
 			if (msi.kind == KIND_HOLE) {
 				//flags_t f = get_flags(offset);
 				//no information about a segment should still assume writable
@@ -651,31 +661,33 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				//volatile for mapped memory should be based on the life of the program
 				//volatile for stack and registers should be based on the life of a function
 				//const and unique would not be volatile ever, though a join space could be comprised of members who are volatile
-				if (base == "ram") {
-					getMemoryInfo(offset, &msi.readonly, &msi.volatil);
+				if (addr.space == "ram") {
+					//prev_addr(offset); prev_head(offset, inf.min_ea); prev_that(offset, inf.max_ea, [](flags_t f, void* ud) { return true; });
+					//next_addr(offset); next_head(offset, inf.max_ea); next_that(offset, inf.max_ea, [](flags_t f, void* ud) { return true; });
+					getMemoryInfo(addr.offset, &msi.readonly, &msi.volatil);
 				} else {//if (base == "register" || base == "stack") {
 					msi.readonly = false;
-					msi.volatil = base != "register"; //far more conservative to assume not volatile until figure out how to determine this - perhaps pspec must explicitly define
+					msi.volatil = addr.space != "register"; //far more conservative to assume not volatile until figure out how to determine this - perhaps pspec must explicitly define
 				}
 			} else if (msi.kind == KIND_LABEL) {
-				if (base == "ram") {
-					getMemoryInfo(offset, &msi.readonly, &msi.volatil);
-					msi.name = getSymbolName(offset);
+				if (addr.space == "ram") {
+					getMemoryInfo(addr.offset, &msi.readonly, &msi.volatil);
+					msi.name = getSymbolName(addr.offset);
 				} else {
 					msi.readonly = false;
-					msi.volatil = base != "register";
+					msi.volatil = addr.space != "register";
 				}
 			} else if (msi.kind == KIND_DATA) {
-				if (base == "ram") {
-					msi.name = lookupDataInfo(offset, &msi.readonly, &msi.volatil, msi.typeChain);
+				if (addr.space == "ram") {
+					msi.name = lookupDataInfo(addr.offset, &msi.readonly, &msi.volatil, msi.typeChain);
 				} else {
 					msi.readonly = false;
-					msi.volatil = base != "register";
+					msi.volatil = addr.space != "register";
 				}
 			} else if (msi.kind == KIND_EXTERNALREFERENCE) {
-				if (base == "ram") {
-					if (imports[offset].name != "") msi.name = imports[offset].name;
-					else msi.name = getSymbolName(offset);
+				if (addr.space == "ram") {
+					if (imports.find((ea_t)addr.offset) != imports.end() && imports[(ea_t)addr.offset].name != "") msi.name = imports[(ea_t)addr.offset].name;
+					else msi.name = getSymbolName(addr.offset);
 				}
 				/*fixup_data_t fd;
 				get_fixup(&fd, offset);
@@ -684,47 +696,54 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				buf.c_str();*/
 			} else if (msi.kind == KIND_FUNCTION) {
 				//get_func_name(&name, f->start_ea);
-				func_t* f = get_func(offset);
-				msi.entryPoint = (f != nullptr) ? f->start_ea : offset;
-				if (msi.entryPoint != offset) {
+				func_t* f = get_func((ea_t)addr.offset);
+				msi.entryPoint = (f != nullptr) ? f->start_ea : addr.offset;
+				if (msi.entryPoint != addr.offset) {
 					if (f != nullptr) {
 						rangeset_t rangeset;
 						if (get_func_ranges(&rangeset, f) != BADADDR) {
 							for (rangeset_t::iterator it = rangeset.begin(); it != rangeset.end(); it++) {
-								msi.ranges.push_back(RangeInfo{ base, it->start_ea, it->end_ea });
+								msi.ranges.push_back(RangeInfo{ addr.space, it->start_ea, it->end_ea });
 							}
 						}
 					}
 				} else {
 					if (f != nullptr) {
-						if (offset == f->start_ea && definedFuncs.find(offset) == definedFuncs.end() && imports.find(offset) == imports.end()) usedFuncs[offset] = true;
+						if (addr.offset == f->start_ea && definedFuncs.find((ea_t)addr.offset) == definedFuncs.end() && imports.find((ea_t)addr.offset) == imports.end()) usedFuncs[(ea_t)addr.offset] = true;
 						//find_func_bounds(f, FIND_FUNC_NORMAL); //size minimally 1 or maximally must be contiguous block from entry point
 						//but func_t already contiguous and the tails account for the rest so end_ea and size are a valid way dont need to find this or first from func ranges should do
 						//*size = f->size();
 						rangeset_t rangeset;
 						msi.size = get_func_ranges(&rangeset, f) == BADADDR ? f->size() : rangeset.begin()->size();
 					} else msi.size = 1; //Ghidra uses 1 always despite its commentary
-					getFuncInfo(base, offset, f, msi.name, msi.func);
-					funcProtoInfos[msi.entryPoint] = FuncInfo{ msi.name.c_str(), msi.func.model, msi.func.retType, msi.func.syminfo };
+					getFuncInfo(addr, f, msi.name, msi.func);
+					funcProtoInfos[(ea_t)msi.entryPoint] = FuncInfo{ msi.name.c_str(), msi.func.model, msi.func.retType, msi.func.syminfo };
 				}
 			}
 		});
 	}
-	void IdaCallback::getFuncTypeInfo(tinfo_t & ti, bool paramOnly, unsigned long long* extraPop, bool* isNoReturn, bool* dotdotdot, bool* hasThis, std::string& model, SymInfo* retType, std::vector<SymInfo>& syminfo)
+	void IdaCallback::getFuncTypeInfo(tinfo_t & ti, bool paramOnly, FuncProtoInfo& func)
 	{
 		asize_t retSize = 0;
 		func_type_data_t ftd;
 		if (ti.is_func() && ti.get_func_details(&ftd)) { //GTD_NO_ARGLOCS
-			*dotdotdot = ftd.is_vararg_cc();
-			*hasThis = (ftd.get_cc() & CM_CC_MASK) == CM_CC_THISCALL;
-			*isNoReturn = (ftd.flags & FTI_NORET) != 0;
+			//(ftd.flags & FTI_SPOILED) != 0
+			for (size_t i = 0; i < ftd.spoiled.size(); i++) {
+				qstring qs;
+				get_reg_name(&qs, ftd.spoiled[i].reg, ftd.spoiled[i].size);
+				unsigned long long offset = regNameToIndexIda(qs.empty() ? ph.reg_names[ftd.spoiled[i].reg] : qs.c_str());
+				func.killedByCall.push_back(SizedAddrInfo{ "register", offset, (unsigned long long)ftd.spoiled[i].size });
+			}
+			func.dotdotdot = ftd.is_vararg_cc();
+			func.hasThis = (ftd.get_cc() & CM_CC_MASK) == CM_CC_THISCALL;
+			func.isNoReturn = (ftd.flags & FTI_NORET) != 0;
 			//switch (get_cc(inf.cc.cm)) {
 			//switch (get_cc(guess_func_cc(fd, ti.calc_purged_bytes(), CC_CDECL_OK | CC_ALLOW_ARGPERM | CC_ALLOW_REGHOLES | CC_HAS_ELLIPSIS))) {
-			model = ccToStr(get_cc(ftd.get_cc()), ftd.get_call_method());
-			for (int i = 0; i < ftd.size(); i++) {
+			func.model = ccToStr(get_cc(ftd.get_cc()), ftd.get_call_method());
+			for (size_t i = 0; i < ftd.size(); i++) {
 				unsigned long long offs;
 				//int typ = coreTypeLookup((int)ftd[i].type.get_size(), getMetaTypeInfo(ftd[i].type));
-				std::vector<JoinEntryInfo> joins;
+				std::vector<SizedAddrInfo> joins;
 				std::string space = arglocToAddr(ftd[i].argloc, &offs, joins, paramOnly);
 				//argloc offset is relative to the frame and not properly adjusted for the stack
 				//need to at least adjust for return address size or problems will occur in 16-bit exports!
@@ -735,20 +754,20 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				getType(ftd[i].type, typeChain, false);
 				qstring qs;
 				if (ftd[i].name.size() == 0 && space == "register") get_reg_name(&qs, ftd[i].argloc.reg1(), ftd[i].type.get_size());
-				syminfo.push_back(SymInfo{ {ftd[i].name.size() == 0 && space == "register" ? "in_" + std::string(qs.c_str()) : ftd[i].name.c_str(), typeChain },
-					space, offs, ftd[i].type.get_size(), i, {}, joins });
+				func.syminfo.push_back(SymInfo{ {ftd[i].name.size() == 0 && space == "register" ? "in_" + std::string(qs.c_str()) : ftd[i].name.c_str(), typeChain },
+					space, offs, ftd[i].type.get_size(), (int)i, {}, joins });
 			}
-			retType->space = arglocToAddr(ftd.retloc, &retType->offset, retType->joins, paramOnly);
-			retType->size = ftd.rettype.get_size();
-			if (retType->size == BADSIZE) retType->size = 0; //0 is void
+			func.retType.addr.addr.space = arglocToAddr(ftd.retloc, &func.retType.addr.addr.offset, func.retType.joins, paramOnly);
+			func.retType.addr.size = ftd.rettype.get_size();
+			if (func.retType.addr.size == BADSIZE) func.retType.addr.size = 0; //0 is void
 			//qstring qs;
 			//ftd.rettype.get_type_name(&qs);
-			getType(ftd.rettype, retType->pi.ti, false);
-			*extraPop = ti.calc_purged_bytes();
+			getType(ftd.rettype, func.retType.pi.ti, false);
+			func.extraPop = ti.calc_purged_bytes();
 			//ti.is_vararg_cc();
 			//local variables still need to be processed
 		} else {
-			*extraPop = -1; //need size of return address which is also popped
+			func.extraPop = -1; //need size of return address which is also popped
 			argloc_t al;
 			const tinfo_t t(inf.is_64bit() ? BT_INT64 : (inf.is_32bit() ? BT_INT32 : BT_INT16)); //or use BT_INT8 - 1 byte like Ghidra?
 #ifdef __X64__
@@ -756,26 +775,26 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 #else
 			if (ph.notify(ph.calc_retloc3, &t, inf.cc.cm, &al) == 2)
 #endif
-				retType->space = arglocToAddr(al, &retType->offset, retType->joins, false);
+				func.retType.addr.addr.space = arglocToAddr(al, &func.retType.addr.addr.offset, func.retType.joins, false);
 			else {
-				retType->space = "register"; // "ram";
+				func.retType.addr.addr.space = "register"; // "ram";
 				qstring qs;
 				get_reg_name(&qs, 0, t.get_size());
-				retType->offset = regNameToIndexIda(qs.empty() ? ph.reg_names[0] : qs.c_str());
-				retType->size = t.get_size();
+				func.retType.addr.addr.offset = regNameToIndexIda(qs.empty() ? ph.reg_names[0] : qs.c_str());
+				func.retType.addr.size = t.get_size();
 			}
 			std::string metaType = "unknown"; //still unknown really
-			int typ = DecompInterface::coreTypeLookup(retType->size, metaType);
-			retType->pi.ti.push_back(TypeInfo{ typ == -1 ? "undefined" : defaultCoreTypes[typ].name.c_str() , retType->size, metaType });
+			int typ = DecompInterface::coreTypeLookup((size_t)func.retType.addr.size, metaType);
+			func.retType.pi.ti.push_back(TypeInfo{ typ == -1 ? "undefined" : defaultCoreTypes[typ].name.c_str(), func.retType.addr.size, metaType });
 			coreTypeUsed[typ == -1 ? 1 : typ] = true;
-			model = "unknown";
+			func.model = "unknown";
 		}
 	}
-	bool IdaCallback::getFuncTypeInfoByAddr(ea_t ea, unsigned long long* extraPop, bool* isNoReturn, bool* dotdotdot, bool* hasThis, std::string& model, SymInfo* retType, std::vector<SymInfo>& syminfo)
+	bool IdaCallback::getFuncTypeInfoByAddr(ea_t ea, FuncProtoInfo& func)
 	{
 		tinfo_t ti;
 		bool bFuncTinfo = getFuncByGuess(ea, ti);
-		getFuncTypeInfo(ti, false, extraPop, isNoReturn, dotdotdot, hasThis, model, retType, syminfo);
+		getFuncTypeInfo(ti, false, func);
 		return bFuncTinfo;
 	}
 	bool IdaCallback::checkPointer(unsigned long long offset, std::vector<TypeInfo>& typeChain, std::vector<ea_t> & deps)
@@ -783,16 +802,16 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		//ea_t ea = offset;
 		//deref_ptr2(get_idati(), &ea, nullptr);
 		tinfo_t ti;
-		if (exists_fixup(offset)) {//need to detect pointers
+		if (exists_fixup((ea_t)offset)) {//need to detect pointers
 			fixup_data_t fd;
-			get_fixup(&fd, offset);
+			get_fixup(&fd, (ea_t)offset);
 			//uval_t u = get_fixup_value(offset, fd.get_type()); //terminate circular types with pointer chain situation
 #ifdef __X64__
 			//if (!fd.is_extdef()) return false;
 			uval_t u = fd.get_base(); //get_fixup_extdef_ea
 #else
 			//if ((fd.type & FIXUP_EXTDEF) != 0) return false;
-			uval_t u = get_fixup_base(offset, &fd); // (fd.type & FIXUP_REL) != 0 ? 0 : (fd.sel != BADSEL ? sel2ea(fd.sel) : 0); //get_fixup_extdef_ea
+			uval_t u = get_fixup_base((ea_t)offset, &fd); // (fd.type & FIXUP_REL) != 0 ? 0 : (fd.sel != BADSEL ? sel2ea(fd.sel) : 0); //get_fixup_extdef_ea
 #endif
 			u += fd.off;
 			if (is_mapped(u) && has_any_name(get_flags(u))) deps.push_back(u);
@@ -805,18 +824,14 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					bool bFuncTinfo = getFuncByGuess(u, ti);
 					getType(ti, nextType, false);
 					if (funcProtoInfos.find(u) == funcProtoInfos.end()) {
-						unsigned long long ep;
-						bool isNoReturn, dotdotdot, hasThis;
-						std::string model;
-						SymInfo retType;
-						std::vector<SymInfo> syminfo;
-						getFuncTypeInfo(ti, false, &ep, &isNoReturn, &dotdotdot, &hasThis, model, &retType, syminfo);
+						FuncProtoInfo innerFunc;
+						getFuncTypeInfo(ti, false, innerFunc);
 						qstring name;
 						//get_func_name(&name, f->start_ea);
-						name = get_short_name(offset, GN_STRICT);
+						name = get_short_name((ea_t)offset, GN_STRICT);
 						if (name.size() != 0) name = name.substr(0, name.find("(", 0));
-						else get_name(&name, offset);
-						funcProtoInfos[u] = FuncInfo{ name.c_str(), model, retType, syminfo };
+						else get_name(&name, (ea_t)offset);
+						funcProtoInfos[u] = FuncInfo{ name.c_str(), innerFunc.model, innerFunc.retType, innerFunc.syminfo };
 					}
 				} else {
 					bool rdonly, volat;
@@ -828,12 +843,12 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 			return true;
 		} else {
-			unsigned long long size = get_item_size(offset);
+			unsigned long long size = get_item_size((ea_t)offset);
 			//if (is_unknown(offset)) size = next_head(offset, BADADDR) - offset;
 			bool foundPtr = false;
 			if ((inf.cc.cm & CM_MASK) == CM_N32_F48 && size == 4) {
 				uval_t u;
-				if (!get_data_value(&u, offset, size)) return false;
+				if (!get_data_value(&u, (ea_t)offset, (asize_t)size)) return false;
 				if (is_mapped(u) && has_any_name(get_flags(u))) deps.push_back(u);
 				if (usedData.find(u) != usedData.end()) return false;
 				if (is_mapped(u) && has_any_name(get_flags(u))) {
@@ -844,18 +859,14 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 						bool bFuncTinfo = getFuncByGuess(u, ti);
 						getType(ti, nextType, false);
 						if (funcProtoInfos.find(u) == funcProtoInfos.end()) {
-							unsigned long long ep;
-							bool isNoReturn, dotdotdot, hasThis;
-							std::string model;
-							SymInfo retType;
-							std::vector<SymInfo> syminfo;
-							getFuncTypeInfo(ti, false, &ep, &isNoReturn, &dotdotdot, &hasThis, model, &retType, syminfo);
+							FuncProtoInfo innerFunc;
+							getFuncTypeInfo(ti, false, innerFunc);
 							qstring name;
 							//get_func_name(&name, f->start_ea);
-							name = get_short_name(offset, GN_STRICT);
+							name = get_short_name((ea_t)offset, GN_STRICT);
 							if (name.size() != 0) name = name.substr(0, name.find("(", 0));
-							else get_name(&name, offset);
-							funcProtoInfos[u] = FuncInfo{ name.c_str(), model, retType, syminfo };
+							else get_name(&name, (ea_t)offset);
+							funcProtoInfos[u] = FuncInfo{ name.c_str(), innerFunc.model, innerFunc.retType, innerFunc.syminfo };
 						}
 					} else {
 						bool rdonly, volat;
@@ -892,34 +903,34 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				}
 			}
 			if (tc[idx].size == 0) { //0 length array can only be alone or very last member of structure which recursively chains up to a top structure
-				tc[idx].size = get_item_size(ea);
+				tc[idx].size = get_item_size((ea_t)ea);
 				tc[idx].arraySize = tc[idx].size / elSize;
 			} else {
 				//could be an array of structures, arrays, or pointers
-				if (!is_strlit(get_flags(ea)) || (elSize != sizeof(char) && elSize != sizeof(wchar16_t) && elSize != sizeof(wchar32_t))) { //must prevent auto detection here
+				if (!is_strlit(get_flags((ea_t)ea)) || (elSize != sizeof(char) && elSize != sizeof(wchar16_t) && elSize != sizeof(wchar32_t))) { //must prevent auto detection here
 					for (int i = 0; i < tc[idx].arraySize; i++) {
 						consumeTypeInfo(idx + 1, tc, ea + elSize * i, deps);
 					}
 				}
 			}
 		} else if (tc[idx].metaType == "struct") {
-			for (int i = 0; i < tc[idx].structMembers.size(); i++) {
+			for (size_t i = 0; i < tc[idx].structMembers.size(); i++) {
 				consumeTypeInfo(0, tc[idx].structMembers[i].ti, ea + tc[idx].structMembers[i].offset, deps);
 			}
-		} else if (is_strlit(get_flags(ea)) && tc[idx].metaType != "array" && (tc[idx].size == sizeof(char) || tc[idx].size == sizeof(wchar16_t) || tc[idx].size == sizeof(wchar32_t)) &&
-			get_item_size(ea) % tc[idx].size == 0) {
+		} else if (is_strlit(get_flags((ea_t)ea)) && tc[idx].metaType != "array" && (tc[idx].size == sizeof(char) || tc[idx].size == sizeof(wchar16_t) || tc[idx].size == sizeof(wchar32_t)) &&
+			get_item_size((ea_t)ea) % tc[idx].size == 0) {
 			//probably need more heuristics than just to verify the type is char, wchar_t or wchar16/32
-			tc.insert(tc.begin() + idx, TypeInfo{ "", get_item_size(ea), "array", false, false, false, get_item_size(ea) / tc[idx].size });
+			tc.insert(tc.begin() + idx, TypeInfo{ "", get_item_size((ea_t)ea), "array", false, false, false, get_item_size((ea_t)ea) / tc[idx].size });
 			//msg("wrong string is not array\n");
 		}
 	}
 	std::string IdaCallback::lookupDataInfo(unsigned long long offset, bool* readonly, bool* volatil, std::vector<TypeInfo>& typeChain)
 	{
-		unsigned long long size = (is_unknown(get_flags(offset))) ? calc_max_item_end(offset) - offset : get_item_size(offset);
+		unsigned long long size = (is_unknown(get_flags((ea_t)offset))) ? calc_max_item_end((ea_t)offset) - offset : get_item_size((ea_t)offset);
 		tinfo_t ti;
 		std::vector<ea_t> deps;
 		//is_strlit(get_flags(offset))
-		if (!is_unknown(get_flags(offset)) && get_tinfo(&ti, offset)) {
+		if (!is_unknown(get_flags((ea_t)offset)) && get_tinfo(&ti, (ea_t)offset)) {
 			getType(ti, typeChain, false);
 			//recursive pointer scan and also 0 length array fix, string identification fix
 			consumeTypeInfo(0, typeChain, offset, deps);
@@ -937,7 +948,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}*/
 		} else if (!checkPointer(offset, typeChain, deps)) { //need to detect pointers
 			std::string metaType = "unknown";
-			int typ = DecompInterface::coreTypeLookup(size, metaType);
+			int typ = DecompInterface::coreTypeLookup((size_t)size, metaType);
 			if (typ == -1 && size != 1) {
 				typeChain.push_back(TypeInfo{ "", size, "array", false, false, false, size });
 				typeChain.push_back(TypeInfo{ "undefined", 1, metaType });
@@ -951,20 +962,22 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		//print_type(&qs, offset, PRTYPE_MULTI);
 		//msg((qs + "\n").c_str());
 		typeChain.begin()->isReadOnly = readonly;
-		usedData[offset] = typeChain;
-		dependentData[offset] = deps;
+		usedData[(ea_t)offset] = typeChain;
+		dependentData[(ea_t)offset] = deps;
 		getMemoryInfo(offset, readonly, volatil);
 		return getSymbolName(offset);
 	}
 
-	void IdaCallback::getExternInfo(std::string base, unsigned long long offset, std::string& callName, std::string& modName, FuncProtoInfo& func)
+	void IdaCallback::getExternInfo(AddrInfo addr, std::string& callName, std::string& modName, FuncProtoInfo& func)
 	{
-		executeOnMainThread([this, base, offset, &callName, &modName, &func]() {
+		if (addr.space != "ram") return;
+		modName = modNames[imports[(ea_t)addr.offset].idx];
+		executeOnMainThread([this, addr, &callName, &func]() {
 			//ids folder contains some basic information for common imports and its in comments in the disassembly but how to properly access the info?
-			modName = modNames[imports[offset].idx];
-			func_t* f = get_func(offset);
-			getFuncInfo(base, offset, f, callName, func);
+			func_t* f = get_func((ea_t)addr.offset);
+			getFuncInfo(addr, f, callName, func);
 		});
+		funcProtoInfos[(ea_t)addr.offset] = FuncInfo{ callName.c_str(), func.model, func.retType, func.syminfo };
 	}
 	void IdaCallback::getType(tinfo_t ti, std::vector<TypeInfo>& typeChain, bool bOuterMost)
 	{
@@ -1012,7 +1025,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			udt_type_data_t udt; //structures with bitfields and unions are to be dealt with by using a character array
 			ti.get_udt_details(&udt);
 			bool bHasBitField = false;
-			for (int i = 0; i < udt.size(); i++) {
+			for (size_t i = 0; i < udt.size(); i++) {
 				std::vector<TypeInfo> memberType;
 				getType(udt[i].type, memberType, false);
 				if (udt[i].type.is_bitfield() || (udt[i].offset & 7) != 0) bHasBitField = true; //mark but scan for better decompiled type prolog
@@ -1043,11 +1056,13 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				ti.get_ptr_details(&pt);
 				ti = pt.obj_type;
 			}
-			getFuncTypeInfo(ti, true, &typeinf.funcInfo.extraPop, &typeinf.funcInfo.isNoReturn, &typeinf.funcInfo.dotdotdot,
-				&typeinf.funcInfo.hasThis, typeinf.funcInfo.model, &typeinf.funcInfo.retType, typeinf.funcInfo.syminfo);
+			ti.get_func_details(&ftd);
+			typeinf.size = (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm)) ? ph.segreg_size : 0;
+			typeinf.size += inf.is_64bit() ? 8 : (inf.is_32bit() ? 4 : 2);
+			getFuncTypeInfo(ti, true, typeinf.funcInfo);
 			typeChain.push_back(typeinf);
 		} else { //size greater than 16 needs to be converted to array, really should be 8 as no core types exist
-			int typ = DecompInterface::coreTypeLookup(typeinf.size, typeinf.metaType);
+			int typ = DecompInterface::coreTypeLookup((size_t)typeinf.size, typeinf.metaType);
 			if (typ == -1 && typeinf.size == 0) { //is_decl_* where there is a forward declaration but not any actual type yields this
 				typeChain.push_back(TypeInfo{ "void", 0, "void" });
 			} if (typ == -1 && typeinf.size != 1) {
@@ -1079,6 +1094,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					coreTypeUsed[0] = true;
 				}
 			});
+			typeDatabase[typeName] = typeChain;
 		} else {
 			usedTypes[typeName] = true;
 			typeChain.insert(typeChain.begin(), typeDatabase[typeName].begin(), typeDatabase[typeName].end());
@@ -1102,7 +1118,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		else if (color == "param") return std::string({ COLOR_ON, COLOR_LOCNAME }) + str + std::string({ COLOR_OFF, COLOR_LOCNAME });
 		else if (color == "var") return std::string({ COLOR_ON, COLOR_LOCNAME }) + str + std::string({ COLOR_OFF, COLOR_LOCNAME });
 		else if (color == "global") return std::string({ COLOR_ON, COLOR_DEFAULT }) + str + std::string({ COLOR_OFF, COLOR_DEFAULT });
-		else if (color == "const") return std::string({ COLOR_ON, COLOR_NUMBER }) + str + std::string({ COLOR_OFF, COLOR_NUMBER });
+		else if (color == "const") return std::string({ COLOR_ON, (char)(str.find('\"') == -1 ? COLOR_NUMBER : COLOR_STRING) }) + str + std::string({ COLOR_OFF, (char)(str.find('\"') == -1 ? COLOR_NUMBER : COLOR_STRING) });
 		else if (color == "funcname") {
 			if (importNames.find(str) != importNames.end()) {
 				return std::string({ COLOR_ON, COLOR_IMPNAME }) + str + std::string({ COLOR_OFF, COLOR_IMPNAME });
@@ -1115,17 +1131,18 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		//COLOR_DREF
 		//else return str;
 	}
-	void IdaCallback::getComments(std::string base, unsigned long long offset, std::vector<CommentInfo>& comments)
+	void IdaCallback::getComments(AddrInfo addr, std::vector<CommentInfo>& comments)
 	{
-		executeOnMainThread([&base, &offset, &comments]() {
+		if (addr.space != "ram") return;
+		executeOnMainThread([&comments, addr]() {
 			//default options only allow warning, warningheader and user2
-			func_t* f = get_func(offset);
+			func_t* f = get_func((ea_t)addr.offset);
 			if (f != nullptr) {
 				qstring qs;
 				if (get_func_cmt(&qs, f, false) != -1)
-					comments.push_back(CommentInfo{ base, offset, "warningheader", qs.c_str() });
+					comments.push_back(CommentInfo{ addr, "warningheader", qs.c_str() });
 				if (get_func_cmt(&qs, f, true) != -1)
-					comments.push_back(CommentInfo{ base, offset, "warningheader", qs.c_str() });
+					comments.push_back(CommentInfo{ addr, "warningheader", qs.c_str() });
 			}
 			rangeset_t rangeset;
 			get_func_ranges(&rangeset, f);
@@ -1134,292 +1151,24 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					//color_t clr; //get_any_indented_cmt is missing from library
 					qstring qs;
 					if (get_cmt(&qs, offs, false) != -1)
-						comments.push_back(CommentInfo{ base, offs, "user1", qs.c_str() });
+						comments.push_back(CommentInfo{ AddrInfo{addr.space, offs}, "user1", qs.c_str() });
 					if (get_cmt(&qs, offs, true) != -1)
-						comments.push_back(CommentInfo{ base, offs, "user1", qs.c_str() });
+						comments.push_back(CommentInfo{ AddrInfo{addr.space, offs}, "user1", qs.c_str() });
 				}
 			}
 		});
 	}
-	std::string IdaCallback::getSymbol(std::string base, unsigned long long offset)
+	std::string IdaCallback::getSymbol(AddrInfo addr)
 	{
 		std::string name;
-		if (base == "ram") {
-			executeOnMainThread([&name, base, offset]() {
-				name = getSymbolName(offset);
+		if (addr.space == "ram") {
+			executeOnMainThread([&name, addr]() {
+				name = getSymbolName(addr.offset);
 			});
 		}
 		return name;
 	}
 
-	std::string IdaCallback::dumpIdaInfo()
-	{
-		std::string str = "IDA SDK selected decompilation useful reported information dump follows:\n\n";
-		str = "Processor: " + std::string(inf.procname) +
-			" Is 32-bit: " + std::string(inf.is_32bit() ? "yes" : "no") +
-			" Is 64-bit: " + std::string(inf.is_64bit() ? "yes" : "no") +
-			" Is big-endian: " + std::string(inf.is_be() ? "yes" : "no") +
-			" MaxPtrSize: " + std::to_string(ph.max_ptr_size()) +
-			" SegRegSize: " + std::to_string(ph.segreg_size) +
-			" SegmBitness: " + std::to_string(ph.get_segm_bitness()) +
-			" StkArgOffs: " + std::to_string(ph.get_stkarg_offset()) +
-			" Use64: " + std::to_string(ph.use64()) +
-			" Use32: " + std::to_string(ph.use32()) +
-			" DefCCModl: 0x" + to_string((uint)inf.cc.cm, std::hex) +
-			"\n\n";
-		const til_t* idati = get_idati();
-		str += "Number of registers: " + std::to_string(ph.regs_num) + "\n";
-		for (int i = 0; i < ph.regs_num; i++) {
-			reg_info_t ri, mnri;
-			bitrange_t bits, mnbits;
-			//get_reg_info(ph.reg_names[i], &bits);
-			const char* regnm = nullptr;
-			qstring qs;
-			regnm = get_reg_info(ph.reg_names[i], &bits);
-			parse_reg_name(&ri, ph.reg_names[i]);
-			bool bSame = regnm == nullptr || strcmp(regnm, ph.reg_names[i]) == 0;
-			if (!bSame) {
-				get_reg_info(regnm, &mnbits);
-				parse_reg_name(&mnri, regnm);
-				get_reg_name(&qs, i, mnri.size);
-			}
-			str += "Idx: " + std::to_string(i) + " Reg: " + ph.reg_names[i] + " Size: " + std::to_string(ri.size) +
-				" BitOffs: " + std::to_string(bits.bitoff()) + " Bits: " + std::to_string(bits.bitsize()) +
-				(!bSame ? +" MainNm: " + std::string(regnm) + " Size: " + std::to_string(mnri.size) +
-					" BitOffs: " + std::to_string(mnbits.bitoff()) + " Bits: " + std::to_string(mnbits.bitsize()) + " SzName: " + std::string(qs.c_str()) : "") +
-				"\n";
-		}
-		//ph.reg_first_sreg, ph.reg_last_sreg, ph.segreg_size
-		str += "\n";
-		size_t num = 0;
-		ea_t ea = get_first_fixup_ea();
-		while (ea != BADADDR) {
-			fixup_data_t fd;
-			get_fixup(&fd, ea);
-			qstring qs;
-			get_fixup_desc(&qs, ea, fd);
-			//fd.get_desc(&qs, ea); //has color info
-			tag_remove(&qs);
-			str += "Fixup: " + std::string(qs.c_str()) + " Addr: 0x" + to_string(ea, std::hex) +
-				" Size: 0x" + to_string(calc_fixup_size(fd.get_type()), std::hex) + " Type: 0x" + to_string(fd.get_type(), std::hex) + "\n";
-			num++;
-			ea = get_next_fixup_ea(ea);
-		}
-		str += "Total fixups: " + std::to_string(num) + "\n\n";
-		num = get_selector_qty();
-		str += "Number of selectors: " + std::to_string(num) + "\n";
-		for (size_t i = 0; i < num; i++) {
-			sel_t base;
-			getn_selector(&base, &ea, i);
-			segment_t* seg = get_segm_by_sel(base);
-			qstring qs;
-			get_segm_name(&qs, seg);
-			str += "Selector Base: 0x" + to_string(base, std::hex) + " Addr: 0x" + to_string(ea, std::hex) + " Seg: " + std::string(qs.c_str()) + "\n";
-		}
-		if (num != 0) str += "\n";
-		num = get_segm_qty();
-		str += "Number of segments: " + std::to_string(num) + "\n";
-		for (size_t i = 0; i < num; i++) {
-			segment_t* seg = getnseg(i);
-			qstring qs, qc, qcr, qcls;
-			get_segm_name(&qs, seg);
-			get_segment_cmt(&qc, seg, false);
-			get_segment_cmt(&qcr, seg, false);
-			get_segm_class(&qcls, seg);
-			str += "Segment: " + std::string(qs.c_str()) + " Cmt: " + std::string(qc.c_str()) + " CmtRpt: " + std::string(qcr.c_str()) + " Class: " + std::string(qcls.c_str()) +
-				" Sel: 0x" + to_string(seg->sel, std::hex) + " Align: 0x" + to_string((uint)seg->align, std::hex) + " Bitness: 0x" + to_string((uint)seg->bitness, std::hex) +
-				" Comb: 0x" + to_string((uint)seg->comb, std::hex) + " Perm: 0x" + to_string((uint)seg->perm, std::hex) + " Flags: 0x" + to_string(seg->flags, std::hex) +
-				" Type: 0x" + to_string((uint)seg->type, std::hex) + " StartEA: 0x" + to_string(seg->start_ea, std::hex) + " EndEA: 0x" + to_string(seg->end_ea, std::hex) + "\n";
-		}
-		if (num != 0) str += "\n";
-		str += "til name: " + std::string(idati->name) + " Description: " + std::string(idati->desc) + " Bases: " + std::to_string(idati->nbases) + "\n";
-		for (size_t i = 0; i < idati->nbases; i++) {
-			str += "Base til name: " + std::string(idati->base[i]->name) + " Description: " + std::string(idati->base[i]->desc) + "\n";
-		}
-		//idati->types;
-		num = get_idasgn_qty();
-		str += "Number of signatures: " + std::to_string(num) + "\n";
-		for (size_t i = 0; i < num; i++) {
-			qstring signame, optlibs, longname;
-			get_idasgn_desc(&signame, &optlibs, (int)i);
-			//idasgn_t* is = get_idasgn_header_by_short_name(signame.c_str());
-			get_idasgn_title(&longname, signame.c_str());
-			str += "Signature short form name: " + std::string(signame.c_str()) + " Optional Libraries: " + std::string(optlibs.c_str()) + " Long form name: " + std::string(longname.c_str()) + "\n";
-		}
-		str += "\nNumber of imported modules: " + std::to_string(modNames.size()) + "\n";
-		for (std::map<ea_t, ImportInfo>::iterator it = imports.begin(); it != imports.end(); it++) {
-			qstring qs, qn, name;
-			get_long_name(&qs, it->first);
-			get_name(&qn, it->first);
-			name = get_short_name(it->first);
-			if (name.size() != 0) {
-				name = name.substr(0, name.find("(", 0));
-			}
-			str += "Long name: " + std::string(qs.c_str()) + " Name: " + std::string(qn.c_str()) + " Callable name: " + std::string(name.c_str());
-			tinfo_t tif;
-			if (getFuncByGuess(it->first, tif)) {
-				print_type(&qs, it->first, PRTYPE_1LINE);
-				func_type_data_t ftd;
-				tif.get_func_details(&ftd);
-				str += " Type: " + std::string(qs.c_str()) + " Args: 0x" + to_string(ftd.size(), std::hex) + " RetType: 0x" + to_string(ftd.retloc.atype(), std::hex) + " RetSize: 0x" + to_string(ftd.rettype.get_size(), std::hex) + "\n";
-			} else str += "\n";
-		}
-		num = get_entry_qty();
-		str += "\nNumber of entry points: " + std::to_string(num) + "\n";
-		for (size_t i = 0; i < num; i++) {
-			std::string disp;
-			ea_t ea = get_entry(get_entry_ordinal(i)); //qstring qs; get_entry_name(&qs, i);
-			str += "Entry point ordinal: " + std::to_string(i) + " Addr: 0x" + to_string(ea, std::hex) + "\n";
-		}
-		num = get_func_qty();
-		str += "\nNumber of functions: " + std::to_string(num) + "\n";
-		for (size_t i = 0; i < num; i++) {
-			func_t* f = getn_func(i);
-			if (f == nullptr) continue;
-			qstring qs, qt;
-			get_func_name(&qs, f->start_ea);
-			tinfo_t tif;
-			get_long_name(&qt, f->start_ea);
-			str += "Name: " + std::string(qs.c_str()) + " Long name: " + std::string(qt.c_str()) + " Addr: 0x" + to_string(f->start_ea, std::hex) + " LocVars: 0x" + to_string(f->frsize, std::hex) +
-				" SaveRegs: 0x" + to_string(f->frregs, std::hex) + " PopArgs: 0x" + to_string(f->argsize, std::hex) + " AFlags: 0x" + to_string(get_aflags(f->start_ea), std::hex) + " AFlags0: 0x" + to_string(get_aflags0(f->start_ea), std::hex) +
-				" RegArgs: 0x" + to_string(f->regargqty, std::hex) + " FrmPtrDelta: 0x" + to_string(f->fpd, std::hex) + " StkPts: 0x" + to_string(f->pntqty, std::hex) + "\n";
-			if (getFuncByGuess(f->start_ea, tif)) {
-				print_type(&qt, f->start_ea, PRTYPE_1LINE);
-				func_type_data_t ftd;
-				tif.get_func_details(&ftd);
-				ftd.dump(&qs);
-				qs.remove_last(1); //trailing new line
-				str += "Type: " + std::string(qt.c_str()) + " Args: 0x" + to_string(ftd.size(), std::hex) + " CallMthd: 0x" + to_string(ftd.get_call_method(), std::hex) + " CC: 0x" + to_string((uint)ftd.cc, std::hex) + " Dump:\n" + qs.c_str() + "\n";
-				for (size_t i = 0; i < ftd.size(); i++) {
-					str += "ArgName: " + std::string(ftd[i].name.c_str()) + " ArgCmt: " + std::string(ftd[i].cmt.c_str()) + " ArgLoc: 0x" + to_string(ftd[i].argloc.is_stkoff() ? ftd[i].argloc.stkoff() : ftd[i].argloc.reg1(), std::hex) + "\n";
-				}
-			}
-			if (f->frame != BADNODE) {
-				struc_t* frame = get_frame(f->start_ea); //get_member_name has sometimes crashed with error 836
-				str += "Frame members: 0x" + to_string(frame->memqty, std::hex) + " Frame size: 0x" + to_string(get_frame_size(f), std::hex) + " LocOffs: 0x" + to_string(frame_off_lvars(f), std::hex) +
-					" SaveOffs: 0x" + to_string(frame_off_savregs(f), std::hex) + " RetOffs: 0x" + to_string(frame_off_retaddr(f), std::hex) + " RetSize: 0x" + to_string(get_frame_retsize(f), std::hex) + " ArgOffs: 0x" + to_string(frame_off_args(f), std::hex) + "\n";
-				for (uint32 i = 0; i < frame->memqty; i++) {
-					str += "Member name: " + std::string(get_member_name(frame->members[i].id).c_str()) + " Offset: 0x" + to_string(frame->members[i].get_soff(), std::hex) + "\n";
-				}
-			}
-			//if (f->points == nullptr) get_spd(f, f->start_ea);
-			/*if (f->points != nullptr) {
-				for (int i = 0; i < f->pntqty; i++) {
-					sval_t s = f->points[i].spd;
-					str += "StackAdj: 0x" + to_string(s, std::hex) + " Offset: 0x" + to_string(f->points[i].ea, std::hex) + "\n";
-				}
-			}
-			for (ea_t i = get_first_cref_to(f->start_ea); i != BADADDR;)
-			{
-				func_t* fp = get_func(i);
-				if (fp->points == nullptr) get_spd(fp, fp->start_ea);
-				str += "CdXref: 0x" + to_string(i, std::hex) + " SpDelta: " + to_string(get_spd(fp, get_item_end(i)), std::hex) +
-					" SpEfctvDelta: " + to_string(get_effective_spd(fo, get_item_end(i)), std::hex) + " SpDelta: " + to_string(get_sp_delta(fp, get_item_end(i)), std::hex) + "\n";
-				i = get_next_cref_to(f->start_ea, i);
-				//str += (i == BADADDR) ? "\n" : " ";
-			}*/
-			if (f->regargs == nullptr) read_regargs(f);
-			for (int i = 0; i < f->regargqty; i++) { //name can be a nullptr!
-				qstring out, qs;
-				size_t size = 0;
-				//regargs are destroyed when the full function type is determined
-				//if (tif.is_func()) {
-					//qs = ph.reg_names[f->regargs[i].reg];
-				//} else 
-				if (f->regargs[i].type != nullptr) {
-					tinfo_t ti; //The type information is internally kept as an array of bytes terminated by 0.
-					qtype typeForDeser;
-					typeForDeser.append(f->regargs[i].type);
-					ti.deserialize(get_idati(), &typeForDeser); //will free buffer passed!
-					ti.get_type_name(&out);
-					size = ti.get_size();
-					get_reg_name(&qs, f->regargs[i].reg, size);
-					//qs = ph.reg_names[f->regargs[i].reg];
-				} else qs = ph.reg_names[f->regargs[i].reg];
-				str += "RegArgName: " + std::string(f->regargs[i].name == nullptr ? "" : f->regargs[i].name) +
-					" Reg: " + std::string(qs.c_str()) + " Idx: 0x" + to_string(f->regargs[i].reg, std::hex) +
-					" Size: 0x" + to_string(size, std::hex) +
-					" TDataLen: 0x" + to_string(strlen((const char*)f->regargs[i].type), std::hex) + " Type: " + std::string(out.c_str()) + "\n";
-			}
-			if (f->regvars == nullptr) find_regvar(f, f->start_ea, nullptr);
-			if (f->regvarqty != -1 && f->regvars != nullptr) {
-				for (int i = 0; i < f->regvarqty; i++) {
-					str += "RegVar: " + std::string(f->regvars[i].user != nullptr ? f->regvars[i].user : "") + " Reg: " + std::string(f->regvars[i].canon) + " Cmt: " + std::string(f->regvars[i].cmt == nullptr ? "" : f->regvars[i].cmt) + "\n";
-				}
-			}
-			str += "\n";
-		}
-		return str;
-	}
-
-	/*std::string IdaCallback::initForType(tinfo_t ti, ea_t addr)
-{
-std::string str;
-if (ti.is_udt()) {
-	udt_type_data_t utd;
-	ti.get_udt_details(&utd);
-	str += "{ ";
-	for (int i = 0; i < utd.size(); i++) {
-		if (i != 0) str += ", ";
-		str += initForType(utd[i].type, addr + utd[i].offset / 8);
-	}
-	str += " }";
-} else if (is_strlit(get_flags(addr))) { //preempt integer and array handling
-	//asize_t len = get_item_size(addr);
-	//single byte formats: STRTYPE_TERMCHR, STRTYPE_C, STRTYPE_PASCAL, STRTYPE_LEN2, STRTYPE_LEN4
-	//double byte formats: STRTYPE_C_16, STRTYPE_PASCAL_16, STRTYPE_LEN4_16
-	//int len = get_max_strlit_length(addr, ti.get_size() == 1 ? STRTYPE_C : (ti.get_size() == 2 ? STRTYPE_C_16 : STRTYPE_C_32), ALOPT_IGNHEADS | ALOPT_IGNPRINT);
-	qstring qs;
-	get_strlit_contents(&qs, addr, -1, get_str_type(addr), nullptr, STRCONV_ESCAPE); //u8 for UTF-8 with char and u for UTF-16 with char16_t
-	str = std::string(ti.get_size() == sizeof(wchar_t) ? "L" : (ti.get_size() == sizeof(char32_t) ? "U" : "")) + "\"" + std::string(qs.c_str()) + "\"";
-} else if (ti.is_array()) {
-	array_type_data_t atd;
-	ti.get_array_details(&atd);
-	str += "{ ";
-	for (uint32 i = 0; i < atd.nelems; i++) {
-		if (i != 0) str += ", ";
-		str += initForType(atd.elem_type, addr + atd.elem_type.get_size() * i);
-	}
-	str += " }";
-} else if (ti.is_char() || is_type_int(ti.get_realtype()) && ti.is_signed()) {
-	long long num = 0;
-	get_bytes(&num, ti.get_size(), addr);
-	//heuristics for printing hex vs decimal?
-	str = "0x" + to_string(num, std::hex);
-} else if (is_type_int(ti.get_realtype())) {
-	unsigned long long num = 0;
-	get_bytes(&num, ti.get_size(), addr);
-	//heuristics for printing hex vs decimal?
-	str = "0x" + to_string(num, std::hex);
-} else if (ti.is_bool()) {
-	str = get_byte(addr) != 0 ? "true" : "false";
-} else if (ti.is_floating()) {
-	if (ti.is_float()) {
-		float f;
-		get_bytes(&f, ti.get_size(), addr);
-		char buf[33];
-		qsnprintf(buf, sizeof(buf), "%.*g", FLT_DECIMAL_DIG, f);
-	} else if (ti.is_double()) {
-		double f;
-		get_bytes(&f, ti.get_size(), addr);
-		char buf[33];
-		qsnprintf(buf, sizeof(buf), "%.*lg", DBL_DECIMAL_DIG, f);
-	}*/ /*else if (ti.is_ldouble()) {
-		long double f;
-		get_bytes(&f, sz, it->first);
-		char buf[33];
-		qsnprintf(buf, sizeof(buf), "%.*Lg", LDBL_DECIMAL_DIG, f); LDBL_DECIMAL_DIG = 21 for 80-bit/10-byte?
-	}*/
-	/*} else if (ti.is_ptr()) {
-		uval_t u;
-		get_data_value(&u, addr, ti.get_size());
-		//tinfo_t tif;
-		//get_tinfo(&tif, u);
-		qstring qs = get_name(u);
-		str = "&" + std::string(qs.c_str());//initForType(tif, addr);
-	}
-	return str;
-}*/
 
 	void checkForwardDecl(tinfo_t ti, const std::map<std::string, bool>& alreadyDefined, std::map<std::string, bool>& needDecl)
 	{
@@ -1524,49 +1273,6 @@ if (ti.is_udt()) {
 		}
 	}
 
-	std::string printTypeForCode(const std::vector<TypeInfo>& types, std::string name)
-	{
-		std::string out;
-		std::stack<std::pair<std::string, int>> s;
-		s.push(std::pair<std::string, int>(name, 0));
-		while (!s.empty()) {
-			std::pair<std::string, int> item = s.top();
-			s.pop();
-			if (item.second < 0) { //post order time where index is complement
-				const TypeInfo& ti = types.at(~item.second);
-				if (ti.metaType == "ptr") {
-					out += std::string(item.first.size() != 0 || ti.isReadOnly ? "* " : "*") + (ti.isReadOnly ? (item.first.size() != 0 ? "const " : "const") : "") + item.first;
-				} else if (ti.metaType == "array") {
-					out += (item.first.size() != 0 ? " " : "") + item.first + "[" + std::to_string(ti.arraySize) + "]";
-				}
-				continue;
-			}
-			const TypeInfo& ti = types.at(item.second);
-			if (ti.typeName.size() != 0) out += (ti.isReadOnly ? "const " : "") + ti.typeName + (item.first.size() != 0 ? " " : "") + item.first;
-			else if (ti.metaType == "ptr") {
-				s.push(std::pair<std::string, int>(item.first, ~item.second));
-				s.push(std::pair<std::string, int>("", item.second + 1));
-			} else if (ti.metaType == "array") {
-				s.push(std::pair<std::string, int>(item.first, ~item.second));
-				s.push(std::pair<std::string, int>("", item.second + 1));
-			} else if (ti.metaType == "code") {
-				std::string str;
-				for (size_t i = 0; i < ti.funcInfo.syminfo.size(); i++) {
-					if (i != 0) str += ", ";
-					str += printTypeForCode(ti.funcInfo.syminfo[i].pi.ti, ti.funcInfo.syminfo[i].pi.name);
-				}
-				out += printTypeForCode(ti.funcInfo.retType.pi.ti, "") + " (" + (ti.funcInfo.model != "default" && ti.funcInfo.model != "unknown" ? ti.funcInfo.model + " " : "") + "*" + item.first + ")(" + str + ")";
-			} else if (ti.metaType == "struct") {
-				std::string str;
-				for (size_t i = 0; i < ti.structMembers.size(); i++) {
-					str += "  " + printTypeForCode(ti.structMembers[i].ti, ti.structMembers[i].name) + ";\n";
-				}
-				out += "struct {\n" + str + "} " + item.first;
-			}
-		}
-		return out;
-	}
-
 	void refTypes(const std::vector<TypeInfo>& types/*tinfo_t ti*/, std::map<std::string, bool>& usedT)
 	{
 		std::stack<int> s;
@@ -1606,104 +1312,6 @@ if (ti.is_udt()) {
 			//metaType == "uint" && callback->isEnum();
 			//metaType == "code"...
 		}
-	}
-
-	std::string IdaCallback::initForType(const std::vector<TypeInfo>& types/*tinfo_t ti*/, ea_t addr)
-	{
-		std::string out;
-		std::stack<std::pair<ea_t, int>> s;
-		s.push(std::pair<ea_t, int>(addr, 0));
-		while (!s.empty()) {
-			std::pair<ea_t, int> item = s.top();
-			s.pop();
-			if (item.second == -1) {
-				out += " }";
-				continue;
-			} else if (item.second == -2) {
-				out += ", ";
-				continue;
-			}
-			const TypeInfo& ti = types.at(item.second);
-			std::string str;
-			if (ti.size == -1) { //typeref
-				tinfo_t tinf;
-				tinf.get_named_type(get_idati(), ti.typeName.c_str());
-				std::vector<TypeInfo> nextChain;
-				getType(tinf, nextChain, true);
-				str = initForType(nextChain, item.first);
-				//msg("%s %s\n", ti.typeName.c_str(), ti.metaType.c_str());
-			} else if (ti.metaType == "struct") {
-				str = "{ ";
-				for (size_t i = 0; i < ti.structMembers.size(); i++) {
-					if (i != 0) str += ", ";
-					str += initForType(ti.structMembers[i].ti, item.first + ti.structMembers[i].offset);
-				}
-				str += " }";
-			} else if (is_strlit(get_flags(item.first))) { //preempt integer and array handling
-				//asize_t len = get_item_size(item.first);
-				//single byte formats: STRTYPE_TERMCHR, STRTYPE_C, STRTYPE_PASCAL, STRTYPE_LEN2, STRTYPE_LEN4
-				//double byte formats: STRTYPE_C_16, STRTYPE_PASCAL_16, STRTYPE_LEN4_16
-				//int len = get_max_strlit_length(item.first, ti.get_size() == 1 ? STRTYPE_C : (ti.get_size() == 2 ? STRTYPE_C_16 : STRTYPE_C_32), ALOPT_IGNHEADS | ALOPT_IGNPRINT);
-				qstring qs;
-				get_strlit_contents(&qs, item.first, -1, get_str_type(item.first), nullptr, STRCONV_ESCAPE); //u8 for UTF-8 with char and u for UTF-16 with char16_t
-				if (ti.metaType == "array") {
-					//if ((ti + 1)->size == -1) //in case a chain of type refs until the size needs to be consumed which would require recursion since its the typeref case above, just divide
-					str = std::string((ti.size / ti.arraySize) == sizeof(wchar_t) ? "L" : ((ti.size / ti.arraySize) == sizeof(char32_t) ? "U" : "")) + "\"" + std::string(qs.c_str()) + "\"";
-				} else str = std::string(ti.size == sizeof(wchar_t) ? "L" : (ti.size == sizeof(char32_t) ? "U" : "")) + "\"" + std::string(qs.c_str()) + "\"";
-				//} else if (ti.is_array()) {
-			} else if (ti.metaType == "array") {
-				str = "{ ";
-				s.push(std::pair<ea_t, int>(item.first, -1));
-				for (uint32 i = ti.arraySize - 1; true; i--) {
-					s.push(std::pair<ea_t, int>(item.first + (ea_t)types.at(item.second + 1).size * i, item.second + 1));
-					if (i != 0) s.push(std::pair<ea_t, int>(item.first, -2));
-					else break;
-				}
-			} else if (ti.metaType == "char" || ti.metaType == "int" || ti.metaType == "unknown") {
-				long long num = 0;
-				get_bytes(&num, ti.size, item.first);
-				//heuristics for printing hex vs decimal?
-				str = "0x" + to_string(num, std::hex);
-			} else if (ti.metaType == "uint") {
-				unsigned long long num = 0;
-				get_bytes(&num, ti.size, item.first);
-				//heuristics for printing hex vs decimal?
-				str = "0x" + to_string(num, std::hex);
-			} else if (ti.metaType == "bool") {
-				str = get_byte(item.first) != 0 ? "true" : "false";
-			} else if (ti.metaType == "float") {
-				if (ti.size == sizeof(float)) {
-					float f;
-					get_bytes(&f, ti.size, item.first);
-					char buf[33];
-					qsnprintf(buf, sizeof(buf), "%.*g", FLT_DECIMAL_DIG, f);
-					str = buf;
-				} else if (ti.size == sizeof(double)) {
-					double f;
-					get_bytes(&f, ti.size, item.first);
-					char buf[33];
-					qsnprintf(buf, sizeof(buf), "%.*lg", DBL_DECIMAL_DIG, f);
-					str = buf;
-				} /*else if (ti.is_ldouble()) {
-					long double f;
-					get_bytes(&f, sz, it->first);
-					char buf[33];
-					qsnprintf(buf, sizeof(buf), "%.*Lg", LDBL_DECIMAL_DIG, f); LDBL_DECIMAL_DIG = 21 for 80-bit/10-byte?
-				}*/ else {
-					msg("%s %s\n", ti.typeName.c_str(), ti.metaType.c_str());
-				}
-			} else if (ti.metaType == "ptr") { //code would have to be a function pointer
-				//} else if (ti.is_ptr()) {
-				uval_t u;
-				get_data_value(&u, item.first, ti.size);
-				//tinfo_t tif;
-				//get_tinfo(&tif, u);
-				qstring qs = get_name(u);
-				str = "&" + std::string(qs.c_str());//initForType(tif, item.first);
-			}
-			out += str;
-		}
-		return out;
 	}
 
 	//void IdaCallback::dfsVisitType(tinfo_t ti, std::vector<std::string>& sortedTypes, bool firstScan)
@@ -1870,7 +1478,7 @@ if (ti.is_udt()) {
 	}*/
 
 	void dfsVisitData(ea_t ea, const std::map<ea_t, std::vector<ea_t>>& depData,
-		std::map<ea_t, std::vector<TypeInfo>> & usdData,
+		std::map<ea_t, std::vector<TypeInfo>>& usdData,
 		std::vector<ea_t>& sortedData, std::map<ea_t, bool>& unvisited)
 	{
 		std::stack<ea_t> s; //should switch to stack based
@@ -1881,7 +1489,7 @@ if (ti.is_udt()) {
 			ea_t e = s.top();
 			bool hasUnvisitChdrn = false;
 			const std::vector<ea_t>& vec = depData.at(e);
-			for (int i = 0; i < vec.size(); i++) {
+			for (size_t i = 0; i < vec.size(); i++) {
 				if (usdData.find(vec[i]) != usdData.end()) {
 					if (unvisited.find(vec[i]) == unvisited.end() || unvisited[vec[i]]) {
 						unvisited[vec[i]] = false; s.push(vec[i]); hasUnvisitChdrn = true;
@@ -1904,7 +1512,7 @@ if (ti.is_udt()) {
 		}
 	}*/
 
-	void checkFwdData(ea_t ea, const std::map<ea_t, std::vector<ea_t>> & depData, 
+	void checkFwdData(ea_t ea, const std::map<ea_t, std::vector<ea_t>>& depData,
 		const std::map<ea_t, bool>& alreadyDefined, std::map<ea_t, bool>& needDecl)
 	{
 		std::stack<ea_t> s;
@@ -1921,7 +1529,566 @@ if (ti.is_udt()) {
 		}
 	}
 
-	std::string IdaCallback::getHeaderDefFromAnalysis(bool allImports)
+	std::string IdaCallback::dumpIdaInfo()
+	{
+		std::string str = "IDA SDK selected decompilation useful reported information dump follows:\n\n";
+		str = "Processor: " + std::string(inf.procname) +
+			" Is 32-bit: " + std::string(inf.is_32bit() ? "yes" : "no") +
+			" Is 64-bit: " + std::string(inf.is_64bit() ? "yes" : "no") +
+			" Is big-endian: " + std::string(inf.is_be() ? "yes" : "no") +
+			" MaxPtrSize: " + std::to_string(ph.max_ptr_size()) +
+			" SegRegSize: " + std::to_string(ph.segreg_size) +
+			" SegmBitness: " + std::to_string(ph.get_segm_bitness()) +
+			" StkArgOffs: " + std::to_string(ph.get_stkarg_offset()) +
+			" Use64: " + std::to_string(ph.use64()) +
+			" Use32: " + std::to_string(ph.use32()) +
+			" DefCCModl: 0x" + to_string((uint)inf.cc.cm, std::hex) +
+			"\n\n";
+		const til_t* idati = get_idati();
+		str += "Number of registers: " + std::to_string(ph.regs_num) + "\n";
+		for (int i = 0; i < ph.regs_num; i++) {
+			reg_info_t ri, mnri;
+			bitrange_t bits, mnbits;
+			//get_reg_info(ph.reg_names[i], &bits);
+			const char* regnm = nullptr;
+			qstring qs;
+			regnm = get_reg_info(ph.reg_names[i], &bits);
+			parse_reg_name(&ri, ph.reg_names[i]);
+			bool bSame = regnm == nullptr || strcmp(regnm, ph.reg_names[i]) == 0;
+			if (!bSame) {
+				get_reg_info(regnm, &mnbits);
+				parse_reg_name(&mnri, regnm);
+				get_reg_name(&qs, i, mnri.size);
+			}
+			str += "Idx: " + std::to_string(i) + " Reg: " + ph.reg_names[i] + " Size: " + std::to_string(ri.size) +
+				" BitOffs: " + std::to_string(bits.bitoff()) + " Bits: " + std::to_string(bits.bitsize()) +
+				(!bSame ? +" MainNm: " + std::string(regnm) + " Size: " + std::to_string(mnri.size) +
+					" BitOffs: " + std::to_string(mnbits.bitoff()) + " Bits: " + std::to_string(mnbits.bitsize()) + " SzName: " + std::string(qs.c_str()) : "") +
+				"\n";
+		}
+		//ph.reg_first_sreg, ph.reg_last_sreg, ph.segreg_size
+		str += "\n";
+		size_t num = 0;
+		ea_t ea = get_first_fixup_ea();
+		while (ea != BADADDR) {
+			fixup_data_t fd;
+			get_fixup(&fd, ea);
+			qstring qs;
+			get_fixup_desc(&qs, ea, fd);
+			//fd.get_desc(&qs, ea); //has color info
+			tag_remove(&qs);
+			str += "Fixup: " + std::string(qs.c_str()) + " Addr: 0x" + to_string(ea, std::hex) +
+				" Size: 0x" + to_string(calc_fixup_size(fd.get_type()), std::hex) + " Type: 0x" + to_string(fd.get_type(), std::hex) + "\n";
+			num++;
+			ea = get_next_fixup_ea(ea);
+		}
+		str += "Total fixups: " + std::to_string(num) + "\n\n";
+		num = get_selector_qty();
+		str += "Number of selectors: " + std::to_string(num) + "\n";
+		for (size_t i = 0; i < num; i++) {
+			sel_t base;
+			getn_selector(&base, &ea, (int)i);
+			segment_t* seg = get_segm_by_sel(base);
+			qstring qs;
+			get_segm_name(&qs, seg);
+			str += "Selector Base: 0x" + to_string(base, std::hex) + " Addr: 0x" + to_string(ea, std::hex) + " Seg: " + std::string(qs.c_str()) + "\n";
+		}
+		if (num != 0) str += "\n";
+		num = get_segm_qty();
+		str += "Number of segments: " + std::to_string(num) + "\n";
+		for (size_t i = 0; i < num; i++) {
+			segment_t* seg = getnseg((int)i);
+			qstring qs, qc, qcr, qcls;
+			get_segm_name(&qs, seg);
+			get_segment_cmt(&qc, seg, false);
+			get_segment_cmt(&qcr, seg, false);
+			get_segm_class(&qcls, seg);
+			str += "Segment: " + std::string(qs.c_str()) + " Cmt: " + std::string(qc.c_str()) + " CmtRpt: " + std::string(qcr.c_str()) + " Class: " + std::string(qcls.c_str()) +
+				" Sel: 0x" + to_string(seg->sel, std::hex) + " Align: 0x" + to_string((uint)seg->align, std::hex) + " Bitness: 0x" + to_string((uint)seg->bitness, std::hex) +
+				" Comb: 0x" + to_string((uint)seg->comb, std::hex) + " Perm: 0x" + to_string((uint)seg->perm, std::hex) + " Flags: 0x" + to_string(seg->flags, std::hex) +
+				" Type: 0x" + to_string((uint)seg->type, std::hex) + " StartEA: 0x" + to_string(seg->start_ea, std::hex) + " EndEA: 0x" + to_string(seg->end_ea, std::hex) + "\n";
+		}
+		if (num != 0) str += "\n";
+		str += "til name: " + std::string(idati->name) + " Description: " + std::string(idati->desc) + " Bases: " + std::to_string(idati->nbases) + "\n";
+		for (int i = 0; i < idati->nbases; i++) {
+			str += "Base til name: " + std::string(idati->base[i]->name) + " Description: " + std::string(idati->base[i]->desc) + "\n";
+		}
+		//idati->types;
+		num = get_idasgn_qty();
+		str += "Number of signatures: " + std::to_string(num) + "\n";
+		for (size_t i = 0; i < num; i++) {
+			qstring signame, optlibs, longname;
+			get_idasgn_desc(&signame, &optlibs, (int)i);
+			//idasgn_t* is = get_idasgn_header_by_short_name(signame.c_str());
+			get_idasgn_title(&longname, signame.c_str());
+			str += "Signature short form name: " + std::string(signame.c_str()) + " Optional Libraries: " + std::string(optlibs.c_str()) + " Long form name: " + std::string(longname.c_str()) + "\n";
+		}
+		str += "\nNumber of imported modules: " + std::to_string(modNames.size()) + "\n";
+		for (std::map<ea_t, ImportInfo>::iterator it = imports.begin(); it != imports.end(); it++) {
+			qstring qs, qn, name;
+			get_long_name(&qs, it->first);
+			get_name(&qn, it->first);
+			name = get_short_name(it->first);
+			if (name.size() != 0) {
+				name = name.substr(0, name.find("(", 0));
+			}
+			str += "Long name: " + std::string(qs.c_str()) + " Name: " + std::string(qn.c_str()) + " Callable name: " + std::string(name.c_str());
+			tinfo_t tif;
+			if (getFuncByGuess(it->first, tif)) {
+				print_type(&qs, it->first, PRTYPE_1LINE);
+				func_type_data_t ftd;
+				tif.get_func_details(&ftd);
+				str += " Type: " + std::string(qs.c_str()) + " Args: 0x" + to_string(ftd.size(), std::hex) + " RetType: 0x" + to_string(ftd.retloc.atype(), std::hex) + " RetSize: 0x" + to_string(ftd.rettype.get_size(), std::hex) + "\n";
+			} else str += "\n";
+		}
+		num = get_entry_qty();
+		str += "\nNumber of entry points: " + std::to_string(num) + "\n";
+		for (size_t i = 0; i < num; i++) {
+			std::string disp;
+			ea_t ea = get_entry(get_entry_ordinal(i)); //qstring qs; get_entry_name(&qs, i);
+			str += "Entry point ordinal: " + std::to_string(i) + " Addr: 0x" + to_string(ea, std::hex) + "\n";
+		}
+		num = get_func_qty();
+		str += "\nNumber of functions: " + std::to_string(num) + "\n";
+		for (size_t i = 0; i < num; i++) {
+			func_t* f = getn_func(i);
+			if (f == nullptr) continue;
+			qstring qs, qt;
+			get_func_name(&qs, f->start_ea);
+			tinfo_t tif;
+			get_long_name(&qt, f->start_ea);
+			str += "Name: " + std::string(qs.c_str()) + " Long name: " + std::string(qt.c_str()) + " Addr: 0x" + to_string(f->start_ea, std::hex) + " LocVars: 0x" + to_string(f->frsize, std::hex) +
+				" SaveRegs: 0x" + to_string(f->frregs, std::hex) + " PopArgs: 0x" + to_string(f->argsize, std::hex) + " AFlags: 0x" + to_string(get_aflags(f->start_ea), std::hex) + " AFlags0: 0x" + to_string(get_aflags0(f->start_ea), std::hex) +
+				" RegArgs: 0x" + to_string(f->regargqty, std::hex) + " FrmPtrDelta: 0x" + to_string(f->fpd, std::hex) + " StkPts: 0x" + to_string(f->pntqty, std::hex) + "\n";
+			if (getFuncByGuess(f->start_ea, tif)) {
+				print_type(&qt, f->start_ea, PRTYPE_1LINE);
+				func_type_data_t ftd;
+				tif.get_func_details(&ftd);
+				ftd.dump(&qs);
+				qs.remove_last(1); //trailing new line
+				str += "Type: " + std::string(qt.c_str()) + " Args: 0x" + to_string(ftd.size(), std::hex) + " CallMthd: 0x" + to_string(ftd.get_call_method(), std::hex) + " CC: 0x" + to_string((uint)ftd.cc, std::hex) + " Dump:\n" + qs.c_str() + "\n";
+				for (size_t i = 0; i < ftd.size(); i++) {
+					str += "ArgName: " + std::string(ftd[i].name.c_str()) + " ArgCmt: " + std::string(ftd[i].cmt.c_str()) + " ArgLoc: 0x" + to_string(ftd[i].argloc.is_stkoff() ? ftd[i].argloc.stkoff() : ftd[i].argloc.reg1(), std::hex) + "\n";
+				}
+			}
+			if (f->frame != BADNODE) {
+				struc_t* frame = get_frame(f->start_ea); //get_member_name has sometimes crashed with error 836
+				str += "Frame members: 0x" + to_string(frame->memqty, std::hex) + " Frame size: 0x" + to_string(get_frame_size(f), std::hex) + " LocOffs: 0x" + to_string(frame_off_lvars(f), std::hex) +
+					" SaveOffs: 0x" + to_string(frame_off_savregs(f), std::hex) + " RetOffs: 0x" + to_string(frame_off_retaddr(f), std::hex) + " RetSize: 0x" + to_string(get_frame_retsize(f), std::hex) + " ArgOffs: 0x" + to_string(frame_off_args(f), std::hex) + "\n";
+				for (uint32 i = 0; i < frame->memqty; i++) {
+					str += "Member name: " + std::string(get_member_name(frame->members[i].id).c_str()) + " Offset: 0x" + to_string(frame->members[i].get_soff(), std::hex) + "\n";
+				}
+			}
+			//if (f->points == nullptr) get_spd(f, f->start_ea);
+			/*if (f->points != nullptr) {
+				for (int i = 0; i < f->pntqty; i++) {
+					sval_t s = f->points[i].spd;
+					str += "StackAdj: 0x" + to_string(s, std::hex) + " Offset: 0x" + to_string(f->points[i].ea, std::hex) + "\n";
+				}
+			}
+			for (ea_t i = get_first_cref_to(f->start_ea); i != BADADDR;)
+			{
+				func_t* fp = get_func(i);
+				if (fp->points == nullptr) get_spd(fp, fp->start_ea);
+				str += "CdXref: 0x" + to_string(i, std::hex) + " SpDelta: " + to_string(get_spd(fp, get_item_end(i)), std::hex) +
+					" SpEfctvDelta: " + to_string(get_effective_spd(fo, get_item_end(i)), std::hex) + " SpDelta: " + to_string(get_sp_delta(fp, get_item_end(i)), std::hex) + "\n";
+				i = get_next_cref_to(f->start_ea, i);
+				//str += (i == BADADDR) ? "\n" : " ";
+			}*/
+			if (f->regargs == nullptr) read_regargs(f);
+			for (int i = 0; i < f->regargqty; i++) { //name can be a nullptr!
+				qstring out, qs;
+				size_t size = 0;
+				//regargs are destroyed when the full function type is determined
+				//if (tif.is_func()) {
+					//qs = ph.reg_names[f->regargs[i].reg];
+				//} else 
+				if (f->regargs[i].type != nullptr) {
+					tinfo_t ti; //The type information is internally kept as an array of bytes terminated by 0.
+					qtype typeForDeser;
+					typeForDeser.append(f->regargs[i].type);
+					ti.deserialize(get_idati(), &typeForDeser); //will free buffer passed!
+					ti.get_type_name(&out);
+					size = ti.get_size();
+					get_reg_name(&qs, f->regargs[i].reg, size);
+					//qs = ph.reg_names[f->regargs[i].reg];
+				} else qs = ph.reg_names[f->regargs[i].reg];
+				str += "RegArgName: " + std::string(f->regargs[i].name == nullptr ? "" : f->regargs[i].name) +
+					" Reg: " + std::string(qs.c_str()) + " Idx: 0x" + to_string(f->regargs[i].reg, std::hex) +
+					" Size: 0x" + to_string(size, std::hex) +
+					" TDataLen: 0x" + to_string(strlen((const char*)f->regargs[i].type), std::hex) + " Type: " + std::string(out.c_str()) + "\n";
+			}
+			if (f->regvars == nullptr) find_regvar(f, f->start_ea, nullptr);
+			if (f->regvarqty != -1 && f->regvars != nullptr) {
+				for (int i = 0; i < f->regvarqty; i++) {
+					str += "RegVar: " + std::string(f->regvars[i].user != nullptr ? f->regvars[i].user : "") + " Reg: " + std::string(f->regvars[i].canon) + " Cmt: " + std::string(f->regvars[i].cmt == nullptr ? "" : f->regvars[i].cmt) + "\n";
+				}
+			}
+			str += "\n";
+		}
+		return str;
+	}
+
+	std::string colorize(std::string str, bool bColor, char clr)
+	{
+		return bColor ? std::string({ COLOR_ON, clr }) + str + std::string({ COLOR_OFF, clr }) : str;
+	}
+	std::string printTypeForCode(const tinfo_t & t, std::string name, bool bColor, char NameColor, bool bTop, int64 indnt) //unions, bitfields and typedefs to default built in types require this
+	{
+		std::string out;
+		std::stack<std::tuple<std::string, tinfo_t, bool>> s;
+		s.push(std::tuple<std::string, tinfo_t, bool>(name, t, false));
+		while (!s.empty()) {
+			std::tuple<std::string, tinfo_t, bool> item = s.top();
+			s.pop();
+			if (std::get<2>(item)) { //post order time where index is complement
+				const tinfo_t& ti = std::get<1>(item);
+				if (ti.is_ptr() || ti.is_array() && t != ti) {
+					out += std::string(std::get<0>(item).size() != 0 || ti.is_const() ? "* " : "*") + (ti.is_const() ? colorize("const", bColor, COLOR_KEYWORD) + (std::get<0>(item).size() != 0 ? " " : "") : "") + colorize(std::get<0>(item), bColor, NameColor);
+				} else if (ti.is_array()) {
+					array_type_data_t atd;
+					ti.get_array_details(&atd); //pointer to array should be treated as pointer to pointer
+					out += (std::get<0>(item).size() != 0 ? " " : "") + colorize(std::get<0>(item), bColor, NameColor) + "[" + std::to_string(atd.nelems) + "]";
+				}
+				continue;
+			}
+			const tinfo_t& ti = std::get<1>(item);
+			qstring qs;
+			ti.get_type_name(&qs);
+			if ((!bTop || t != ti) && qs.size() != 0) out += (ti.is_const() ? colorize("const", bColor, COLOR_KEYWORD) + " " : "") + colorize(qs.c_str(), bColor, COLOR_LOCNAME) + (std::get<0>(item).size() != 0 ? " " : "") + colorize(std::get<0>(item), bColor, NameColor);
+			else if (ti.is_ptr() && !ti.is_funcptr()) {
+				ptr_type_data_t ptd;
+				ti.get_ptr_details(&ptd);
+				s.push(std::tuple<std::string, tinfo_t, bool>(std::get<0>(item), std::get<1>(item), true));
+				s.push(std::tuple<std::string, tinfo_t, bool>("", ptd.obj_type, false));
+			} else if (ti.is_array()) {
+				array_type_data_t atd;
+				ti.get_array_details(&atd);
+				s.push(std::tuple<std::string, tinfo_t, bool>(std::get<0>(item), std::get<1>(item), true));
+				s.push(std::tuple<std::string, tinfo_t, bool>("", atd.elem_type, false));
+			} else if (ti.is_funcptr()) {
+				func_type_data_t ftd;
+				ti.get_func_details(&ftd);
+				std::string str;
+				for (size_t i = 0; i < ftd.size(); i++) {
+					if (i != 0) str += ", ";
+					str += printTypeForCode(ftd[i].type, ftd[i].name.c_str(), bColor, NameColor, false, indnt);
+					if (ftd[i].cmt.size() != 0) str += colorize(" /*" + std::string(ftd[i].cmt.c_str()) + "*/", bColor, COLOR_AUTOCMT);
+				}
+				std::string model = ccToStr(ftd.cc, ftd.get_call_method(), false);
+				out += printTypeForCode(ftd.rettype, "", bColor, NameColor, false, indnt) + " (" + (model != "default" && model != "unknown" ? colorize(model, bColor, COLOR_KEYWORD) + " " : "") + "*" + colorize(std::get<0>(item), bColor, COLOR_LOCNAME) + ")(" + str + ")";
+			} else if (ti.is_udt()) {
+				udt_type_data_t utd;
+				ti.get_udt_details(&utd);
+				std::string str;
+				for (size_t i = 0; i < utd.size(); i++) {
+					if (utd[i].type.is_bitfield()) {
+						bitfield_type_data_t btd;
+						utd[i].type.get_bitfield_details(&btd);
+						str += std::string(indnt + 2, ' ') + colorize(std::string(utd[i].name.c_str()), bColor, NameColor) + ":" + std::to_string(btd.width);
+					} else str += std::string(indnt + 2, ' ') + printTypeForCode(utd[i].type, utd[i].name.c_str(), bColor, NameColor, false, indnt + 2);
+					str += ";" + colorize(std::string(utd[i].cmt.size() != 0 ? " //" + std::string(utd[i].cmt.c_str()) : ""), bColor, COLOR_AUTOCMT) + "\n";
+				}
+				out += colorize(utd.is_union ? "union" : "struct", bColor, COLOR_KEYWORD) + " {\n" + str + "}" + (std::get<0>(item).size() != 0 ? " " : "") + colorize(std::get<0>(item), bColor, NameColor);
+			} else if (ti.is_enum()) {
+				enum_type_data_t etd;
+				ti.get_enum_details(&etd);
+				for (size_t i = 0; i < etd.size(); i++) {
+					out += std::string(etd[i].name.c_str()) + " = " + std::to_string(etd[i].value) + (i != etd.size() - 1 ? "," : "") + colorize(std::string(etd[i].cmt.size() != 0 ? " //" + std::string(etd[i].cmt.c_str()) : ""), bColor, COLOR_AUTOCMT);
+				}
+			} else if (ti.is_int() || ti.is_uint() || ti.is_floating() || ti.is_void() || ti.is_bool() || ti.is_unknown()) {
+				qstring qs;
+				ti.print(&qs, nullptr, PRTYPE_DEF);
+				out += colorize(qs.c_str(), bColor, COLOR_KEYWORD) + " " + colorize(std::get<0>(item), bColor, NameColor);
+			}
+		}
+		return out;
+	}
+	std::string printTypeForCode(const std::vector<TypeInfo>& types, std::string name, bool bColor, char NameColor, bool bTop, int64 indnt)
+	{
+		std::string out;
+		std::stack<std::pair<std::string, int>> s;
+		s.push(std::pair<std::string, int>(name, 0));
+		while (!s.empty()) {
+			std::pair<std::string, int> item = s.top();
+			s.pop();
+			if (item.second < 0) { //post order time where index is complement
+				const TypeInfo& ti = types.at(~item.second);
+				if (ti.metaType == "ptr" || ti.metaType == "array" && 0 != ~item.second) {
+					out += std::string(item.first.size() != 0 || ti.isReadOnly ? "* " : "*") + (ti.isReadOnly ? colorize("const", bColor, COLOR_KEYWORD) + (item.first.size() != 0 ? " " : "") : "") + colorize(item.first, bColor, NameColor);
+				} else if (ti.metaType == "array") { //pointer to array should be treated as pointer to pointer
+					out += (item.first.size() != 0 ? " " : "") + colorize(item.first, bColor, NameColor) + "[" + std::to_string(ti.arraySize) + "]";
+				}
+				continue;
+			}
+			const TypeInfo& ti = types.at(item.second);
+			if ((!bTop || item.second != 0) && ti.typeName.size() != 0) out += (ti.isReadOnly ? colorize("const", bColor, COLOR_KEYWORD) + " " : "") + colorize(ti.typeName, bColor, COLOR_LOCNAME) + (item.first.size() != 0 ? " " : "") + colorize(item.first, bColor, NameColor);
+			else if (ti.metaType == "ptr") {
+				s.push(std::pair<std::string, int>(item.first, ~item.second));
+				s.push(std::pair<std::string, int>("", item.second + 1));
+			} else if (ti.metaType == "array") {
+				s.push(std::pair<std::string, int>(item.first, ~item.second));
+				s.push(std::pair<std::string, int>("", item.second + 1));
+			} else if (ti.metaType == "code") {
+				std::string str;
+				for (size_t i = 0; i < ti.funcInfo.syminfo.size(); i++) {
+					if (i != 0) str += ", ";
+					str += printTypeForCode(ti.funcInfo.syminfo[i].pi.ti, ti.funcInfo.syminfo[i].pi.name, bColor, NameColor, false, indnt);
+				}
+				out += printTypeForCode(ti.funcInfo.retType.pi.ti, "", bColor, NameColor, false, indnt) + " (" + (ti.funcInfo.model != "default" && ti.funcInfo.model != "unknown" ? colorize(ti.funcInfo.model, bColor, COLOR_KEYWORD) + " " : "") + "*" + colorize(item.first, bColor, COLOR_LOCNAME) + ")(" + str + ")";
+			} else if (ti.metaType == "struct") { //note: bitfields and unions are not handled here except as byte arrays
+				std::string str;
+				for (size_t i = 0; i < ti.structMembers.size(); i++) {
+					str += std::string(indnt + 2, ' ') + printTypeForCode(ti.structMembers[i].ti, ti.structMembers[i].name, bColor, NameColor, false, indnt + 2) + ";\n";
+				}
+				out += colorize("struct", bColor, COLOR_KEYWORD) + " {\n" + str + "}" + (item.first.size() != 0 ? " " : "") + colorize(item.first, bColor, NameColor);
+			} else {}
+		}
+		return out;
+	}
+
+	std::string IdaCallback::initForType(const tinfo_t & t, ea_t addr, bool bColor) //unions/bitfields require this method
+	{
+		std::string out;
+		std::stack<std::tuple<ea_t, tinfo_t, int>> s;
+		s.push(std::tuple<ea_t, tinfo_t, int>(addr, t, 0));
+		while (!s.empty()) {
+			std::tuple<ea_t, tinfo_t, int> item = s.top();
+			s.pop();
+			if (std::get<2>(item) == -1) {
+				out += " }";
+				continue;
+			} else if (std::get<2>(item) == -2) {
+				out += ", ";
+				continue;
+			}
+			const tinfo_t& ti = std::get<1>(item);
+			std::string str;
+			if (ti.is_typeref()) {
+				qstring qs;
+				ti.get_next_type_name(&qs);
+				tinfo_t tinf;
+				tinf.get_named_type(get_idati(), qs.c_str());
+				str = initForType(tinf, std::get<0>(item), bColor);
+			}  else if (ti.is_udt()) {
+				udt_type_data_t utd;
+				ti.get_udt_details(&utd);
+				str = "{ ";
+				if (utd.is_union) { //how to choose member? size of each member could be matched with next data, pointers in union could be matched to pointers in data
+					if (utd.size() != 0) str += initForType(utd[0].type, std::get<0>(item), bColor);
+				} else {
+					for (int i = 0; i < utd.size(); i++) {
+						if (i != 0) str += ", ";
+						if (utd[i].type.is_bitfield()) {
+							bitfield_type_data_t btd;
+							utd[i].type.get_bitfield_details(&btd);
+							uint64 val = 0;
+							uint64 totalSize = (utd[i].offset + btd.width + 7) / 8 - utd[i].offset / 8;
+							std::vector<uchar> bts(totalSize);
+							get_bytes(bts.data(), totalSize, std::get<0>(item));
+							unsigned long long num, shiftbits = 8 - ((utd[i].offset + btd.width) % 8);
+							num |= (bts[0] >> shiftbits);
+							for (size_t j = 1; j < bts.size(); j++) {
+								num |= (((unsigned long long)bts[j]) << (j * 8 - shiftbits));
+							}
+							num &= ((~0ull) >> (8 - (btd.width % 8)));
+							str += colorize("0x" + to_string(num, std::hex), bColor, COLOR_NUMBER);
+						} else {
+							str += initForType(utd[i].type, std::get<0>(item) + utd[i].offset / 8, bColor);
+						}
+					}
+				}
+				str += " }";
+			} else if (is_strlit(get_flags(std::get<0>(item)))) { //preempt integer and array handling
+				//asize_t len = get_item_size(std::get<0>(item));
+				//single byte formats: STRTYPE_TERMCHR, STRTYPE_C, STRTYPE_PASCAL, STRTYPE_LEN2, STRTYPE_LEN4
+				//double byte formats: STRTYPE_C_16, STRTYPE_PASCAL_16, STRTYPE_LEN4_16
+				//int len = get_max_strlit_length(addr, ti.get_size() == 1 ? STRTYPE_C : (ti.get_size() == 2 ? STRTYPE_C_16 : STRTYPE_C_32), ALOPT_IGNHEADS | ALOPT_IGNPRINT);
+				qstring qs;
+				get_strlit_contents(&qs, std::get<0>(item), -1, get_str_type(std::get<0>(item)), nullptr, STRCONV_ESCAPE); //u8 for UTF-8 with char and u for UTF-16 with char16_t
+				if (ti.is_array()) {
+					array_type_data_t atd;
+					ti.get_array_details(&atd);
+					str = std::string(atd.elem_type.get_size() == sizeof(wchar_t) ? "L" : (atd.elem_type.get_size() == sizeof(char32_t) ? "U" : "")) + "\"" + std::string(qs.c_str()) + "\"";
+				} else str = std::string(ti.get_size() == sizeof(wchar_t) ? "L" : (ti.get_size() == sizeof(char32_t) ? "U" : "")) + "\"" + std::string(qs.c_str()) + "\"";
+				str = colorize(str, bColor, COLOR_STRING);
+			} else if (ti.is_array()) {
+				array_type_data_t atd;
+				ti.get_array_details(&atd);
+				str = "{ ";
+				s.push(std::tuple<ea_t, tinfo_t, int>(std::get<0>(item), ti, -1));
+				for (uint32 i = atd.nelems - 1; true; i--) {
+					s.push(std::tuple<ea_t, tinfo_t, int>(std::get<0>(item) + atd.elem_type.get_size() * i, atd.elem_type, 0));
+					if (i != 0) s.push(std::tuple<ea_t, tinfo_t, int>(std::get<0>(item), ti, -2));
+					else break;
+				}
+			} else if (ti.is_char() || is_type_int(ti.get_realtype()) && ti.is_signed()) {
+				long long num = 0;
+				get_bytes(&num, ti.get_size(), std::get<0>(item));
+				//heuristics for printing hex vs decimal?
+				str = colorize("0x" + to_string(num, std::hex), bColor, COLOR_NUMBER);
+			} else if (is_type_int(ti.get_realtype())) {
+				unsigned long long num = 0;
+				get_bytes(&num, ti.get_size(), std::get<0>(item));
+				//heuristics for printing hex vs decimal?
+				str = colorize("0x" + to_string(num, std::hex), bColor, COLOR_NUMBER);
+			} else if (ti.is_bool()) {
+				str = colorize(get_byte(std::get<0>(item)) != 0 ? "true" : "false", bColor, COLOR_KEYWORD);
+			} else if (ti.is_floating()) {
+				if (ti.is_float()) {
+					float f;
+					get_bytes(&f, ti.get_size(), std::get<0>(item));
+					char buf[33];
+					qsnprintf(buf, sizeof(buf), "%.*g", FLT_DECIMAL_DIG, f);
+					str = colorize(buf, bColor, COLOR_NUMBER);
+				} else if (ti.is_double()) {
+					double f;
+					get_bytes(&f, ti.get_size(), std::get<0>(item));
+					char buf[33];
+					qsnprintf(buf, sizeof(buf), "%.*lg", DBL_DECIMAL_DIG, f);
+					str = colorize(buf, bColor, COLOR_NUMBER);
+				} /*else if (ti.is_ldouble()) {
+					long double f;
+					get_bytes(&f, sz, it->first);
+					char buf[33];
+					qsnprintf(buf, sizeof(buf), "%.*Lg", LDBL_DECIMAL_DIG, f); LDBL_DECIMAL_DIG = 21 for 80-bit/10-byte?
+				}*/ else {
+					//msg("%s %s\n", ti.typeName.c_str(), ti.metaType.c_str());
+				}
+			} else if (ti.is_ptr()) {
+				uval_t u;
+				get_data_value(&u, std::get<0>(item), ti.get_size());
+				//tinfo_t tif;
+				//get_tinfo(&tif, u);
+				qstring qs = get_name(u);
+				str = "&" + colorize(std::string(qs.c_str()), bColor, COLOR_DEFAULT);//initForType(tif, addr);
+			}
+			out += str;
+		}
+		return out;
+	}
+	std::string IdaCallback::initForType(const std::vector<TypeInfo>& types, ea_t addr, bool bColor)
+	{
+		std::string out;
+		std::stack<std::pair<ea_t, int>> s;
+		s.push(std::pair<ea_t, int>(addr, 0));
+		while (!s.empty()) {
+			std::pair<ea_t, int> item = s.top();
+			s.pop();
+			if (item.second == -1) {
+				out += " }";
+				continue;
+			} else if (item.second == -2) {
+				out += ", ";
+				continue;
+			}
+			const TypeInfo& ti = types.at(item.second);
+			std::string str;
+			if (ti.size == -1) { //typeref
+				tinfo_t tinf;
+				tinf.get_named_type(get_idati(), ti.typeName.c_str());
+				std::vector<TypeInfo> nextChain;
+				getType(tinf, nextChain, true);
+				str = initForType(nextChain, item.first, bColor);
+				//msg("%s %s\n", ti.typeName.c_str(), ti.metaType.c_str());
+			} else if (ti.metaType == "struct") {
+				str = "{ ";
+				for (size_t i = 0; i < ti.structMembers.size(); i++) {
+					if (i != 0) str += ", ";
+					str += initForType(ti.structMembers[i].ti, item.first + (ea_t)ti.structMembers[i].offset, bColor);
+				}
+				str += " }";
+			} else if (is_strlit(get_flags(item.first))) { //preempt integer and array handling
+				//asize_t len = get_item_size(item.first);
+				//single byte formats: STRTYPE_TERMCHR, STRTYPE_C, STRTYPE_PASCAL, STRTYPE_LEN2, STRTYPE_LEN4
+				//double byte formats: STRTYPE_C_16, STRTYPE_PASCAL_16, STRTYPE_LEN4_16
+				//int len = get_max_strlit_length(item.first, ti.get_size() == 1 ? STRTYPE_C : (ti.get_size() == 2 ? STRTYPE_C_16 : STRTYPE_C_32), ALOPT_IGNHEADS | ALOPT_IGNPRINT);
+				qstring qs;
+				get_strlit_contents(&qs, item.first, -1, get_str_type(item.first), nullptr, STRCONV_ESCAPE); //u8 for UTF-8 with char and u for UTF-16 with char16_t
+				if (ti.metaType == "array") {
+					//if ((ti + 1)->size == -1) //in case a chain of type refs until the size needs to be consumed which would require recursion since its the typeref case above, just divide
+					str = std::string((ti.size / ti.arraySize) == sizeof(wchar_t) ? "L" : ((ti.size / ti.arraySize) == sizeof(char32_t) ? "U" : "")) + "\"" + std::string(qs.c_str()) + "\"";
+				} else str = std::string(ti.size == sizeof(wchar_t) ? "L" : (ti.size == sizeof(char32_t) ? "U" : "")) + "\"" + std::string(qs.c_str()) + "\"";
+				str = colorize(str, bColor, COLOR_STRING);
+			} else if (ti.metaType == "array") {
+				str = "{ ";
+				s.push(std::pair<ea_t, int>(item.first, -1));
+				for (unsigned long long i = ti.arraySize - 1; true; i--) {
+					s.push(std::pair<ea_t, int>(item.first + (ea_t)types.at(item.second + 1).size * (ea_t)i, item.second + 1));
+					if (i != 0) s.push(std::pair<ea_t, int>(item.first, -2));
+					else break;
+				}
+			} else if (ti.metaType == "char" || ti.metaType == "int" || ti.metaType == "unknown") {
+				long long num = 0;
+				get_bytes(&num, (ssize_t)ti.size, item.first);
+				//heuristics for printing hex vs decimal?
+				str = colorize("0x" + to_string(num, std::hex), bColor, COLOR_NUMBER);
+			} else if (ti.metaType == "uint") {
+				unsigned long long num = 0;
+				get_bytes(&num, (ssize_t)ti.size, item.first);
+				//heuristics for printing hex vs decimal?
+				str = colorize("0x" + to_string(num, std::hex), bColor, COLOR_NUMBER);
+			} else if (ti.metaType == "bool") {
+				str = colorize(get_byte(item.first) != 0 ? "true" : "false", bColor, COLOR_KEYWORD);
+			} else if (ti.metaType == "float") {
+				if (ti.size == sizeof(float)) {
+					float f;
+					get_bytes(&f, (ssize_t)ti.size, item.first);
+					char buf[33];
+					qsnprintf(buf, sizeof(buf), "%.*g", FLT_DECIMAL_DIG, f);
+					str = colorize(buf, bColor, COLOR_NUMBER);
+				} else if (ti.size == sizeof(double)) {
+					double f;
+					get_bytes(&f, (ssize_t)ti.size, item.first);
+					char buf[33];
+					qsnprintf(buf, sizeof(buf), "%.*lg", DBL_DECIMAL_DIG, f);
+					str = colorize(buf, bColor, COLOR_NUMBER);
+				} /*else if (ti.is_ldouble()) {
+					long double f;
+					get_bytes(&f, sz, it->first);
+					char buf[33];
+					qsnprintf(buf, sizeof(buf), "%.*Lg", LDBL_DECIMAL_DIG, f); LDBL_DECIMAL_DIG = 21 for 80-bit/10-byte?
+				}*/ else {
+					//msg("%s %s\n", ti.typeName.c_str(), ti.metaType.c_str());
+				}
+			} else if (ti.metaType == "ptr") { //code would have to be a function pointer
+				//} else if (ti.is_ptr()) {
+				uval_t u;
+				get_data_value(&u, item.first, (asize_t)ti.size);
+				//tinfo_t tif;
+				//get_tinfo(&tif, u);
+				qstring qs = get_name(u);
+				str = "&" + colorize(std::string(qs.c_str()), bColor, COLOR_DEFAULT);//initForType(tif, item.first, bColor);
+			}
+			out += str;
+		}
+		return out;
+	}
+
+	std::string IdaCallback::print_func(ea_t ea, std::string& forDisplay, char NameColor)
+	{
+		//does model go before or after return type - seems to be compiler specific what about C language spec?
+		std::string definitions = printTypeForCode(funcProtoInfos[ea].retType.pi.ti, "", false, COLOR_LOCNAME, false, 0) + (funcProtoInfos[ea].model != "default" && funcProtoInfos[ea].model != "unknown" ? " " + funcProtoInfos[ea].model : "") + " " + funcProtoInfos[ea].name + "(";
+		forDisplay += printTypeForCode(funcProtoInfos[ea].retType.pi.ti, "", true, COLOR_LOCNAME, false, 0) +
+			(funcProtoInfos[ea].model != "default" && funcProtoInfos[ea].model != "unknown" ? " " + std::string({ COLOR_ON, COLOR_KEYWORD }) + funcProtoInfos[ea].model + std::string({ COLOR_OFF, COLOR_KEYWORD }) : "") + " " +
+			std::string({ COLOR_ON, NameColor }) + funcProtoInfos[ea].name + std::string({ COLOR_OFF, NameColor }) + "(";
+		bool bFirst = true;
+		for (size_t i = 0; i < funcProtoInfos[ea].syminfo.size(); i++) {
+			if (funcProtoInfos[ea].syminfo[i].argIndex != -1) {
+				if (!bFirst) {
+					definitions += ", "; forDisplay += ", ";
+				}
+				bFirst = false;
+				definitions += printTypeForCode(funcProtoInfos[ea].syminfo[i].pi.ti, funcProtoInfos[ea].syminfo[i].pi.name, false, COLOR_LOCNAME, false, 0);
+				forDisplay += printTypeForCode(funcProtoInfos[ea].syminfo[i].pi.ti, funcProtoInfos[ea].syminfo[i].pi.name, true, COLOR_LOCNAME, false, 0);
+			}
+		}
+		definitions += ")";
+		forDisplay += ")";
+		return definitions;
+	}
+
+	std::string IdaCallback::getHeaderDefFromAnalysis(bool allImports, std::string & forDisplay)
 	{
 		qstring qs;
 		std::string definitions;
@@ -1947,18 +2114,17 @@ if (ti.is_udt()) {
 		//so both large floats and integers are truncated currently
 		//other types are not guaranteed to be sizes specified so where nullptr occurs are C keyword types but perhaps the core type names should be redone from the defaults entirely
 
-		definitions += "//Default calling convention set to: " + (di->customCallStyle.empty() ? ccToStr(inf.cc.cm, 0, true) : di->customCallStyle) + "\n\n"; //should really use callback interface to get cspec variant
-
 		std::map<ea_t, bool> dataDependee;
 		std::map<ea_t, bool> usedRefData;
 		std::map<ea_t, bool> usedRefFuncs;
 		for (std::map<ea_t, std::vector<TypeInfo>>::iterator it = usedData.begin(); it != usedData.end(); it++) {
-			if (finalData.find(get_name(it->first).c_str()) != finalData.end()) {
+			if (finalData.find(getSymbolName(it->first).c_str()) != finalData.end()) {
 				addAllDataRefs(it->first, dependentData, usedData, usedRefData, dataDependee, usedRefFuncs);
 			}
 		}
 		for (std::map<ea_t, bool>::iterator it = usedImports.begin(); it != usedImports.end(); it++) {
-			qs = get_short_name(it->first, GN_STRICT);
+			qs = imports[it->first].name.c_str();
+			if (qs.size() == 0) qs = get_short_name(it->first, GN_STRICT);
 			if (qs.size() != 0) qs = qs.substr(0, qs.find("(", 0));
 			else get_name(&qs, it->first);
 			if (finalFuncs.find(qs.c_str()) != finalFuncs.end()) usedRefFuncs[it->first] = true;
@@ -2000,16 +2166,6 @@ if (ti.is_udt()) {
 			refTypes(usedData[it->first], usedRefTypes);
 		}
 
-		for (int i = 0; i < numDefCoreTypes; i++) {
-			if (usedRefTypes.find(defaultCoreTypes[i].name) != usedRefTypes.end()) {
-				coreTypeUsed[i] = true;
-				usedRefTypes.erase(defaultCoreTypes[i].name);
-			}
-			if (coreTypeUsed[i] && szCoreTypeDefs[i] != nullptr) {
-				definitions += "typedef " + std::string(szCoreTypeDefs[i]) + " " + defaultCoreTypes[i].name + ";\n";
-			}
-		}
-
 		std::map<std::string, bool> isDependee;
 		std::for_each(usedTypes.begin(), usedTypes.end(), [&isDependee, &usedRefTypes, this](std::pair<std::string, bool> it) { buildDependents(it.first, usedRefTypes, isDependee); });
 		isDependee.clear(); //more usedTypes can be added here but it is not a problem as the real reference ones previously search and later filter applied
@@ -2031,101 +2187,7 @@ if (ti.is_udt()) {
 				dfsTypeVisit(it->first, usedTypes, sortedTypes);
 				//dfsVisit(it->first, sortedTypes);
 		}
-		//print_decls(); //could print all suitable for header file
-		for (std::vector<std::string>::iterator it = sortedTypes.begin(); it != sortedTypes.end(); it++) {
-			tinfo_t ti;
-			ti.get_named_type(get_idati(), it->c_str());
-			qstring qt = it->c_str();
-			//ti.get_type_name(&qt);
-			qstring qs;
-			alreadyDefined[*it] = true;
-			if (ti.is_udt()) {
-				std::map<std::string, bool> notDefined;
-				checkForwardDecl(ti, alreadyDefined, notDefined);
-				for (std::map<std::string, bool>::iterator iter = notDefined.begin(); iter != notDefined.end(); iter++) {
-					tinfo_t t;
-					t.get_named_type(get_idati(), iter->first.c_str());
-					//t.print(&qs, NULL, PRTYPE_1LINE | PRTYPE_TYPE);
-					if (usedRefTypes.find(*it) == usedRefTypes.end()) definitions += "//";
-					definitions += std::string(t.is_union() ? "union " : "struct ") + iter->first + ";\n";
-				}
-			} else if (ti.is_func()) { //ti.is_funcptr()
-				//function definitions need the entire definition printed but should be tracked separately
-			}
-			if (ti.is_forward_decl()) {
-				if (usedRefTypes.find(*it) == usedRefTypes.end()) definitions += "//";
-				definitions += std::string(ti.is_decl_union() ? "union " : "struct ") + " " + std::string(qt.c_str()) + ";\n";
-			} else {
-				//ida has a bug where only the first anonymous member of a union is printed anonymously...
-				ti.print(&qs, NULL, (ti.is_udt() ? PRTYPE_MULTI : PRTYPE_1LINE) | PRTYPE_DEF | PRTYPE_TYPE | PRTYPE_RESTORE);
-				if (usedRefTypes.find(*it) == usedRefTypes.end()) definitions += "/*";
-				definitions += std::string((ti.is_udt() ? qs.rtrim('\n') : qs).c_str()) + " " + std::string(qt.c_str()) + ";";
-				if (usedRefTypes.find(*it) == usedRefTypes.end()) definitions += "*/";
-				definitions += "\n";
-			}
-			/*if (ti.is_struct()) {
-			} else if (ti.is_array()) {
-			//} else if (ti.is_enum()) {
-			} else if (ti.is_typeref()) {
-				qstring qs;
-				if (!ti.get_next_type_name(&qs)) {
-					int typ = coreTypeLookup(ti.get_size(), getMetaTypeInfo(ti));
-					qs = typ == -1 ? "undefined" : defaultCoreTypes[typ].name.c_str();
-				}
-				definitions += "typedef " + std::string(qs.c_str()) + " " + std::string(qt.c_str()) + ";\n";
-			}
-			else { //?
-			}*/
-		}
-		if (definitions.size() != 0) definitions += "\n";
-		//these are sorted by library and have a comment to remind that libraries are link time imported
-		for (size_t i = 0; i < modNames.size(); i++) {
-			if (impByMod[i].size() != 0) definitions += "//" + modNames[i] + '\n';
-			for (std::vector<ea_t>::iterator it = impByMod[i].begin(); it != impByMod[i].end(); it++) {
-				tinfo_t tif;
-				qstring qs;
-				if (getFuncByGuess(*it, tif)) print_type(&qs, *it, PRTYPE_1LINE);
-				if (qs.size() == 0) get_long_name(&qs, *it, GN_STRICT);
-				//std::string str = demangle_name(imports[*it].name.c_str(), MNG_LONG_FORM).c_str();
-				if (qs.size() == 0) get_name(&qs, *it);
-				//str = get_name(*it).c_str();				
-				if (qs.find("(", 0) == qstring::npos) qs = qstring("void ") + qs + "(void)";
-				//most of the names are not mangled, and thus do not have the needed C declaration information attached
-				if (usedRefFuncs.find(*it) == usedRefFuncs.end()) definitions += "//";
-				definitions += "extern " + std::string(qs.c_str()) + ";\n";
-			}
-			if (impByMod[i].size() != 0) definitions += '\n';
-		}
-		for (std::map<ea_t, bool>::iterator it = usedFuncs.begin(); it != usedFuncs.end(); it++) {
-			if (imports.find(it->first) != imports.end()) continue;
-			if (usedRefFuncs.find(it->first) == usedRefFuncs.end()) definitions += "//";
-			if (funcProtos.find(it->first) != funcProtos.end()) definitions += funcProtos[it->first];
-			else if (funcProtoInfos.find(it->first) != funcProtoInfos.end()) {
-				//does model go before or after return type - seems to be compiler specific what about C language spec?
-				definitions += printTypeForCode(funcProtoInfos[it->first].retType.pi.ti, "") + (funcProtoInfos[it->first].model != "default" && funcProtoInfos[it->first].model != "unknown" ? " " + funcProtoInfos[it->first].model : "") + " " + funcProtoInfos[it->first].name + "(";
-				bool bFirst = true;
-				for (int i = 0; i < funcProtoInfos[it->first].syminfo.size(); i++) {
-					if (funcProtoInfos[it->first].syminfo[i].argIndex != -1) {
-						if (!bFirst) definitions += ", ";
-						bFirst = false;
-						definitions += printTypeForCode(funcProtoInfos[it->first].syminfo[i].pi.ti, funcProtoInfos[it->first].syminfo[i].pi.name);
-					}
-				}
-				definitions += ")";
-			} else { //only function pointers currently but after fixed this case should never occur
-				tinfo_t tif;
-				qstring qs; //first check decompiler prototypes, then type info, then demangler, then void <name>(void)
-				if (getFuncByGuess(it->first, tif)) print_type(&qs, it->first, PRTYPE_1LINE);
-				if (qs.size() == 0) get_long_name(&qs, it->first, GN_STRICT);
-				//std::string str = demangle_name(get_name(it->first).c_str(), MNG_LONG_FORM).c_str();
-				if (qs.size() == 0) get_name(&qs, it->first);
-				if (qs.find("(", 0) == qstring::npos) qs = qstring("void ") + qs + "(void)";
-				//most of the names are not mangled, and thus do not have the needed C declaration information attached
-				definitions += qs.c_str();
-			}
-			definitions += ";\n";
-		}
-		if (usedFuncs.size() != 0) definitions += "\n";
+
 		//pointer initizations can lead to a dependency ordering here, otherwise address ordering is ideal perhaps
 		//functions can be pointed to as well making their declarations need to go prior to the data
 		std::vector<ea_t> sortedData; //in dependency order
@@ -2143,6 +2205,181 @@ if (ti.is_udt()) {
 			if (dataDependee.find(it->first) != dataDependee.end())
 				dfsVisitData(it->first, dependentData, usedData, sortedData, visited);
 		}
+
+		std::string str = "//Default calling convention set to: " + (di->customCallStyle.empty() ? ccToStr(inf.cc.cm, 0, true) : di->customCallStyle) + "\n\n";
+		definitions += str; //should really use callback interface to get cspec variant
+		forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + str + std::string({ COLOR_OFF, COLOR_AUTOCMT });
+		for (int i = 0; i < numDefCoreTypes; i++) {
+			if (usedRefTypes.find(defaultCoreTypes[i].name) != usedRefTypes.end()) {
+				coreTypeUsed[i] = true;
+				usedRefTypes.erase(defaultCoreTypes[i].name);
+			}
+			if (coreTypeUsed[i] && szCoreTypeDefs[i] != nullptr) {
+				definitions += "typedef " + std::string(szCoreTypeDefs[i]) + " " + defaultCoreTypes[i].name + ";\n";
+				forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + "typedef" + std::string({ COLOR_OFF, COLOR_KEYWORD }) + " " +
+					std::string({ COLOR_ON, COLOR_LOCNAME }) + std::string(szCoreTypeDefs[i]) + std::string({ COLOR_OFF, COLOR_LOCNAME }) +
+					" " +
+					std::string({ COLOR_ON, COLOR_LOCNAME }) + defaultCoreTypes[i].name + std::string({ COLOR_OFF, COLOR_LOCNAME }) +
+					";\n";
+			}
+		}
+		//print_decls(); //could print all suitable for header file
+		for (std::vector<std::string>::iterator it = sortedTypes.begin(); it != sortedTypes.end(); it++) {
+			tinfo_t ti;
+			ti.get_named_type(get_idati(), it->c_str());
+			qstring qt = it->c_str();
+			//ti.get_type_name(&qt);
+			qstring qs;
+			alreadyDefined[*it] = true;
+			if (ti.is_udt()) {
+				std::map<std::string, bool> notDefined;
+				checkForwardDecl(ti, alreadyDefined, notDefined);
+				for (std::map<std::string, bool>::iterator iter = notDefined.begin(); iter != notDefined.end(); iter++) {
+					tinfo_t t;
+					t.get_named_type(get_idati(), iter->first.c_str());
+					//t.print(&qs, NULL, PRTYPE_1LINE | PRTYPE_TYPE);
+					if (usedRefTypes.find(*it) == usedRefTypes.end()) {
+						definitions += "//"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//";
+					}
+					definitions += std::string(t.is_union() ? "union " : "struct ") + iter->first + ";\n";
+					forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + std::string(t.is_union() ? "union" : "struct") + std::string({ COLOR_OFF, COLOR_KEYWORD }) +
+						" " + std::string({ COLOR_ON, COLOR_LOCNAME }) + iter->first + std::string({ COLOR_OFF, COLOR_LOCNAME }) + ";\n";
+					if (usedRefTypes.find(*it) == usedRefTypes.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
+				}
+			} else if (ti.is_func()) { //ti.is_funcptr()
+				//function definitions need the entire definition printed but should be tracked separately
+			}
+			if (ti.is_forward_decl()) {
+				if (usedRefTypes.find(*it) == usedRefTypes.end()) {
+					definitions += "//"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//";
+				}
+				definitions += std::string(ti.is_decl_union() ? "union " : "struct ") + " " + std::string(qt.c_str()) + ";\n";
+				forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + std::string(ti.is_decl_union() ? "union" : "struct") + std::string({ COLOR_OFF, COLOR_KEYWORD }) +
+					" " + std::string({ COLOR_ON, COLOR_LOCNAME }) + std::string(qt.c_str()) + std::string({ COLOR_OFF, COLOR_LOCNAME }) + ";\n";
+				if (usedRefTypes.find(*it) == usedRefTypes.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
+			} else {
+				//ida has a bug where only the first anonymous member of a union is printed anonymously...
+				//ti.print(&qs, nullptr, (ti.is_udt() ? PRTYPE_MULTI : PRTYPE_1LINE) | PRTYPE_DEF | PRTYPE_TYPE | PRTYPE_RESTORE);				
+				if (usedRefTypes.find(*it) == usedRefTypes.end()) {
+					definitions += "/*"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "/*";
+				}
+				//definitions += std::string((ti.is_udt() ? qs.rtrim('\n') : qs).c_str()) + " " + std::string(qt.c_str()) + ";";
+				std::vector<TypeInfo> typeChain = typeDatabase[it->c_str()];
+				if (typeChain.size() == 0 || (typeChain.begin()->typeName == qt.c_str() &&
+					(typeChain.begin()->metaType == "int" || typeChain.begin()->metaType == "uint" || typeChain.begin()->metaType == "void" ||
+					typeChain.begin()->metaType == "bool" || typeChain.begin()->metaType == "float" || typeChain.begin()->metaType == "unknown")) || (ti.is_union() || ti.is_struct()) && !ti.is_typeref()) { //&& has_bitfields
+					//ti.print(&qs, nullptr, PRTYPE_DEF);
+					definitions += "typedef " + printTypeForCode(ti, "", false, COLOR_LOCNAME, typeChain.size() == 0 || typeChain.begin()->typeName == qt.c_str(), 0) + " " + std::string(qt.c_str()) + ";";
+					//str = std::string((ti.is_udt() ? qs.rtrim('\n') : qs).c_str()) + " " + std::string(qt.c_str()) + ";";
+					str = std::string({ COLOR_ON, COLOR_KEYWORD }) + "typedef" + std::string({ COLOR_OFF, COLOR_KEYWORD }) +
+						" " + printTypeForCode(ti, "", true, COLOR_LOCNAME, typeChain.size() == 0 || typeChain.begin()->typeName == qt.c_str(), 0) + " " +
+						std::string({ COLOR_ON, COLOR_LOCNAME }) + std::string(qt.c_str()) + std::string({ COLOR_OFF, COLOR_LOCNAME }) + ";";
+				} else {
+					//if (typeChain.begin()->typeName == qt.c_str()) typeChain.begin()->typeName = "";
+					definitions += "typedef " + printTypeForCode(typeChain, "", false, COLOR_LOCNAME, typeChain.begin()->typeName == qt.c_str(), 0) + " " + std::string(qt.c_str()) + ";";
+					//str = std::string((ti.is_udt() ? qs.rtrim('\n') : qs).c_str()) + " " + std::string(qt.c_str()) + ";";
+					str = std::string({ COLOR_ON, COLOR_KEYWORD }) + "typedef" + std::string({ COLOR_OFF, COLOR_KEYWORD }) +
+						" " + printTypeForCode(typeChain, "", true, COLOR_LOCNAME, typeChain.begin()->typeName == qt.c_str(), 0) + " " +
+						std::string({ COLOR_ON, COLOR_LOCNAME }) + std::string(qt.c_str()) + std::string({ COLOR_OFF, COLOR_LOCNAME }) + ";";
+				}
+				if (usedRefTypes.find(*it) == usedRefTypes.end()) {
+					std::string finalstr;
+					std::for_each(str.begin(), str.end(), [&finalstr](char c) { if (c == '\n') finalstr += std::string({ COLOR_OFF, COLOR_AUTOCMT }) + c + std::string({ COLOR_ON, COLOR_AUTOCMT }); else finalstr += c; });
+					forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + finalstr + std::string({ COLOR_OFF, COLOR_AUTOCMT });
+					definitions += "*/"; forDisplay += "*/" + std::string({ COLOR_OFF, COLOR_AUTOCMT });
+				} else forDisplay += str;
+				definitions += "\n";
+				forDisplay += "\n";
+			}
+			/*if (ti.is_struct()) {
+			} else if (ti.is_array()) {
+			//} else if (ti.is_enum()) {
+			} else if (ti.is_typeref()) {
+				qstring qs;
+				if (!ti.get_next_type_name(&qs)) {
+					int typ = coreTypeLookup(ti.get_size(), getMetaTypeInfo(ti));
+					qs = typ == -1 ? "undefined" : defaultCoreTypes[typ].name.c_str();
+				}
+				definitions += "typedef " + std::string(qs.c_str()) + " " + std::string(qt.c_str()) + ";\n";
+			}
+			else { //?
+			}*/
+		}
+		if (definitions.size() != 0) {
+			definitions += "\n"; forDisplay += "\n";
+		}
+		//these are sorted by library and have a comment to remind that libraries are link time imported
+		for (size_t i = 0; i < modNames.size(); i++) {
+			if (impByMod[i].size() != 0) {
+				definitions += "//" + modNames[i] + '\n';
+				forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//" + modNames[i] + std::string({ COLOR_OFF, COLOR_AUTOCMT }) + '\n';
+			}
+			for (std::vector<ea_t>::iterator it = impByMod[i].begin(); it != impByMod[i].end(); it++) {
+				tinfo_t tif;
+				qstring qs;
+				if (usedRefFuncs.find(*it) == usedRefFuncs.end()) {
+					definitions += "//"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//";
+				}
+				definitions += "extern ";
+				forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + "extern" + std::string({ COLOR_OFF, COLOR_KEYWORD }) + " ";
+				if (getFuncByGuess(*it, tif) && funcProtoInfos.find(*it) != funcProtoInfos.end()) {
+					//print_type(&qs, *it, PRTYPE_1LINE);
+					//func_type_data_t ftd;
+					//tif.get_func_details(&ftd);
+					definitions += print_func(*it, forDisplay, COLOR_IMPNAME);
+				} else {
+					qs = imports[*it].name.c_str();
+					if (qs.size() == 0) get_long_name(&qs, *it, GN_STRICT);
+					//std::string str = demangle_name(imports[*it].name.c_str(), MNG_LONG_FORM).c_str();
+					if (qs.size() == 0) get_name(&qs, *it);
+					//str = get_name(*it).c_str();				
+					if (qs.find("(", 0) == qstring::npos) {
+						definitions += "void" " " + std::string(qs.c_str()) + "(" "void" ")";
+						forDisplay += std::string({ COLOR_ON, COLOR_LOCNAME }) + "void" + std::string({ COLOR_OFF, COLOR_LOCNAME }) + " " + 
+							std::string({ COLOR_ON, COLOR_IMPNAME }) + std::string(qs.c_str()) + std::string({ COLOR_OFF, COLOR_IMPNAME }) + "(" + std::string({ COLOR_ON, COLOR_LOCNAME }) + "void" + std::string({ COLOR_OFF, COLOR_LOCNAME }) + ")";
+					} else {
+						definitions += qs.c_str();
+						forDisplay += std::string({ COLOR_ON, COLOR_IMPNAME }) + qs.c_str() + std::string({ COLOR_OFF, COLOR_IMPNAME });
+					}
+					//most of the names are not mangled, and thus do not have the needed C declaration information attached
+				}
+				definitions += ";\n";
+				forDisplay += ";\n";
+				if (usedRefFuncs.find(*it) == usedRefFuncs.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
+			}
+			if (impByMod[i].size() != 0) {
+				definitions += '\n'; forDisplay += '\n';
+			}
+		}
+		for (std::map<ea_t, bool>::iterator it = usedFuncs.begin(); it != usedFuncs.end(); it++) {
+			if (imports.find(it->first) != imports.end()) continue;
+			if (usedRefFuncs.find(it->first) == usedRefFuncs.end()) {
+				definitions += "//"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//";
+			}
+			if (funcProtos.find(it->first) != funcProtos.end()) {
+				definitions += funcProtos[it->first];
+				forDisplay += funcColorProtos[it->first];
+			} else if (funcProtoInfos.find(it->first) != funcProtoInfos.end()) {
+				definitions += print_func(it->first, forDisplay, COLOR_DEFAULT);
+			} else { //only function pointers currently but after fixed this case should never occur
+				tinfo_t tif;
+				qstring qs; //first check decompiler prototypes, then type info, then demangler, then void <name>(void)
+				if (getFuncByGuess(it->first, tif)) print_type(&qs, it->first, PRTYPE_1LINE);
+				if (qs.size() == 0) get_long_name(&qs, it->first, GN_STRICT);
+				//std::string str = demangle_name(get_name(it->first).c_str(), MNG_LONG_FORM).c_str();
+				if (qs.size() == 0) get_name(&qs, it->first);
+				if (qs.find("(", 0) == qstring::npos) qs = qstring("void ") + qs + "(void)";
+				//most of the names are not mangled, and thus do not have the needed C declaration information attached
+				definitions += qs.c_str();
+				forDisplay += std::string({ COLOR_ON, COLOR_DEFAULT }) + qs.c_str() + std::string({ COLOR_OFF, COLOR_DEFAULT });
+			}
+			definitions += ";\n";
+			forDisplay += ";\n";
+			if (usedRefFuncs.find(it->first) == usedRefFuncs.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
+		}
+		if (usedFuncs.size() != 0) {
+			definitions += "\n"; forDisplay += "\n";
+		}
 		for (std::vector<ea_t>::iterator it = sortedData.begin(); it != sortedData.end(); it++) {
 			tinfo_t ti;
 			//segment_t* seg = getseg(*it);
@@ -2154,16 +2391,19 @@ if (ti.is_udt()) {
 			std::map<ea_t, bool> notDefined;
 			checkFwdData(*it, dependentData, alreadyDefData, notDefined);
 			for (std::map<ea_t, bool>::iterator iter = notDefined.begin(); iter != notDefined.end(); iter++) {
-				if (usedRefData.find(*it) == usedRefData.end()) definitions += "//";
-				definitions += "extern " + printTypeForCode(usedData[iter->first], std::string(get_name(iter->first).c_str())) + ";\n";
+				if (usedRefData.find(*it) == usedRefData.end()) {
+					definitions += "//"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//";
+				}
+				definitions += "extern " + printTypeForCode(usedData[iter->first], std::string(get_name(iter->first).c_str()), false, COLOR_DEFAULT, false, 0) + ";\n";
+				forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + "extern" + std::string({ COLOR_OFF, COLOR_KEYWORD }) + " " + printTypeForCode(usedData[iter->first], std::string(get_name(iter->first).c_str()), true, COLOR_DEFAULT, false, 0) + ";\n";
+				if (usedRefData.find(*it) == usedRefData.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
 			}
-			if (usedRefData.find(*it) == usedRefData.end()) definitions += "//";
-			qs = get_name(*it);
-			if (qs.size() == 0) {
-				std::string str = to_string(*it, std::hex);
-				qs = ("ram0x" + std::string(8 - str.size(), '0') + str).c_str();
+			if (usedRefData.find(*it) == usedRefData.end()) {
+				definitions += "//"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//";
 			}
-			definitions += printTypeForCode(usedData[*it], qs.c_str());
+			str = getSymbolName(*it);
+			definitions += printTypeForCode(usedData[*it], str.c_str(), false, COLOR_DEFAULT, false, 0);
+			forDisplay += printTypeForCode(usedData[*it], str.c_str(), true, COLOR_DEFAULT, false, 0);
 			//if (get_tinfo(&ti, *it)) {
 				/*qstring qt;
 				ti.get_type_name(&qt);
@@ -2246,18 +2486,26 @@ if (ti.is_udt()) {
 						}
 					}*/
 					//}
-			if (bInitData) definitions += " = " + initForType(usedData[*it], *it);
+			if (bInitData) {
+				definitions += " = " + initForType(usedData[*it], *it, false);
+				forDisplay += " = " + initForType(usedData[*it], *it, true);
+			}
 			definitions += ";\n";
+			forDisplay += ";\n";
+			if (usedRefData.find(*it) == usedRefData.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
 		}
-		if (usedData.size() != 0) definitions += "\n";
+		if (usedData.size() != 0) {
+			definitions += "\n";
+			forDisplay += "\n";
+		}
 
 		//definitions += '\n';
 		return definitions;
 	}
-	void IdaCallback::analysisDump(std::string& definitions, std::string& idaInfo)
+	void IdaCallback::analysisDump(std::string& definitions, std::string& forDisplay, std::string& idaInfo)
 	{
-		executeOnMainThread([this, &definitions, &idaInfo]() {
-			definitions = getHeaderDefFromAnalysis(di->decompiledFunction == nullptr);
+		executeOnMainThread([this, &definitions, &forDisplay, &idaInfo]() {
+			definitions = getHeaderDefFromAnalysis(di->decompiledFunction == nullptr, forDisplay);
 			idaInfo = dumpIdaInfo();
 			});
 	}
@@ -2325,6 +2573,7 @@ if (ti.is_udt()) {
 		definedFuncs.clear();
 		usedFuncs.clear();
 		funcProtos.clear();
+		funcColorProtos.clear();
 		funcProtoInfos.clear();
 		finalData.clear();
 		finalTypes.clear();
@@ -2338,11 +2587,11 @@ if (ti.is_udt()) {
 		imp.pImports = &imports;
 		//validate_idb_names2(true);
 		for (size_t i = 0; i < num; i++) {
-			get_import_module_name(&qs, i);
+			get_import_module_name(&qs, (int)i);
 			modNames.push_back(qs.c_str());
-			imp.cur = i;
+			imp.cur = (int)i;
 			//causing Ida Pro to error with internal error 835, 836 - because not in main thread
-			enum_import_names(i, &EnumImportNames, &imp);
+			enum_import_names((int)i, &EnumImportNames, &imp);
 		}
 		for (std::map<ea_t, ImportInfo>::iterator it = imports.begin(); it != imports.end(); it++) {
 			importNames[it->second.name] = true;
@@ -2395,9 +2644,9 @@ if (ti.is_udt()) {
 			for (int i = 0; i <= ph.reg_last_sreg - ph.reg_first_sreg; i++) {
 				//this is a much more powerful analysis by the processor engine than the default segregs which now are not used
 				sregRanges.push_back(std::vector<sreg_range_t>());
-				for (int k = 0; k < get_sreg_ranges_qty(i + ph.reg_first_sreg); k++) {
+				for (size_t k = 0; k < get_sreg_ranges_qty(i + ph.reg_first_sreg); k++) {
 					sreg_range_t out;
-					getn_sreg_range(&out, i + ph.reg_first_sreg, k);
+					getn_sreg_range(&out, i + ph.reg_first_sreg, (int)k);
 					sregRanges[i].push_back(out);
 				}
 			}
@@ -2436,13 +2685,14 @@ if (ti.is_udt()) {
 	}
 	std::string IdaCallback::tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err)
 	{
-		std::string code, funcProto;
+		std::string code, funcProto, funcColorProto;
 		definedFuncs[ea] = true;
 		try {
 			if (di->decompPid == 0) decInt->registerProgram();
-			code = decInt->doDecompile(dec, "ram", ea, display, funcProto);
+			code = decInt->doDecompile(dec, AddrInfo{ "ram", ea }, display, funcProto, funcColorProto);
 			if (funcProto.size() != 0) {
 				funcProtos[ea] = funcProto;
+				funcColorProtos[ea] = funcColorProto;
 			} else {
 				err = code.substr(3).c_str();
 				code += "//Decompiling function: " + funcName + " @ 0x" + to_string(ea, std::hex) + "\n";
@@ -2520,7 +2770,7 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 	opt.decompileDoublePrecis = (di->alysChecks & 16) != 0;
 	opt.conditionalexe = (di->alysChecks & 32) != 0;
 	opt.inPlaceOps = (di->alysChecks & 64) != 0;
-	opt.commentIndent = di->cmtLevel;
+	opt.commentIndent = (int)di->cmtLevel;
 	opt.noCastPrinting = (di->dispChecks & 1) != 0;
 	opt.commentUser1 = (di->dispChecks & 2) != 0; //EOL
 	opt.commentHeader = (di->dispChecks & 4) != 0;
@@ -2533,11 +2783,11 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 	opt.conventionPrinting = (di->dispChecks & 1024) != 0;
 	opt.commentStyle = (di->comStyle ? "cplusplus" : "c");
 	opt.integerFormat = (di->intFormat ? (di->intFormat == 2 ? "best" : "dec") : "hex");
-	opt.maxLineWidth = di->maxChars;
-	opt.indentIncrement = di->numChars;
+	opt.maxLineWidth = (int)di->maxChars;
+	opt.indentIncrement = (int)di->numChars;
 	std::vector<CoreType> cts(&defaultCoreTypes[0], &defaultCoreTypes[numDefCoreTypes]);
 	try {
-		di->idacb->decInt->setup(di->idacb, di->idacb->sleighfilename, di->idacb->pspec, di->idacb->cspec, cts, opt, di->timeout, di->maxPayload);
+		di->idacb->decInt->setup(di->idacb, di->idacb->sleighfilename, di->idacb->pspec, di->idacb->cspec, cts, opt, (int)di->timeout, (int)di->maxPayload);
 	} catch (DecompError& err) {
 		WARNING_GUI("Decompilation FAILED: " << err.explain << ".\n");
 		di->decompSuccess = false;
@@ -2580,10 +2830,13 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 		return;
 	}
 
-	std::string definitions, idaInfo;
-	di->idacb->analysisDump(definitions, idaInfo);
+	std::string definitions, defdisplay, idaInfo;
+	di->idacb->analysisDump(definitions, defdisplay, idaInfo);
 	code = definitions + code + "\n/*\n" + idaInfo + "\n*/\n";
-	display = definitions + display + "\n/*\n" + idaInfo + "\n*/\n";
+	std::string str;
+	idaInfo = "/*\n" + idaInfo + "\n*/";
+	std::for_each(idaInfo.begin(), idaInfo.end(), [&str](char c) { if (c == '\n') str += std::string({ COLOR_OFF, COLOR_AUTOCMT }) + c + std::string({ COLOR_ON, COLOR_AUTOCMT }); else str += c; });
+	display = defdisplay + display + "\n" + std::string({ COLOR_ON, COLOR_AUTOCMT }) + str + std::string({ COLOR_OFF, COLOR_AUTOCMT }) + "\n";
 
 	//should save to a .c file?
 	//INFO_MSG("Decompiled file: " << decName << "\n");
@@ -2907,4 +3160,142 @@ Code:
 int idx = -1;
 qhandle_t handles[2] = { finishSem, termSem };
 while (qwait_for_handles(&idx, handles, 2, 0, -1), idx == -1) {}
+*/
+
+
+
+
+/*
+Advanced IdaPython to change details UI cannot change
+
+----------------------------------------
+Advanced IDAPython coding tutorial
+----------------------------------------
+
+For example, in 16-bit code, there is far-code near-data and the other 3 combinations for farness and nearness. Sometimes IDA gets it wrong with FLIRT and chooses the wrong model messing up stack parameter alignments and so forth. But you cannot change the function type as it already has pointers in it e.g.: void *__cdecl memset(void *, int, size_t);
+
+The Options -> Compilers is the only place where this model can be specified but its a global setting despite that every function prototype has some setting for this.
+
+So you want 2 byte pointers not 4 byte pointers for this particular function since it uses near-data far-code model. But the default for the file is far-data far-code. If the function has an unknown calling convention it will also use this default.
+
+So how can you fix it without ruining the pointer type of the return and first arguments?
+
+Code:
+ea = idaapi.get_name_ea(idaapi.BADADDR, "_memset") "_fflush" "_rename" "_strcat" "_strlen"
+tinfo = idaapi.tinfo_t()
+idaapi.get_tinfo2(ea, tinfo)
+fi = idaapi.func_type_data_t()
+tinfo.get_func_details(fi)
+fi.cc
+fi.cc will return a value such as 50 (48+2) and the docs will help on the calling convention masks and values:
+Code:
+const cm_t  CM_N16_F32   = 0x02;  ///< 2: near 2bytes, far 4bytes
+
+const cm_t CM_M_MASK = 0x0C;
+const cm_t  CM_M_NN      = 0x00;  ///< small:   code=near, data=near (or unknown if CM_UNKNOWN)
+const cm_t  CM_M_FF      = 0x04;  ///< large:   code=far, data=far
+const cm_t  CM_M_NF      = 0x08;  ///< compact: code=near, data=far
+const cm_t  CM_M_FN      = 0x0C;  ///< medium:  code=far, data=near
+
+const cm_t  CM_CC_UNKNOWN  = 0x10;  ///< unknown calling convention
+const cm_t  CM_CC_CDECL    = 0x30;  ///< stack
+So it is marked as near 16/far 32 pointers and CDECL both of which are correct.
+
+Code:
+fi.cc = (fi.cc & ~idaapi.CM_M_MASK) | idaapi.CM_M_FN
+tinfo.create_func(fi)
+ida_typeinf.apply_tinfo(ea, tinfo, idaapi.TINFO_DEFINITE)
+This works in IDA (creating a new tinfo would crash it because data would be missing). If you use apply_tinfo without creating a newtinfo it does nothing as the fi needs to be rebound to a tinfo to work. If you do not change fi.cc to far code near data, it also works. So the code is correct, can query the type again and it is changed.
+
+Now unfortunately that did not fix the stack of the function nor the callers.
+
+This gets a bit trickier. Intuitively one would think that just using `ida_funcs.reanalyze_function(idaapi.get_func(ea))` would fix the function up immediately. But it does not work and the answer is deeper in IDAs functioning. The tool to create frames lies in the processor module which is not properly exposed to IDAPython. So some manual C tricks will be needed: first get the DLL name, then get the 'ph' processor_t structure (unfortunately the undocumented ida_idp.ph is not helpful here). Of course inspection is always a best first start such as:
+Code:
+dir(ida_idp)
+import inspect
+inspect.getmembers(ida_idp)
+ida_idp.ph
+Anyway, this done manually requires careful adjustment to pad out the not needed fields before the notify callback. IDA 7.x changes things quite a bit not just with 64 bit calling convention but additional members and the pointer size change. Some commented code is left in for those brave enough to try a solution for Linux where theoretically the variadic argument list is a data structure supporting register arguments and quite a bit more complicated. For whatever strange reason, Windows is not following the recommended ABI with va_list but the old model pre-amd64 model where its a mere pointer to the arguments, conveniently making things easier.
+
+Code:
+import ctypes
+def get_dll():
+	# http://www.hexblog.com/?p=695
+	idaname = "ida64" if idc.__EA64__ else "ida"
+	if sys.platform == "win32":
+		return ctypes.windll[idaname + (".dll" if idaapi.IDA_SDK_VERSION >= 700 else ".wll")]
+	elif sys.platform == "linux2":
+		return ctypes.cdll["lib" + idaname + ".so"]
+	elif sys.platform == "darwin":
+		return ctypes.cdll["lib" + idaname + ".dylib"]
+def get_ph(notif):
+#int32 version, id, uint32 flag;
+#uint32 flag2; # >= 7.0
+#int32 cnbits, dnbits;
+#const char *const *psnames, *plnames, const asm_t *const *assemblers; # ptr >= 7.0 is 64-bit
+#hook_cb_t *_notify; # >= 7.0 otherwise its just notify(int, ...) instead of (void*, int, va_list/...)
+#va_list is just a pointer argument to the variadic list which at invocation time would be difficult to achieve by pushing the next stack address onto the stack as such low level operation probably is not in ctypes
+	class processor_t(ctypes.Structure):
+		_fields_ = [ ('padding', ctypes.c_int * (8 + 4 if idaapi.IDA_SDK_VERSION >= 700 else 0)),
+					 ('notify', notif), ]
+	# The exported 'ph' global is the processor_t of the current proc module
+	return processor_t.in_dll(get_dll(), 'ph')
+
+def ph_notify(msgid, *args):
+  if idaapi.IDA_SDK_VERSION >= 700:
+	class VA_LIST(ctypes.Structure):
+	  _fields_ = [("arg_" + str(i), args[i].__class__) for i in range(len(args))]
+	va_list = VA_LIST(*args)
+	return get_ph(ctypes.WINFUNCTYPE(ctypes.c_size_t, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p)).notify(None, msgid, ctypes.pointer(va_list))
+  else:
+	return get_ph(ctypes.WINFUNCTYPE(ctypes.c_size_t, ctypes.c_int, [i.__class__ for i in args])).notify(msgid, *args)
+
+#idaman ssize_t ida_export invoke_callbacks(hook_type_t hook_type, int notification_code, va_list va);
+def invoke_callbacks(msgid, *args):
+  HT_IDP = 0 #Hook to the processor module.
+#AMD64 ABI va_list: unsigned int gp_offset (max 48=6*8), fp_offset (max 304=6*8+16*16), void* overflow_arg_area, reg_save_area
+  #class VA_LIST(ctypes.Structure):
+  #    _fields_ = [("gp_offset", ctypes.c_uint), ("fp_offset", ctypes.c_uint),
+  #      ("overflow_arg_area", ctypes.c_void_p), ("reg_save_area", ctypes.c_void_p)]
+  class VA_OF_LIST(ctypes.Structure):
+	  _fields_ = [("arg_" + str(i), args[i].__class__) for i in range(len(args))]
+  va_of_list = VA_OF_LIST(*args)
+  #va_list = VA_LIST(0, 6*8, ctypes.cast(ctypes.pointer(va_of_list), ctypes.c_void_p), ctypes.cast(ctypes.pointer(va_of_list), ctypes.c_void_p))
+  return get_dll().invoke_callbacks(HT_IDP, msgid, ctypes.pointer(va_of_list))
+Finally the reward for that mess is that any processor calls are now possible if done carefully:
+Code:
+#event_t enum
+ev_verify_sp = 58
+ev_create_func_frame = 60
+ev_analyze_prolog = 81
+ev_max_ptr_size = 2002
+ev_calc_cdecl_purged_bytes = 2008
+
+#ssize_t notify(event_t event_code, ...)
+f = idaapi.get_func(ea)
+invoke_callbacks(ev_verify_sp, ctypes.c_void_p(int(f.this)))
+ph_notify(ev_analyze_prolog, ctypes.c_size_t(ea))
+ph_notify(ev_calc_cdecl_purged_bytes, ctypes.c_size_t(ea))
+invoke_callbacks(ev_max_ptr_size)
+Note that IDA 7.0 has and should use invoke_callbacks as all the wrapper functions do so and not to use ph_notify directly - though there is no reason why it is not possible to do so as it is still exposed especially for processor module development where a custom user defined value is needed. So either one will work.
+
+Finally the reward of all the hard work:
+Code:
+ida_frame.del_frame(f)
+ph_notify(ev_create_func_frame, ctypes.c_void_p(int(f.this)))
+The 'int(f.this)' is a tricky point to as it actually yields the true func_t* structure address which is the only one which will work. id(f.this), id(f) are both wrong and yielding the Python pointer value. The string message even misleadingly gives the wrong address. IDA has used the SWIG interface to wrap the objects and the C code here is implemented using the ctypes library. But as an RE the details of the exact mechanisms should be understood or decipherable by compiling small samples and studying disassemblies or even live debugging IDA64.dll.
+
+Now to get this to take place in the callers of the function still the type has stale stack offsets (its separate from the frame):
+Code:
+ida_typeinf.guess_tinfo(tinfo, ea)
+fi.cc = (fi.cc & ~idaapi.CM_M_MASK) | idaapi.CM_M_FN
+tinfo.create_func(fi)
+ida_typeinf.apply_tinfo(ea, tinfo, idaapi.TINFO_DEFINITE)
+
+Manually one could enumerate code x-refs to the function and use ida_typeinf.apply_callee_tinfo(callee_ea, tinfo).
+
+Also an alternative to the processor module may be to use ida_typeinf.delete_wrong_frame_info(f, reanalyze_callback) but it requires a callback which takes instructions as an argument.  Its not really intended for a complete refresh.
+
+Anyway, the wrong far data pointer identification was fixed and I have not found any simpler or more straight forward way to do so. Regardless, the techniques and ideas here could be useful beyond such legacy cases. Happy reversing.
+
 */

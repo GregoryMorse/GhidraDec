@@ -108,10 +108,10 @@ bool readConfigFile(RdGlobalInfo& rdgi)
 	}
 
 	rdgi.ghidraPath = root.get(JSON_ghidraPath, "").asString();
-	rdgi.cacheSize = root.get(JSON_cacheSize, 10).asUInt64();
-	rdgi.maxPayload = root.get(JSON_maxPayload, 50).asUInt64();
-	rdgi.timeout = root.get(JSON_timeout, 30).asUInt64();
-	rdgi.cmtLevel = root.get(JSON_cmtLevel, 20).asUInt64();
+	rdgi.cacheSize = (sval_t)root.get(JSON_cacheSize, 10).asUInt64();
+	rdgi.maxPayload = (sval_t)root.get(JSON_maxPayload, 50).asUInt64();
+	rdgi.timeout = (sval_t)root.get(JSON_timeout, 30).asUInt64();
+	rdgi.cmtLevel = (sval_t)root.get(JSON_cmtLevel, 20).asUInt64();
 	rdgi.alysChecks = root.get(JSON_alysChecks, 1 | 4 | 8 | 16 | 32).asUInt();
 	rdgi.dispChecks = root.get(JSON_dispChecks, 4 | 8 | 128 | 256 | 1024).asUInt();
 	rdgi.maxChars = root.get(JSON_maxChars, 100).asUInt();
@@ -345,8 +345,8 @@ bool askUserToConfigurePlugin(RdGlobalInfo& rdgi)
 		else protoeval = ccToStr(inf.cc.cm, 0, true);
 		vec.insert(vec.begin(), "default");
 		vec.insert(vec.begin(), "unknown");
-		for (int i = 0; i < vec.size(); i++) {
-			if (strcmp(protoeval.c_str(), vec[i].c_str()) == 0) curProto = i;
+		for (size_t i = 0; i < vec.size(); i++) {
+			if (strcmp(protoeval.c_str(), vec[i].c_str()) == 0) curProto = (int)i;
 			protoTypes.push_back(vec[i].c_str());
 		}
 		if (curProto == -1) curProto = 0;
@@ -360,12 +360,13 @@ bool askUserToConfigurePlugin(RdGlobalInfo& rdgi)
 			&protoTypes, &curProto
 		);
 		if (ok == ASKBTN_YES) {
-			cspec = cCspecPath;
-			if (cspec != rdgi.customCspec) {
-				warning("Since you changed the compiler specification file, please confirm the prototype in use");
+			if (cspec != cCspecPath) {
+				cspec = cCspecPath;
+				warning("Since the compiler specification file was changed, please confirm the prototype in use");
+				continue;
 			}
 		}
-	} while (ok == ASKBTN_YES && cspec != rdgi.customCspec);
+	} while (false);
 	if (ok != ASKBTN_YES)
 	{
 		// ESC or CANCEL

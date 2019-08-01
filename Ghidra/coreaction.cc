@@ -846,6 +846,13 @@ SymbolEntry *ActionConstantPtr::isPointer(AddrSpace *spc,Varnode *vn,PcodeOp *op
     case CPUI_RETURN:
     case CPUI_CALL:
     case CPUI_CALLIND:
+	  if (op->code() != CPUI_RETURN && op->getIn(0)->getAddr().getSpace()->getType() == IPTR_FSPEC) {
+		FuncCallSpecs* otherfc = FuncCallSpecs::getFspecFromConst(op->getIn(0)->getAddr());
+		if (otherfc != (FuncCallSpecs*)0 && otherfc->numParams() > op->getSlot(vn) - 1) {
+			ProtoParameter* pp = otherfc->getParam(op->getSlot(vn) - 1);
+			if (pp->getType()->getMetatype() != TYPE_PTR && pp->isTypeLocked()) return (SymbolEntry*)0;
+		}
+	  }
       // A constant parameter or return value could be a pointer
       if (!glb->infer_pointers)
 	return (SymbolEntry *)0;
@@ -862,10 +869,9 @@ SymbolEntry *ActionConstantPtr::isPointer(AddrSpace *spc,Varnode *vn,PcodeOp *op
     case CPUI_INT_ADD:
       outvn = op->getOut();
       if (outvn->getType()->getMetatype()==TYPE_PTR) {
-		BlockBasic* curblock = op->getParent();
-		list<PcodeOp*>::iterator iter = op->getBasicIter();
-		if (++iter != curblock->endOp() && //if part of a segment op cannot process here!
-		  (*iter)->code() == CPUI_SEGMENTOP) return (SymbolEntry*)0;
+		PcodeOp* outop = outvn->loneDescend();
+		if (outop != (PcodeOp*)0 && //if part of a segment op cannot process here!
+		  outop->code() == CPUI_SEGMENTOP) return (SymbolEntry*)0;
 	int4 slot = op->getSlot(vn);
 	// Is there another pointer base in this expression
 	if (op->getIn(1-slot)->getType()->getMetatype()==TYPE_PTR)
@@ -950,8 +956,7 @@ int4 ActionConstantPtr::apply(Funcdata &data)
     entry = isPointer(rspc,vn,op,rampoint,data);
     vn->setPtrCheck();		// Set check flag AFTER searching for symbol
     if (entry != (SymbolEntry *)0) {
-		data.spacebaseConstant(op, slot, entry, rampoint, rampoint.getOffset(), rampoint.getAddrSize());
-		//data.spacebaseConstant(op, slot, entry, rampoint, vn->getOffset(), vn->getSize());
+		data.spacebaseConstant(op, slot, entry, rampoint, rampoint.getOffset(), vn->getSize());
       if ((opc == CPUI_INT_ADD)&&(slot==1))
 	data.opSwapInput(op,0,1);
       count += 1;
@@ -1393,7 +1398,7 @@ int4 ActionParamDouble::apply(Funcdata &data)
     int4 numparams = fp.numParams();
     for(int4 i=0;i<numparams;++i) {
       ProtoParameter *param = fp.getParam(i);
-      Datatype *tp = param->getType();
+	  Datatype *tp = param->getType();
       type_metatype mt = tp->getMetatype();
       if ((mt==TYPE_ARRAY)||(mt==TYPE_STRUCT)) continue; // Not double precision objects
       Varnode *vn = data.findVarnodeInput(tp->getSize(),param->getAddress());

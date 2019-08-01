@@ -78,16 +78,22 @@ struct Options
 	std::string setLanguage; //"c-language" - also has "java-language"
 	std::string protoEval; //calling convention
 };
-
-struct InitStateItem
+struct AddrInfo
 {
-	std::string space1;
-	unsigned long long offset1;
-	std::string space2;
-	unsigned long long offset2;
 	std::string space;
 	unsigned long long offset;
-	unsigned long size;
+};
+struct SizedAddrInfo
+{
+	AddrInfo addr;
+	unsigned long long size;
+	//std::string regName;
+};
+struct InitStateItem
+{
+	AddrInfo addr1;
+	AddrInfo addr2;
+	SizedAddrInfo addr;
 	unsigned long long val;
 };
 
@@ -124,12 +130,6 @@ struct RangeInfo
 };
 
 struct TypeInfo;
-struct JoinEntryInfo
-{
-	std::string space;
-	unsigned long long offset;
-	unsigned long long size;
-};
 
 //name and argIndex not used for function return values
 struct ParamInfo
@@ -140,12 +140,10 @@ struct ParamInfo
 struct SymInfo
 {
 	ParamInfo pi;
-	std::string space; //"ram", "stack", "join" but then need offsets for something like piece1="register:0x8:4" piece2="register:0x0:4"
-	unsigned long long offset;
-	unsigned long long size;
+	SizedAddrInfo addr; //"ram", "stack", "join" but then need offsets for something like piece1="register:0x8:4" piece2="register:0x0:4"
 	int argIndex; //-1 if local variable
 	RangeInfo range; //for register space only with locals (for arguments, will automatically specify one less than the start address of the function)
-	std::vector<JoinEntryInfo> joins; //for join space only
+	std::vector<SizedAddrInfo> joins; //for join space only
 };
 struct FuncProtoInfo
 {
@@ -160,6 +158,7 @@ struct FuncProtoInfo
 	bool isDestruct;
 	SymInfo retType;
 	std::vector<SymInfo> syminfo;
+	std::vector<SizedAddrInfo> killedByCall;
 };
 struct StructMemberInfo;
 struct ParamInfo;
@@ -188,8 +187,7 @@ struct StructMemberInfo
 };
 struct CommentInfo
 {
-	std::string space;
-	unsigned long long offset;
+	AddrInfo addr;
 	std::string type;
 	std::string text;
 };
@@ -243,10 +241,10 @@ struct CPoolRecord
 class DecompileCallback
 {
 public:
-	virtual int getBytes(unsigned char* ptr, int size, std::string base, unsigned long long offset) = 0;
+	virtual int getBytes(unsigned char* ptr, int size, AddrInfo addr) = 0;
 
-	virtual void getMappedSymbol(std::string base, unsigned long long offset, MappedSymbolInfo& msi) = 0;
-	virtual void getExternInfo(std::string base, unsigned long long offset, std::string& callName, std::string& modName, FuncProtoInfo& func) = 0;
+	virtual void getMappedSymbol(AddrInfo addr, MappedSymbolInfo& msi) = 0;
+	virtual void getExternInfo(AddrInfo addr, std::string& callName, std::string& modName, FuncProtoInfo& func) = 0;
 
 	//type functions only needed if returned from the symbol queries
 	//metatypes are ptr, array and struct beyond the core ones: void, int, uint, bool, code, float, unknown
@@ -255,10 +253,10 @@ public:
 	//4 P-code injection callbacks, along with C Pool Ref callbacks are not yet implemented
 	
 	//valid types are "user1", "user2", "user3", "header", "warning", "warningheader"
-	virtual void getComments(std::string base, unsigned long long offset, std::vector<CommentInfo> & comments) = 0;
-	virtual std::string getSymbol(std::string base, unsigned long long offset) = 0;
+	virtual void getComments(AddrInfo addr, std::vector<CommentInfo> & comments) = 0;
+	virtual std::string getSymbol(AddrInfo addr) = 0;
 
-	virtual std::string getPcodeInject(int type, std::string name, std::string base, unsigned long long offset, std::string fixupbase, unsigned long long fixupoffset) = 0;
+	virtual std::string getPcodeInject(int type, std::string name, AddrInfo addr, std::string fixupbase, unsigned long long fixupoffset) = 0;
 	virtual void getCPoolRef(const std::vector<unsigned long long>& refs, CPoolRecord& rec) = 0;
 
 	//colors are Clang-based: "keyword", "comment", "type", "funcname", "var", "const", "param" and "global"
@@ -300,7 +298,7 @@ class DecompInterface
 	//std::string procSpaces;
 	//uint8 uniqBase;
 	//bool bigEndian;
-	unsigned long long startOffs;
+	AddrInfo startOffs;
 	CallbackLoadImage* loader = nullptr;
 	ContextInternal* context = nullptr;
 	Sleigh* trans = nullptr;
@@ -334,12 +332,13 @@ class DecompInterface
 		int timeoutSecs);
 	std::vector<uchar> sendCommand2Params(std::string command, std::string param1, std::string param2);
 	std::vector<uchar> sendCommand1Param(std::string command, std::string param1);
-	std::string convertSourceDoc(Element* el, std::string& displayXml, std::string& funcProto);
+	std::string convertSourceDoc(Element* el, std::string& displayXml,
+		std::string& funcProto, std::string& funcColorProto);
 	std::string getOptions(Options opt);
 	void adjustUniqueBase(VarnodeTpl* v);
 	std::string buildTypeXml(std::vector<TypeInfo>& typeInfo);
 	std::string writeFuncProto(FuncProtoInfo func, std::string injectstr, bool bUseInternalList);
-	std::string writeFunc(std::string space, unsigned long long offset, unsigned long long size, std::string funcname, std::string parentname, FuncProtoInfo func);
+	std::string writeFunc(SizedAddrInfo addr, std::string funcname, std::string parentname, FuncProtoInfo func);
 protected:
 	void setupTranslator(DecompileCallback* cb, std::string sleighfilename);
 	XmlPcodeEmit* getPcodeSnippet(std::string parsestring,
@@ -356,13 +355,15 @@ public:
 
 	~DecompInterface();
 	static int coreTypeLookup(size_t size, std::string metatype);
-	static void getLangFiles(std::string processorpath, std::string externaltool, std::map<std::string, std::vector<int>> & toolMap, std::vector<LangInfo>& li);
+	static void getLangFiles(std::string processorpath, std::string externaltool,
+		std::map<std::string, std::vector<int>> & toolMap, std::vector<LangInfo>& li);
 	static void getProtoEvals(std::string cspec, std::vector<std::string>& vec, int* defaultIdx);
 	static std::string compilePcodeSnippet(std::string sleighfilename, std::string parsestring,
 		const std::vector<std::pair<std::string, int>>& inputs,
 		const std::vector<std::pair<std::string, int>>& outputs);
 
-	void setup(DecompileCallback* cb, std::string sleighfilename, std::string pspecfilename, std::string cspecfilename, std::vector<CoreType>& coreTypes, Options opt, int timeout, int maxpload);
+	void setup(DecompileCallback* cb, std::string sleighfilename, std::string pspecfilename,
+		std::string cspecfilename, std::vector<CoreType>& coreTypes, Options opt, int timeout, int maxpload);
 	//coreTypes IDs will be automatically properly generated upon return
 	void setMaxResultSize(int maxResultSizeMBytes);
 	void setShowNamespace(bool showNamespace);
@@ -374,7 +375,8 @@ public:
 	bool setOptions(Options opt);
 
 	//only after setup, and if decompilation process running and registered
-	std::string doDecompile(DecMode dm, std::string base, unsigned long long DecompAddress, std::string& displayXml, std::string& funcProto);
+	std::string doDecompile(DecMode dm, AddrInfo addr, std::string& displayXml,
+		std::string& funcProto, std::string& funcColorProto);
 	void registerProgram();
 	int deregisterProgram();
 	int regNameToIndex(std::string regName);

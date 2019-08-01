@@ -159,14 +159,14 @@
     <ClInclude Include="jsoncpp\src\lib_json\json_tool.h">
       <Filter>Header Files\JsonCpp</Filter>
     </ClInclude>
-    <ClInclude Include="decompile\sleighinterface.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="address.hh">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="decompile\pcodeparse.tab.h">
       <Filter>Header Files\Sleigh</Filter>
+    </ClInclude>
+    <ClInclude Include="sleighinterface.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

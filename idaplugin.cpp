@@ -451,9 +451,9 @@ bool canDecompileInput()
 	decompInfo->toolMap.clear();
 	DecompInterface::getLangFiles(decompInfo->ghidraPath + "/Ghidra/Processors", "IDA-PRO", decompInfo->toolMap, decompInfo->li);
 	//metapc is reported for 16-bit but not reported in Ghidra
-	for (int i = 0; i < decompInfo->li.size(); i++) {
+	for (size_t i = 0; i < decompInfo->li.size(); i++) {
 		if (decompInfo->li[i].processor == "x86" && decompInfo->li[i].size == 16) {
-			decompInfo->toolMap["metapc"].push_back(i); break;
+			decompInfo->toolMap["metapc"].push_back((int)i); break;
 		}
 	}
 	return decompInfo->toolMap.find(inf.procname) != decompInfo->toolMap.end();

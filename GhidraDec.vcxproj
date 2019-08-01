@@ -447,7 +447,7 @@
     <ClInclude Include="decompile\semantics.hh" />
     <ClInclude Include="decompile\sleigh.hh" />
     <ClInclude Include="decompile\sleighbase.hh" />
-    <ClInclude Include="decompile\sleighinterface.h" />
+    <ClInclude Include="sleighinterface.h" />
     <ClInclude Include="decompile\slghpatexpress.hh" />
     <ClInclude Include="decompile\slghpattern.hh" />
     <ClInclude Include="decompile\slghsymbol.hh" />

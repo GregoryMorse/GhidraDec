@@ -541,10 +541,10 @@ public:
 	void getInits(std::vector<InitStateItem>& inits)
 	{
 	}
-	int getBytes(unsigned char* ptr, int size, std::string base, unsigned long long offset)
+	int getBytes(unsigned char* ptr, int size, AddrInfo addr)
 	{
 		for (int i = 0; i < size; i++) {
-			ptr[i] = myprog[offset - 0x80483b4 + i];
+			ptr[i] = myprog[addr.offset - 0x80483b4 + i];
 		}
 		return size;
 	}
@@ -552,23 +552,23 @@ public:
 	{
 		return str;
 	}
-	void getMappedSymbol(std::string base, unsigned long long offset, MappedSymbolInfo& msi)
+	void getMappedSymbol(AddrInfo addr, MappedSymbolInfo& msi)
 	{
 	}
-	void getExternInfo(std::string base, unsigned long long offset, std::string& callName, std::string& modName, FuncProtoInfo& func)
+	void getExternInfo(AddrInfo addr, std::string& callName, std::string& modName, FuncProtoInfo& func)
 	{
 	}
 	void getMetaType(std::string typeName, std::vector<TypeInfo>& typeChain)
 	{
 	}
-	void getComments(std::string base, unsigned long long offset, std::vector<CommentInfo>& comments)
+	void getComments(AddrInfo addr, std::vector<CommentInfo>& comments)
 	{
 	}
-	std::string getSymbol(std::string base, unsigned long long offset)
+	std::string getSymbol(AddrInfo addr)
 	{
 		return "";
 	}
-	std::string getPcodeInject(int type, std::string name, std::string base, unsigned long long offset, std::string fixupbase, unsigned long long fixupoffset)
+	std::string getPcodeInject(int type, std::string name, AddrInfo addr, std::string fixupbase, unsigned long long fixupoffset)
 	{
 		return "";
 	}
@@ -622,11 +622,11 @@ int __cdecl main()
 	std::vector<CoreType> cts(&defaultCoreTypes[0], &defaultCoreTypes[numDefCoreTypes]);
 	di.setup(cb, ghidraPath + "Ghidra/Processors/x86/data/languages/x86-64.sla", ghidraPath + "Ghidra/Processors/x86/data/languages/x86-64.pspec",
 		ghidraPath + "Ghidra/Processors/x86/data/languages/x86-64-win.cspec", cts, defaultOptions, timeout, maxpayload);
-	cout << di.doDecompile(defaultDecMode, "ram", 0x80483b4, display, funcProto);
+	cout << di.doDecompile(defaultDecMode, AddrInfo{ "ram", 0x80483b4 }, display, funcProto);
 	//cout << di.doDecompile(cb, ghidraPath + "Ghidra/Processors/x86/data/languages/x86-64.sla", ghidraPath + "Ghidra/Processors/x86/data/languages/x86-64.pspec",
 	//	ghidraPath + "Ghidra/Processors/x86/data/languages/x86-64-gcc.cspec", std::vector<CoreType>(&defaultCoreTypes[0], &defaultCoreTypes[numDefCoreTypes]), defaultOptions, defaultDecMode, 0x80483b4);
 	di.setup(cb, ghidraPath + "Ghidra/Processors/x86/data/languages/x86.sla", ghidraPath + "Ghidra/Processors/x86/data/languages/x86.pspec",
 		ghidraPath + "Ghidra/Processors/x86/data/languages/x86gcc.cspec", cts, defaultOptions, timeout, maxpayload);
-	cout << di.doDecompile(defaultDecMode, "ram", 0x80483b4, display, funcProto);
+	cout << di.doDecompile(defaultDecMode, AddrInfo{ "ram", 0x80483b4 }, display, funcProto);
 	delete cb;
 }

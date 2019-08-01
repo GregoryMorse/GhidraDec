@@ -633,7 +633,7 @@ inline uval_t get_fixup_value(ea_t ea, fixup_type_t type) //ida64.dll v7.x - der
 	case FIXUP_VLOW:
 		return get_long(ea) & ((1 << ph.high_fixup_bits) - 1);
 	case FIXUP_OFF64:
-		return (long long)get_qword(ea);
+		return (uval_t)get_qword(ea);
 	case FIXUP_CUSTOM:
 		break; //no get_fixup_handler() function so no way to handle easily - perhaps netnode
 	}

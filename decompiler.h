@@ -42,7 +42,7 @@ namespace idaplugin {
 		};
 		RdGlobalInfo* di;
 		int regNameToIndexIda(std::string regstr);
-		std::string arglocToAddr(argloc_t al, unsigned long long* offset, std::vector<JoinEntryInfo>& joins, bool noResolveReg);
+		std::string arglocToAddr(argloc_t al, unsigned long long* offset, std::vector<SizedAddrInfo>& joins, bool noResolveReg);
 	public:
 		DecompInterface* decInt = nullptr;
 
@@ -75,6 +75,7 @@ namespace idaplugin {
 
 		std::map<ea_t, FuncInfo> funcProtoInfos;
 		std::map<ea_t, std::string> funcProtos;
+		std::map<ea_t, std::string> funcColorProtos;
 		IdaCallback(RdGlobalInfo* rdgi) : di(rdgi) {}
 		virtual ~IdaCallback();
 		void executeOnMainThread(std::function<void()> fun);
@@ -84,29 +85,31 @@ namespace idaplugin {
 		size_t writeDec(void const* Buf, size_t MaxCharCount);
 		void terminate();
 		void getInits(std::vector<InitStateItem>& inits);
-		std::string getPcodeInject(int type, std::string name, std::string base, unsigned long long offset, std::string fixupbase, unsigned long long fixupoffset);
+		std::string getPcodeInject(int type, std::string name, AddrInfo addr, std::string fixupbase, unsigned long long fixupoffset);
 		void getCPoolRef(const std::vector<unsigned long long>& refs, CPoolRecord& rec);
-		int getBytes(unsigned char* ptr, int size, std::string base, unsigned long long offset);
-		void getMappedSymbol(std::string base, unsigned long long offset, MappedSymbolInfo& msi);
-		void getExternInfo(std::string base, unsigned long long offset, std::string& callName, std::string& modName, FuncProtoInfo& func);
+		int getBytes(unsigned char* ptr, int size, AddrInfo addr);
+		void getMappedSymbol(AddrInfo addr, MappedSymbolInfo& msi);
+		void getExternInfo(AddrInfo addr, std::string& callName, std::string& modName, FuncProtoInfo& func);
 		void getMetaType(std::string typeName, std::vector<TypeInfo>& typeChain);
 		//colors are Clang-based: "keyword", "comment", "type", "funcname", "var", "const", "param" and "global"
 		std::string emit(std::string type, std::string color, std::string str);
-		void getComments(std::string base, unsigned long long offset, std::vector<CommentInfo>& comments);
-		std::string getSymbol(std::string base, unsigned long long offset);
+		void getComments(AddrInfo addr, std::vector<CommentInfo>& comments);
+		std::string getSymbol(AddrInfo addr);
 
-		void getFuncInfo(std::string base, ea_t offset, func_t* f, std::string & name, FuncProtoInfo & func);
-		void getFuncTypeInfo(tinfo_t& ti, bool paramOnly, unsigned long long* extraPop, bool* isNoReturn, bool* dotdotdot, bool* hasThis, std::string& model, SymInfo* retType, std::vector<SymInfo>& syminfo);
-		bool getFuncTypeInfoByAddr(ea_t ea, unsigned long long* extraPop, bool* isNoReturn, bool* dotdotdot, bool* hasThis, std::string& model, SymInfo* retType, std::vector<SymInfo>& syminfo);
+		void getFuncInfo(AddrInfo addr, func_t* f, std::string & name, FuncProtoInfo & func);
+		void getFuncTypeInfo(tinfo_t& ti, bool paramOnly, FuncProtoInfo& func);
+		bool getFuncTypeInfoByAddr(ea_t ea, FuncProtoInfo& func);
 		bool checkPointer(unsigned long long offset, std::vector<TypeInfo>& typeChain, std::vector<ea_t>& deps);
 		void consumeTypeInfo(int idx, std::vector<TypeInfo>& tc, unsigned long long ea, std::vector<ea_t>& deps);
 		std::string lookupDataInfo(unsigned long long offset, bool* readonly, bool* volatil, std::vector<TypeInfo>& typeChain);
 		void getType(tinfo_t ti, std::vector<TypeInfo>& typeChain, bool bOuterMost = true);
 
-		void analysisDump(std::string& definitions, std::string& idaInfo);
+		void analysisDump(std::string& definitions, std::string& forDisplay, std::string& idaInfo);
 		std::string dumpIdaInfo();
-		std::string initForType(const std::vector<TypeInfo>& types/*tinfo_t ti*/, ea_t addr);
-		std::string getHeaderDefFromAnalysis(bool allImports);
+		std::string print_func(ea_t ea, std::string& forDisplay, char NameColor);
+		std::string initForType(const tinfo_t& t, ea_t addr, bool bColor);
+		std::string initForType(const std::vector<TypeInfo>& types, ea_t addr, bool bColor);
+		std::string getHeaderDefFromAnalysis(bool allImports, std::string& forDisplay);
 
 		void init(std::string sleighfilename, std::string pspec, std::string cspec);
 		std::string tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err);

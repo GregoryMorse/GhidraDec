@@ -140,9 +140,14 @@ CoreType defaultCoreTypes[] = {
 const int numDefCoreTypes = sizeof(defaultCoreTypes) / sizeof(defaultCoreTypes[0]);
 
 const char* szCoreTypeDefs[] = {
-nullptr, "__int8", "__int8", "__int16", "__int32", "__int32", "__int64", "__int64", "__int64", "__int64",
-"__int8", nullptr, "__int16", "__int32", nullptr, "__int32", "__int64", "__int64", "__int64", nullptr, "__int64", "__int64", "__int64",
-"unsigned __int8", "unsigned __int16" , "unsigned __int16", "unsigned __int32", "unsigned __int32", "unsigned __int32", "unsigned __int64", "unsigned __int64", "unsigned __int64", "unsigned __int64", "unsigned __int64", "unsigned __int64", "unsigned __int64",
+nullptr, "__int8", "__int8", "__int16", "__int32",
+	"__int32", "__int64", "__int64", "__int64", "__int64",
+"__int8", nullptr, "__int16", "__int32", nullptr, "__int32", "__int64", "__int64",
+	"__int64", nullptr, "__int64", "__int64", "__int64",
+"unsigned __int8", "unsigned __int16" , "unsigned __int16", "unsigned __int32",
+	"unsigned __int32", "unsigned __int32", "unsigned __int64", "unsigned __int64",
+	"unsigned __int64", "unsigned __int64", "unsigned __int64", "unsigned __int64",
+	"unsigned __int64",
 "float", nullptr, nullptr, "double", "long double", "long double", "long double",
 "void*", nullptr, nullptr, "char16_t", "char32_t", nullptr
 };
@@ -191,7 +196,8 @@ public:
 // depending on the address range requested
 void CallbackLoadImage::loadFill(uint1* ptr, int4 size, const Address& addr)
 {
-	if (callback->getBytes(ptr, size, addr.getSpace()->getName(), addr.getOffset()) == 0)
+	if (callback->getBytes(ptr, size,
+		AddrInfo{ addr.getSpace()->getName(), addr.getOffset() }) == 0)
 		throw DecompError("No bytes could be loaded");
 }
 
@@ -350,7 +356,7 @@ void resolveRelatives(std::string& buf) {
 //Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/app/plugin/processors/sleigh/SleighInstructionPrototype.java
 //Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/app/plugin/processors/sleigh/PcodeEmit.java
 //Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/app/plugin/processors/sleigh/PcodeEmitPacked.java
-static std::string getPackedPcode(Translate& trans, std::string space, uintb startaddr)
+static std::string getPackedPcode(Translate& trans, AddrInfo addr)
 
 { // Dump pcode translation of machine instructions
 	PackedPcodeRawOut emit;		// Set up the pcode dumper
@@ -361,15 +367,15 @@ static std::string getPackedPcode(Translate& trans, std::string space, uintb sta
 	//labelCount = 0;
 	//labelrefs.clear();
 	//labeldefs.clear();
-	Address addr(trans.getSpaceByName(space), startaddr); // First address to translate
+	Address address(trans.getSpaceByName(addr.space), addr.offset); // First address to translate
 
 	std::string packed;
 	packed += PcodeEmit::inst_tag;
-	length = trans.oneInstruction(emit, addr); // Translate instruction
+	length = trans.oneInstruction(emit, address); // Translate instruction
 	packed += dumpOffset(length);
-	uchar spcindex = addr.getSpace()->getIndex();
+	uchar spcindex = address.getSpace()->getIndex();
 	packed += (spcindex + 0x20);
-	packed += dumpOffset(addr.getOffset());
+	packed += dumpOffset(address.getOffset());
 	//resolveRelatives(emit.packedPcodes);
 	packed += emit.packedPcodes;
 	packed += PcodeEmit::end_tag;
@@ -412,12 +418,15 @@ public:
 		std::string inpstr;
 		for (int i = opc == CPUI_LOAD || opc == CPUI_STORE ? 1 : 0; i < isize; i++) {
 			inpstr += "<addr space=\"" + vars[i].space->getName() + "\" offset=\"0x" +
-				to_string(vars[i].offset, hex) + "\" size=\"" + std::to_string(vars[i].size) + "\"/>";
+				to_string(vars[i].offset, hex) +
+				"\" size=\"" + std::to_string(vars[i].size) + "\"/>";
 		}
 		strs.push_back({ "<op code=\"" + std::to_string(opc) + "\">",
 			(outvar != nullptr ? "<addr space=\"" + outvar->space->getName() + "\" offset=\"0x" +
-				to_string(outvar->offset, hex) + "\" size=\"" + std::to_string(outvar->size) + "\"/>" : "<void/>") +
-			(opc == CPUI_LOAD || opc == CPUI_STORE ? "<spaceid name=\"" + vars[0].space->getName() + "\"/>" : "") +
+				to_string(outvar->offset, hex) +
+				"\" size=\"" + std::to_string(outvar->size) + "\"/>" : "<void/>") +
+			(opc == CPUI_LOAD || opc == CPUI_STORE ?
+				"<spaceid name=\"" + vars[0].space->getName() + "\"/>" : "") +
 			inpstr + "</op>" });
 	}
 	std::string build(std::string space, uintb addr)
@@ -637,26 +646,34 @@ std::string DecompInterface::buildTypeXml(std::vector<TypeInfo>& ti)
 
 		if (typeInfo.metaType == "ptr") {
 			str += "<type name=\"" + typeInfo.typeName + /*"\" id=\"" + std::to_string(hashName(typeInfo.typeName))*/ +
-				"\" metatype=\"" + typeInfo.metaType + "\" size=\"" + std::to_string(typeInfo.size) + "\">";
+				"\" metatype=\"" + typeInfo.metaType +
+				"\" size=\"" + std::to_string(typeInfo.size) + "\">";
 			s.push(-1);
 			s.push(idx + 1);
 		} else if (typeInfo.metaType == "struct") {
 			std::string strct;
 			for (int i = 0; i < typeInfo.structMembers.size(); i++) { //core types are not type referenced though
 				strct += "<field name=\"" + typeInfo.structMembers[i].name +
-					"\" offset=\"" + std::to_string(typeInfo.structMembers[i].offset) + "\">" +
+					"\" offset=\"" +
+					std::to_string(typeInfo.structMembers[i].offset) + "\">" +
 					buildTypeXml(typeInfo.structMembers[i].ti) + "</field>\n";
 			}
-			str += "<type name=\"" + typeInfo.typeName + "\" id=\"" + std::to_string(hashName(typeInfo.typeName)) +
-				"\" metatype=\"" + typeInfo.metaType + "\" size=\"" + std::to_string(typeInfo.size) + "\">" + strct + "</type>\n"; //terminates
+			str += "<type name=\"" + typeInfo.typeName +
+				"\" id=\"" + std::to_string(hashName(typeInfo.typeName)) +
+				"\" metatype=\"" + typeInfo.metaType + "\" size=\"" +
+				std::to_string(typeInfo.size) + "\">" + strct + "</type>\n"; //terminates
 		} else if (typeInfo.metaType == "array") {
-			str += "<type name=\"" + typeInfo.typeName + "\" metatype=\"" + typeInfo.metaType + "\" size=\"" +
-				std::to_string(typeInfo.size) + "\" arraysize=\"" + std::to_string(typeInfo.arraySize) + "\">";
+			str += "<type name=\"" + typeInfo.typeName +
+				"\" metatype=\"" + typeInfo.metaType + "\" size=\"" +
+				std::to_string(typeInfo.size) +
+				"\" arraysize=\"" + std::to_string(typeInfo.arraySize) + "\">";
 			s.push(-1);
 			s.push(idx + 1);
 		} else if (typeInfo.metaType == "code") {
-			str += "<type name=\"" + typeInfo.typeName + "\" id=\"" + std::to_string(hashName(typeInfo.typeName)) +
-				"\" metatype=\"" + typeInfo.metaType + "\" size=\"" + std::to_string(typeInfo.size) + "\">" +
+			str += "<type name=\"" + typeInfo.typeName +
+				"\" id=\"" + std::to_string(hashName(typeInfo.typeName)) +
+				"\" metatype=\"" + typeInfo.metaType +
+				"\" size=\"" + std::to_string(typeInfo.size) + "\">" +
 				writeFuncProto(typeInfo.funcInfo, "", true) +
 				"</type>\n";
 		} else if (typeInfo.metaType == "void") {
@@ -666,8 +683,10 @@ std::string DecompInterface::buildTypeXml(std::vector<TypeInfo>& ti)
 			for (i = 0; i < numDefCoreTypes; i++) {
 				if (defaultCoreTypes[i].name == typeInfo.typeName) break;
 			} // - (i == numDefCoreTypes ? (1ull << 63) : 0)*/
-			str += "<type name=\"" + typeInfo.typeName + "\" id=\"" + to_string(hashName(typeInfo.typeName)) +
-				"\" metatype=\"" + typeInfo.metaType + "\" size=\"" + std::to_string(typeInfo.size) + "\"" +
+			str += "<type name=\"" + typeInfo.typeName +
+				"\" id=\"" + to_string(hashName(typeInfo.typeName)) +
+				"\" metatype=\"" + typeInfo.metaType +
+				"\" size=\"" + std::to_string(typeInfo.size) + "\"" +
 				std::string(typeInfo.isEnum ? " enum=\"true\"" : "") +
 				std::string(typeInfo.isUtf ? " utf=\"true\"" : "") +
 				std::string(typeInfo.isChar ? " char=\"true\"" : "") +
@@ -795,7 +814,7 @@ std::string DecompInterface::compilePcodeSnippet(std::string sleighfilename,
 	return str;
 }
 
-void getAddrFromString(std::string addrstring, std::string & space, uint8 & idx, int8* size)
+void getAddrFromString(std::string addrstring, AddrInfo& addr, unsigned long long* size)
 {
 	istringstream str(addrstring);
 	Document* doc;
@@ -805,10 +824,20 @@ void getAddrFromString(std::string addrstring, std::string & space, uint8 & idx,
 		throw DecompError("Received bad XML Address from decompiler");
 	}
 	Element* el = doc->getRoot();
-	space = el->getAttributeValue("space");
-	idx = strtoull(el->getAttributeValue("offset").c_str(), nullptr, 16);
-	if (size)* size = strtoll(el->getAttributeValue("size").c_str(), nullptr, 10);
+	addr.space = el->getAttributeValue("space");
+	addr.offset = strtoull(el->getAttributeValue("offset").c_str(), nullptr, 16);
+	if (size != nullptr) *size = strtoll(el->getAttributeValue("size").c_str(), nullptr, 10);
 	delete doc;
+}
+
+void getAddrFromString(std::string addrstring, AddrInfo & addr)
+{
+	getAddrFromString(addrstring, addr, nullptr);
+}
+
+void getAddrFromString(std::string addrstring, SizedAddrInfo& addr)
+{
+	getAddrFromString(addrstring, addr.addr, &addr.size);
 }
 
 void DecompInterface::processPcodeInject(int type, std::map<std::string, XmlPcodeEmit*> &fixupmap)
@@ -844,17 +873,21 @@ void DecompInterface::processPcodeInject(int type, std::map<std::string, XmlPcod
 	uint8 fixupidx = strtoull(fixupoffset.c_str(), nullptr, 16);
 	XmlPcodeEmit* emitter = fixupmap[name];
 	if (fixupmap[name]->strs.size() == 0) //dynamic, has no body
-		emitter = getPcodeSnippet(callback->getPcodeInject(type, name, space, idx, fixupspace, fixupidx),
+		emitter = getPcodeSnippet(callback->getPcodeInject(type, name,
+			AddrInfo{ space, idx }, fixupspace, fixupidx),
 			emitter->inputs, emitter->outputs);
 	write(query_response_start, sizeof(query_response_start));
-	writeString("<inst" " offset=\"" + std::to_string(trans->instructionLength(Address(trans->getSpaceByName(space), idx))) + "\"" +
-		std::string(emitter->paramShift != 0 ? "paramshift=\"" + std::to_string(emitter->paramShift) + "\"" : "") + ">" +
+	writeString("<inst" " offset=\"" +
+		std::to_string(trans->instructionLength(Address(trans->getSpaceByName(space), idx))) + "\"" +
+		std::string(emitter->paramShift != 0 ? "paramshift=\"" +
+			std::to_string(emitter->paramShift) + "\"" : "") + ">" +
 		emitter->build(space, idx) + "</inst>"); //" paramshift=\"\"" 
 	write(query_response_end, sizeof(query_response_end));
 	if (fixupmap[name] == nullptr) delete emitter;
 }
 
-std::string DecompInterface::writeFuncProto(FuncProtoInfo func, std::string injectstr, bool bUseInternalList)
+std::string DecompInterface::writeFuncProto(FuncProtoInfo func,
+	std::string injectstr, bool bUseInternalList)
 {
 	std::string symbols;
 	std::string joinString;
@@ -862,24 +895,39 @@ std::string DecompInterface::writeFuncProto(FuncProtoInfo func, std::string inje
 	if (bUseInternalList) {
 		for (std::vector<SymInfo>::iterator it = func.syminfo.begin(); it != func.syminfo.end(); it++) {
 			bool readonly = false;
-			symbols += "<param name=\"" + it->pi.name + "\" typelock=\"" "true" "\" namelock=\"" + std::string(it->pi.name.size() != 0 ? "true" : "false") + "\">\n"
+			symbols += "<param name=\"" + it->pi.name + "\" typelock=\"" "true"
+				"\" namelock=\"" + std::string(it->pi.name.size() != 0 ? "true" : "false") + "\">\n"
 				"  <addr/>\n" +
 				buildTypeXml(it->pi.ti) +
 				"</param>\n"; //"<type name=\"\" metatype=\"" + "\" size=\"" "\"><typeref name=\"" + it->typeRef + "\" id=\"" + std::string(buf) "\"/></type>"
 		}
 	} else {
-		if (func.retType.space == "join") {
+		if (func.retType.addr.addr.space == "join") {
 			for (int i = 0; i < func.retType.joins.size(); i++) {
 				if (i != 0) joinString += " ";
-				joinString += "piece" + std::to_string(i + 1) + "=\"" + func.retType.joins[i].space + ":0x" +
-					to_string(func.retType.joins[i].offset) + ":" + std::to_string(func.retType.joins[i].size) + "\"";
+				joinString += "piece" + std::to_string(i + 1) +
+					"=\"" + func.retType.joins[i].addr.space + ":0x" +
+					to_string(func.retType.joins[i].addr.offset) + ":" +
+					std::to_string(func.retType.joins[i].size) + "\"";
 			}
 		}
 	}
-	return "<prototype extrapop=\"" + (func.extraPop != -1 ? std::to_string(func.extraPop) : std::string("unknown")) +
+	std::string killbycall;
+	if (func.killedByCall.size() != 0) {
+		killbycall = "  <killedbycall>\n";
+		for (size_t i = 0; i < func.killedByCall.size(); i++) {
+			killbycall += "    <addr space=\"" + func.killedByCall[i].addr.space +
+				"\" offset=\"0x" + to_string(func.killedByCall[i].addr.offset, hex) +
+				"\" size=\"" + std::to_string(func.killedByCall[i].size) + "\"/>\n";
+		}
+		killbycall += "  </killedbycall>\n";
+	}
+	return "<prototype extrapop=\"" +
+		(func.extraPop != -1 ? std::to_string(func.extraPop) : std::string("unknown")) +
 		"\" model=\"" + func.model + "\" modellock=\"" +
 		(func.model != "default" && func.model != "unknown" ? "true" : "false") +
-		(func.model != "default" && func.model != "unknown" && func.syminfo.size() == 0 ? "\" voidlock=\"true" : "") +
+		(func.model != "default" && func.model != "unknown" && func.syminfo.size() == 0 ?
+			"\" voidlock=\"true" : "") +
 		(func.isInline ? "\" inline=\"true" : "") +
 		(func.isNoReturn ? "\" noreturn=\"true" : "") +
 		(func.hasThis ? "\" hasthis=\"true" : "") +
@@ -888,19 +936,24 @@ std::string DecompInterface::writeFuncProto(FuncProtoInfo func, std::string inje
 		(func.isDestruct ? "\" destructor=\"true" : "") +
 		(func.dotdotdot ? "\" dotdotdot=\"true" : "") +
 		"\">\n"
-		"  <returnsym" + std::string(func.retType.pi.ti.begin()->metaType != "unknown" ? " typelock=\"true\"" : "") + ">\n" +
-		std::string(func.retType.size == 0 ? "   <addr/>\n" "   <void/>\n" :
+		"  <returnsym" +
+		std::string(func.retType.pi.ti.begin()->metaType != "unknown" ? " typelock=\"true\"" : "") +
+		">\n" +
+		std::string(func.retType.addr.size == 0 ? "   <addr/>\n" "   <void/>\n" :
 			((bUseInternalList ? "   <addr/>\n" : 
-			"   <addr space=\"" + func.retType.space + "\" " + (func.retType.space != "join" ? "offset=\"0x" + to_string(func.retType.offset, hex) +
-				"\" size=\"" + std::to_string(func.retType.size) + "\"" : joinString) + "/>\n") +
+			"   <addr space=\"" + func.retType.addr.addr.space + "\" " +
+				(func.retType.addr.addr.space != "join" ? "offset=\"0x" +
+					to_string(func.retType.addr.addr.offset, hex) +
+				"\" size=\"" + std::to_string(func.retType.addr.size) + "\"" : joinString) + "/>\n") +
 			buildTypeXml(func.retType.pi.ti))) +
 		"  </returnsym>\n" +
 		injectstr + //Pcode injection: "<inject>" + "</inject>\n"
+		killbycall +
 		(bUseInternalList ? "  <internallist>\n" + symbols + "  </internallist>\n" : "") +  
 		"</prototype>\n";
 }
 
-std::string DecompInterface::writeFunc(std::string space, unsigned long long offset, unsigned long long size, std::string funcname, std::string parentname, FuncProtoInfo func)
+std::string DecompInterface::writeFunc(SizedAddrInfo addr, std::string funcname, std::string parentname, FuncProtoInfo func)
 {//mapsym can have type: type="dynamic"/"equate" as well as booleans volatile, indirectstorage, hiddenretparm
 							//valid symbol tags are: symbol/dynsymbol, equatesymbol, function/functionshell, labelsym, externrefsymbol
 							//prototype can contain elements for <unaffected>..., <killedbycall>..., <returnaddress>..., <likelytrash>...
@@ -920,20 +973,20 @@ std::string DecompInterface::writeFunc(std::string space, unsigned long long off
 	for (std::vector<SymInfo>::iterator it = func.syminfo.begin(); it != func.syminfo.end(); it++) {
 		//must bitmask any negative offsets to the current addressing sizes, for stack, likely pointers and others too
 		int addrSize = 0;
-		if (it->space == "stack") {
+		if (it->addr.addr.space == "stack") {
 			if (trans->getStackSpace() != nullptr)
 				addrSize = trans->getStackSpace()->getAddrSize();
 			else
 				addrSize = trans->getRegister(stackPointerReg).size;
-		} else addrSize = trans->getSpaceByName(it->space)->getAddrSize();
-		it->offset &= ((~0ull) >> (64 - addrSize * 8));
+		} else addrSize = trans->getSpaceByName(it->addr.addr.space)->getAddrSize();
+		it->addr.addr.offset &= ((~0ull) >> (64 - addrSize * 8));
 		bool readonly = false;
 		std::string joinString;
-		if (it->space == "join") {
+		if (it->addr.addr.space == "join") {
 			for (int i = 0; i < it->joins.size(); i++) {
 				if (i != 0) joinString += " ";
-				joinString += "piece" + std::to_string(i + 1) + "=\"" + it->joins[i].space + ":0x" +
-					to_string(it->joins[i].offset) + ":" + std::to_string(it->joins[i].size) + "\"";
+				joinString += "piece" + std::to_string(i + 1) + "=\"" + it->joins[i].addr.space + ":0x" +
+					to_string(it->joins[i].addr.offset) + ":" + std::to_string(it->joins[i].size) + "\"";
 			}
 		}
 		//current function arguments must be added to the category 0 index # in order of function definition parameters
@@ -941,31 +994,46 @@ std::string DecompInterface::writeFunc(std::string space, unsigned long long off
 		//bool bIsCat = idx == startOffs && it->space == "stack" && it->offset != 0 && (it->offset & (1ull << (addrSize * 8 - 1))) == 0;
 		//could assume positive offsets are args but indexes now assigned by callback
 		symbols += "<mapsym><symbol name=\"" + it->pi.name + "\" typelock=\"" +
-			(it->pi.ti.begin()->metaType == "unknown" ? "false" : "true") + //startOffs == idx && it->argIndex == -1
-			"\" namelock=\"" + std::string(it->pi.name.size() != 0 ? "true" : "false") + "\" readonly=\"" + (readonly ? "true" : "false") +
-			"\" cat=\"" + std::string(it->argIndex != -1 ? "0\" index=\"" + std::to_string(it->argIndex) : "-1") + "\">" +
+			//the typelock is a size lock for unknown metatype and for category 0 mappings for the primary function being decompiled it is an all or nothing situation - due to design issue in Ghidra
+			(it->pi.ti.begin()->metaType == "unknown" &&
+			(startOffs.space != addr.addr.space || startOffs.offset != addr.addr.offset ||
+				it->argIndex == -1) ? "false" : "true") +
+			"\" namelock=\"" + std::string(it->pi.name.size() != 0 ? "true" : "false") +
+			"\" readonly=\"" + (readonly ? "true" : "false") +
+			"\" cat=\"" + std::string(it->argIndex != -1 ? "0\" index=\"" +
+				std::to_string(it->argIndex) : "-1") + "\">" +
 			buildTypeXml(it->pi.ti) +
 			"</symbol>"
-			"<addr space=\"" + it->space + "\" " + (it->space != "join" ? "offset=\"0x" + to_string(it->offset, hex) +
-				"\" size=\"" + std::to_string(it->size) + "\"" : joinString) + "/>" +
-			std::string(it->space == "register" ? "<rangelist>\n<range space=\"" + (it->argIndex != -1 ? space : it->range.space) +
-				"\" first=\"0x" + to_string(it->argIndex != -1 ? offset - 1 : it->range.beginoffset, hex) +
-				"\" last=\"0x" + to_string(it->argIndex != -1 ? offset - 1 : it->range.endoffset, hex) + "\"/></rangelist>\n" : "<rangelist/>") +
+			"<addr space=\"" + it->addr.addr.space + "\" " +
+			(it->addr.addr.space != "join" ? "offset=\"0x" + to_string(it->addr.addr.offset, hex) +
+				"\" size=\"" + std::to_string(it->addr.size) + "\"" : joinString) + "/>" +
+			std::string(it->addr.addr.space == "register" ? "<rangelist>\n<range space=\"" +
+			(it->argIndex != -1 ? addr.addr.space : it->range.space) +
+				"\" first=\"0x" +
+				to_string(it->argIndex != -1 ? addr.addr.offset - 1 : it->range.beginoffset, hex) +
+				"\" last=\"0x" +
+				to_string(it->argIndex != -1 ? addr.addr.offset - 1 : it->range.endoffset, hex) +
+				"\"/></rangelist>\n" : "<rangelist/>") +
 			"</mapsym>";
 	}
 	//callback->status("Extern name: " + externname);
 	//prototype has uponentry and uponreturn tags to inject pcode for call mechanism fixup
-	res = "<result>\n<parent>\n<val/>\n" + std::string(parentname.size() != 0 ? "<val>" + parentnameesc.str() + "</val>" : "") + "</parent>\n<mapsym>\n"
-		"<function name=\"" + nameesc.str() + "\" size=\"" + std::to_string(size) + "\">\n"
-		"<addr space=\"" + space + "\" offset=\"0x" + to_string(offset, hex) + "\"/>"
+	res = "<result>\n<parent>\n<val/>\n" +
+		std::string(parentname.size() != 0 ? "<val>" + parentnameesc.str() + "</val>" : "") +
+		"</parent>\n<mapsym>\n"
+		"<function name=\"" + nameesc.str() + "\" size=\"" + std::to_string(addr.size) + "\">\n"
+		"<addr space=\"" + addr.addr.space + "\" offset=\"0x" + to_string(addr.addr.offset, hex) + "\"/>"
 		"<localdb lock=\"false\" main=\"" "stack" "\">\n<scope name=\"" + nameesc.str() + "\">\n"
-		"<parent>\n<val/>\n" + std::string(parentname.size() != 0 ? "<val>" + parentnameesc.str() + "</val>" : "") + "</parent>\n<rangelist/>\n"
+		"<parent>\n<val/>\n" +
+		std::string(parentname.size() != 0 ? "<val>" + parentnameesc.str() + "</val>" : "") +
+		"</parent>\n<rangelist/>\n"
 		"<symbollist>" + symbols + "\n</symbollist>\n</scope>\n</localdb>\n" +
 		writeFuncProto(func, (fixupTargetMap.find(funcname) != fixupTargetMap.end() ?
 			"<inject>" + fixupTargetMap[funcname] + "</inject>" :
-			(callFixupMap.find(funcname) != callFixupMap.end() ? "<inject>" + nameesc.str() + "</inject>" : "")), false) +
+			(callFixupMap.find(funcname) != callFixupMap.end() ?
+				"<inject>" + nameesc.str() + "</inject>" : "")), false) +
 		"</function>\n"
-		"<addr space=\"" + space + "\" offset=\"0x" + to_string(offset, hex) + "\"/>"
+		"<addr space=\"" + addr.addr.space + "\" offset=\"0x" + to_string(addr.addr.offset, hex) + "\"/>"
 		"<rangelist/></mapsym>\n</result>\n";
 	return res;
 }
@@ -999,14 +1067,12 @@ std::vector<uchar> DecompInterface::readResponse() {
 				case 'B':
 				{
 					addrstring = readQueryString();
-					std::string space;
-					uint8 idx;
-					int8 sz;
-					getAddrFromString(addrstring, space, idx, &sz);
+					SizedAddrInfo addr;
+					getAddrFromString(addrstring, addr);
 					//callback->status("getBytes " + addrstring);
 					std::vector<uchar> res;
-					res.resize(sz);
-					callback->getBytes(res.data(), sz, space, idx);
+					res.resize(addr.size);
+					callback->getBytes(res.data(), addr.size, addr.addr);
 					std::vector<uchar> dblres;
 					dblres.resize(res.size() * 2);
 					for (int i = 0; i < res.size(); i++) {
@@ -1026,9 +1092,8 @@ std::vector<uchar> DecompInterface::readResponse() {
 						addrstring = readQueryString();
 						//flags from Ghidra/Features/Decompiler/src/decompile/cpp/comment.hh based on initialization options
 						std::string flags = readQueryString();
-						std::string space;
-						uint8 idx;
-						getAddrFromString(addrstring, space, idx, nullptr);
+						AddrInfo addr;
+						getAddrFromString(addrstring, addr);
 						uint8 f = strtoull(flags.c_str(), nullptr, 10);
 						//callback->status("getComments " + addr + " " + flags);
 						//addr = Varnode.readXMLAddress(addrstring, addrfactory, funcEntry.getAddressSpace());
@@ -1052,19 +1117,22 @@ std::vector<uchar> DecompInterface::readResponse() {
 						}*/
 						std::string commentStr;
 						std::vector<CommentInfo> comments;
-						callback->getComments(space, idx, comments);
+						callback->getComments(addr, comments);
 						for (int i = 0; i < comments.size(); i++) {
 							if (comments[i].type == "header" && (f & comment_type::header) != 0 ||
 								comments[i].type == "warning" && (f & comment_type::warning) != 0 ||
-								comments[i].type == "warningheader" && (f & comment_type::warningheader) != 0 ||
+								comments[i].type == "warningheader" &&
+									(f & comment_type::warningheader) != 0 ||
 								comments[i].type == "user1" && (f & comment_type::user1) != 0 ||
 								comments[i].type == "user2" && (f & comment_type::user2) != 0 ||
 								comments[i].type == "user3" && (f & comment_type::user3) != 0) {
 								ostringstream commentesc;
 								xml_escape(commentesc, comments[i].text.c_str());
 								commentStr += "<comment type=\"" + comments[i].type + "\">\n"
-									"<addr space=\"" + space + "\" offset=\"0x" + to_string(idx, hex) + "\"/>"
-									"<addr space=\"" + comments[i].space + "\" offset=\"0x" + to_string(comments[i].offset, hex) + "\"/>"
+									"<addr space=\"" + addr.space +
+									"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>"
+									"<addr space=\"" + comments[i].addr.space +
+									"\" offset=\"0x" + to_string(comments[i].addr.offset, hex) + "\"/>"
 									"\n<text>" + commentesc.str() + "</text>\n"
 									"</comment>";
 							}
@@ -1107,11 +1175,14 @@ std::vector<uchar> DecompInterface::readResponse() {
 							xml_escape(commentesc, rec.token.c_str());
 						}
 						write(query_response_start, sizeof(query_response_start));
-						writeString("<cpoolrec ref=\"" + std::to_string(refs[0]) + "\" tag=\"" + cpoolreftags[rec.tag] + "\"" +
+						writeString("<cpoolrec ref=\"" + std::to_string(refs[0]) +
+							"\" tag=\"" + cpoolreftags[rec.tag] + "\"" +
 							std::string(rec.hasThis ? " hasthis=\"true\"" : "") +
 							std::string(rec.constructor ? " constructor=\"true\"" : "") + ">\n" +
-							(rec.tag == PRIMITIVE ? "<value>" + std::to_string(rec.value) + "</value>" : "") +
-							(rec.data.size() != 0 ? "<data length=\"" + std::to_string(rec.data.size()) + "\">\n" + dblres + "</data>\n" :
+							(rec.tag == PRIMITIVE ? "<value>" +
+								std::to_string(rec.value) + "</value>" : "") +
+							(rec.data.size() != 0 ? "<data length=\"" +
+								std::to_string(rec.data.size()) + "\">\n" + dblres + "</data>\n" :
 								"<token>" + commentesc.str() + "</token>\n") +
 							"</cpoolrec>");
 						write(query_response_end, sizeof(query_response_end));
@@ -1124,14 +1195,13 @@ std::vector<uchar> DecompInterface::readResponse() {
 				{
 					addrstring = readQueryString();
 					//callback->status("getExternalRefXML " + addrstring);
-					std::string space;
-					uint8 idx;
-					getAddrFromString(addrstring, space, idx, nullptr);
+					AddrInfo addr;
+					getAddrFromString(addrstring, addr);
 					std::string externname;
 					std::string modName;
 					FuncProtoInfo func = {};
-					callback->getExternInfo(space, idx, externname, modName, func);
-					std::string res = writeFunc(space, idx, 1, externname, modName, func);
+					callback->getExternInfo(addr, externname, modName, func);
+					std::string res = writeFunc(SizedAddrInfo{ addr, 1 }, externname, modName, func);
 					write(query_response_start, sizeof(query_response_start));
 					writeString(res);
 					write(query_response_end, sizeof(query_response_end));
@@ -1143,28 +1213,28 @@ std::vector<uchar> DecompInterface::readResponse() {
 					addrstring = readQueryString();
 					//callback->status("getMappedSymbolsXML " + addrstring);
 					istringstream str(addrstring);
-					std::string space;
-					uint8 idx;
-					getAddrFromString(addrstring, space, idx, nullptr);
-					if (space == "register") {
+					AddrInfo addr;
+					getAddrFromString(addrstring, addr);
+					if (addr.space == "register") {
 						//trans->getRegisterName(trans->getSpaceByName(space), idx, sz).c_str()
 					}
 					MappedSymbolInfo msi = { KIND_HOLE };
-					callback->getMappedSymbol(space, idx, msi);
+					callback->getMappedSymbol(addr, msi);
 					std::string res;
 					if (msi.kind == KIND_FUNCTION) {
-						if (msi.entryPoint != idx) {
+						if (msi.entryPoint != addr.offset) {
 							std::vector<RangeInfo>::iterator iter = msi.ranges.begin();
 							for (; iter != msi.ranges.end(); iter++) {
-								if (idx >= iter->beginoffset && idx <= iter->endoffset) {
-									res = buildHoleXml(space, iter->beginoffset, iter->endoffset, true, false);
+								if (addr.offset >= iter->beginoffset && addr.offset <= iter->endoffset) {
+									res = buildHoleXml(addr.space,
+										iter->beginoffset, iter->endoffset, true, false);
 									break;
 								}
 							}
 							if (iter == msi.ranges.end())
-								res = buildHoleXml(space, idx, idx, true, false);
+								res = buildHoleXml(addr.space, addr.offset, addr.offset, true, false);
 						} else {
-							res = writeFunc(space, idx, msi.size, msi.name, "", msi.func);
+							res = writeFunc(SizedAddrInfo{ addr, msi.size }, msi.name, "", msi.func);
 						}
 					} else if (msi.kind == KIND_DATA) {
 						ostringstream datanameesc;
@@ -1173,12 +1243,15 @@ std::vector<uchar> DecompInterface::readResponse() {
 						//callback->status("Data name: " + dataname);
 						res = "<result>\n<parent>\n<val/>\n</parent>\n<mapsym>\n" //type=\"dynamic\"/\"equate"
 							"<symbol name=\"" + datanameesc.str() + "\" typelock=\"" +
-							(msi.typeChain.begin()->metaType == "unknown" ? "false" : "true") +
-							"\" namelock=\"" + std::string(msi.name.size() != 0 ? "true" : "false") + "\" readonly=\"" + (msi.readonly ? "true" : "false") +
-							"\" volatile=\"" + std::string(msi.volatil ? "true" : "false") + "\" cat=\"" "-1" "\">" +
+							(msi.typeChain.begin()->metaType == "unknown" ? "true" : "true") +
+							"\" namelock=\"" + std::string(msi.name.size() != 0 ? "true" : "false") +
+							"\" readonly=\"" + (msi.readonly ? "true" : "false") +
+							"\" volatile=\"" +
+							std::string(msi.volatil ? "true" : "false") + "\" cat=\"" "-1" "\">" +
 							buildTypeXml(msi.typeChain) +
 							"</symbol>"
-							"<addr space=\"" + space + "\" offset=\"0x" + to_string(idx, hex) + "\"/>"
+							"<addr space=\"" + addr.space +
+							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>"
 							"<rangelist/></mapsym>\n</result>\n";
 					} else if (msi.kind == KIND_EXTERNALREFERENCE) {
 						ostringstream nameesc;
@@ -1186,23 +1259,28 @@ std::vector<uchar> DecompInterface::readResponse() {
 						//callback->status("Extern name: " + externname);
 						res = "<result>\n<parent>\n<val/>\n</parent>\n<mapsym>\n"
 							"<externrefsymbol name=\"" + nameesc.str() + "\">"
-							"<addr space=\"" + space + "\" offset=\"0x" + to_string(idx, hex) + "\"/>"
+							"<addr space=\"" + addr.space +
+							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>"
 							"</externrefsymbol>"
-							"<addr space=\"" + space + "\" offset=\"0x" + to_string(idx, hex) + "\"/>"
+							"<addr space=\"" + addr.space +
+							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>"
 							"<rangelist/></mapsym>\n</result>\n";
 					} else if (msi.kind == KIND_LABEL) {
 						ostringstream nameesc;
 						xml_escape(nameesc, msi.name.c_str());
 						res = "<result>\n<parent>\n<val/>\n</parent>\n<mapsym>\n"
-							"<labelsym name=\"" + nameesc.str() + "\" namelock=\"true\" typelock=\"true\" readonly=\"" +
+							"<labelsym name=\"" + nameesc.str() +
+							"\" namelock=\"true\" typelock=\"true\" readonly=\"" +
 							std::string(msi.readonly ? "true" : "false") + "\" volatile=\"" +
 							std::string(msi.volatil ? "true" : "false") + "\" cat=\"" "-1" "\"/>\n"
-							"<addr space=\"" + space + "\" offset=\"0x" + to_string(idx, hex) + "\"/>"
+							"<addr space=\"" + addr.space +
+							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>"
 							"<rangelist/></mapsym>\n</result>\n";
 					}
 					if (res.size() == 0) { //KIND_HOLE
 						//get the readonly status
-						res = buildHoleXml(space, idx, idx, msi.readonly, msi.volatil);
+						res = buildHoleXml(addr.space,
+							addr.offset, addr.offset, msi.readonly, msi.volatil);
 					} //get info about hole
 					//addr = Varnode.readXMLAddress(addrstring, addrfactory, funcEntry.getAddressSpace());
 					//Object obj = lookupSymbol(addr);
@@ -1234,16 +1312,15 @@ std::vector<uchar> DecompInterface::readResponse() {
 					addrstring = readQueryString();
 					//callback->status("getPcodePacked " + addrstring);
 					istringstream str(addrstring);
-					std::string space;
-					uint8 idx;
-					getAddrFromString(addrstring, space, idx, nullptr);
+					AddrInfo addr;
+					getAddrFromString(addrstring, addr);
 					//addr = Varnode.readXMLAddress(addrstring, addrfactory, funcEntry.getAddressSpace());
 					//Instruction instr = getInstruction(addr);
 					//PackedBytes pcode = instr.getPrototype().getPcodePacked(instr.getInstructionContext(),
 					//	new InstructionPcodeOverride(instr), uniqueFactory);
 					std::string packed;
 					try {
-						packed = getPackedPcode(*trans, space, idx);
+						packed = getPackedPcode(*trans, addr);
 					} catch (SleighError&) {
 					} catch (BadDataError&) {
 					} catch (UnimplError&) {
@@ -1266,7 +1343,8 @@ std::vector<uchar> DecompInterface::readResponse() {
 						//if (it != registers.end()) writeString(it->second + "\n");
 						VarnodeData vd = trans->getRegister(nm);
 						std::string res = "<addr space=\"" + vd.space->getName() + "\" offset=\"0x" +
-							to_string(vd.offset, hex) + "\" size=\"" + std::to_string(vd.size) + "\"/>\n";
+							to_string(vd.offset, hex) +
+							"\" size=\"" + std::to_string(vd.size) + "\"/>\n";
 						write(query_response_start, sizeof(query_response_start));
 						writeString(res);
 						write(query_response_end, sizeof(query_response_end));
@@ -1274,10 +1352,8 @@ std::vector<uchar> DecompInterface::readResponse() {
 					} else { //getRegisterName mainly because not all registers enumerated initially with getRegister
 						//however this is probably never a problem, but it could be a problem if there is some highly specialized code with uneven alignment on registers?
 						addrstring = readQueryString(); //is addr the same as offset?
-						std::string space;
-						uint8 idx;
-						int8 sz;
-						getAddrFromString(addrstring, space, idx, &sz);
+						SizedAddrInfo addr;
+						getAddrFromString(addrstring, addr);
 						//Address addr = Varnode.readXMLAddress(addrstring, addrfactory, nullptr);
 						//int size = readXMLSize(addrstring);
 						//Register reg = pcodelanguage.getRegister(addr, size);
@@ -1287,19 +1363,19 @@ std::vector<uchar> DecompInterface::readResponse() {
 						//}
 						//writeString(it == registers.end() ? "" : it->first);
 						write(query_response_start, sizeof(query_response_start));
-						writeString(trans->getRegisterName(trans->getSpaceByName(space), idx, sz).c_str());
+						writeString(trans->getRegisterName(trans->getSpaceByName(addr.addr.space),
+							addr.addr.offset, addr.size).c_str());
 						write(query_response_end, sizeof(query_response_end));
 					}
 					break;
 				case 'S':
 				{
 					addrstring = readQueryString();
-					std::string space;
-					uint8 idx;
-					getAddrFromString(addrstring, space, idx, nullptr);
+					AddrInfo addr;
+					getAddrFromString(addrstring, addr);
 					//callback->status("getSymbol " + addrstring);
 					write(query_response_start, sizeof(query_response_start));
-					writeString(callback->getSymbol(space, idx));
+					writeString(callback->getSymbol(addr));
 					write(query_response_end, sizeof(query_response_end));
 					//getSymbol();					// getSymbol
 					break;
@@ -1336,9 +1412,8 @@ std::vector<uchar> DecompInterface::readResponse() {
 						//getTrackedRegisters();
 						addrstring = readQueryString();
 						//callback->status("getTrackedRegisters " + addrstring);
-						std::string space;
-						uint8 idx;
-						getAddrFromString(addrstring, space, idx, nullptr);
+						AddrInfo addr;
+						getAddrFromString(addrstring, addr);
 						//.pspec context_data -> tracked_set -> <set name="DF" val="0"/>
 						//addr = Varnode.readXMLAddress(addrstring, addrfactory, funcEntry.getAddressSpace());
 						//ProgramContext context = program.getProgramContext();
@@ -1356,17 +1431,19 @@ std::vector<uchar> DecompInterface::readResponse() {
 						//"<set space=\"register\" offset=\"0x106\" size=\"2\" val=\"0x90c\"/>\n"
 						//"<set space=\"register\" offset=\"0x20a\" size=\"1\" val=\"0x0\"/>\n"
 						//only the DF direction control flag on x86 is reported by default here for string operations from the pspec
-						TrackedSet ts = context->getTrackedSet(Address(trans->getSpaceByName(space), idx));
+						TrackedSet ts = context->getTrackedSet(
+							Address(trans->getSpaceByName(addr.space), addr.offset));
 						std::string track;
 						for (TrackedSet::iterator it = ts.begin(); it != ts.end(); it++) {
 							track += "<set space=\"" + it->loc.space->getName() + "\" offset=\"0x" +
-								to_string(it->loc.offset, hex) + "\" size=\"" + std::to_string(it->loc.size) +
+								to_string(it->loc.offset, hex) +
+								"\" size=\"" + std::to_string(it->loc.size) +
 								"\" val=\"0x" + to_string(it->val, hex) + "\"/>\n";
 						}
 						//register values upon entry
 						write(query_response_start, sizeof(query_response_start));
-						writeString(std::string("<tracked_pointset space=\"" + space +
-							"\" offset=\"0x") + to_string(idx, hex) +
+						writeString(std::string("<tracked_pointset space=\"" + addr.space +
+							"\" offset=\"0x") + to_string(addr.offset, hex) +
 							"\">\n" + track +
 							"</tracked_pointset>\n");
 						write(query_response_end, sizeof(query_response_end));
@@ -1447,7 +1524,8 @@ std::vector<uchar> DecompInterface::readResponse() {
 			if (buf.size() != 0) { //can enhance if resbuf contains partial output?
 				//always "\r\n" at start of message?
 				//need to replace all new lines with "//"
-				std::replace_if(buf.begin() + 2, buf.end(), [](uchar it) { return it == '\n'; }, ' ');
+				std::replace_if(buf.begin() + 2, buf.end(),
+					[](uchar it) { return it == '\n'; }, ' ');
 				std::string str = "<doc><function><comment color=\"comment\">\n"
 					"//Decompiler native message: " + std::string(buf.begin()+2, buf.end()) +
 					"\n</comment></function></doc>";
@@ -1690,8 +1768,8 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 			std::to_string(inits[i].offset2 - inits[i].offset1) + "\">" "<set space=\"" + inits[i].space + "\" offset=\"" +
 			std::to_string(inits[i].offset) + "\" val=\"" + std::to_string(inits[i].val) + "\"/>"
 			"</tracked_pointset>";*/
-		Address addr1(trans->getSpaceByName(inits[i].space1), inits[i].offset1);
-		Address addr2(trans->getSpaceByName(inits[i].space2), inits[i].offset2);
+		Address addr1(trans->getSpaceByName(inits[i].addr1.space), inits[i].addr1.offset);
+		Address addr2(trans->getSpaceByName(inits[i].addr2.space), inits[i].addr2.offset);
 		newtrackmap.split(addr1);
 		newtrackmap.split(addr2);
 		for (partmap<Address, TrackedSet>::iterator it = newtrackmap.begin(addr1);
@@ -1700,8 +1778,9 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 			for (int i = 0; i < oldts.size(); i++) {
 				it->second.push_back(oldts[i]);
 			}*/
-			it->second.push_back(TrackedContext({ VarnodeData{ trans->getSpaceByName(inits[i].space),
-				inits[i].offset, inits[i].size}, inits[i].val }));
+			it->second.push_back(TrackedContext({
+				VarnodeData{ trans->getSpaceByName(inits[i].addr.addr.space),
+					inits[i].addr.addr.offset, (uint4)inits[i].addr.size}, inits[i].val }));
 		}
 	}
 
@@ -1756,7 +1835,8 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 							Address addrinner = Address::restoreXml(el, trans, size);
 							for (partmap<Address, TrackedSet>::iterator it = newtrackmap.begin(addr1);
 								it != newtrackmap.begin(addr2); it++) {
-								it->second.push_back(TrackedContext({ VarnodeData{ addrinner.getSpace(),
+								it->second.push_back(TrackedContext({
+									VarnodeData{ addrinner.getSpace(),
 									addrinner.getOffset(), (uint4)size},
 									strtoull(el->getAttributeValue("val").c_str(), nullptr, 10) }));
 							}
@@ -1790,14 +1870,17 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 				std::vector<std::pair<std::string, int>> outputs;
 				for (t = l.begin(); t != l.end(); ++t) {
 					if ((*t)->getName() == "input") { //name, size
-						inputs.push_back(std::pair<std::string, int>((*t)->getAttributeValue("name"), strtoull((*t)->getAttributeValue("size").c_str(), nullptr, 10)));
+						inputs.push_back(std::pair<std::string, int>((*t)->getAttributeValue("name"),
+							strtoull((*t)->getAttributeValue("size").c_str(), nullptr, 10)));
 					} else if ((*t)->getName() == "output") { //name, size
-						outputs.push_back(std::pair<std::string, int>((*t)->getAttributeValue("name"), strtoull((*t)->getAttributeValue("size").c_str(), nullptr, 10)));
+						outputs.push_back(std::pair<std::string, int>((*t)->getAttributeValue("name"),
+							strtoull((*t)->getAttributeValue("size").c_str(), nullptr, 10)));
 					} else if ((*t)->getName() == "body") {
 						body = (*t)->getContent();
 					}
 				}
-				if (finalname.size() != 0 && body.size() != 0) callExecPcodeMap[finalname] = getPcodeSnippet(body, inputs, outputs);
+				if (finalname.size() != 0 && body.size() != 0)
+					callExecPcodeMap[finalname] = getPcodeSnippet(body, inputs, outputs);
 			}
 		}
 	}
@@ -1874,7 +1957,8 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 					for (size_t i = 0; i < e->getNumAttributes(); i++) {
 						if (e->getAttributeName(i) == "dynamic") {
 							if (e->getAttributeValue(i) == "true")
-								callMechMap[el->getAttributeValue("name") + "@@inject_" + e->getAttributeValue("inject")] = new XmlPcodeEmit;
+								callMechMap[el->getAttributeValue("name") +
+									"@@inject_" + e->getAttributeValue("inject")] = new XmlPcodeEmit;
 							break;
 						}
 					}
@@ -1882,7 +1966,8 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 					const List& l(e->getChildren());
 					for (t = l.begin(); t != l.end(); ++t) {
 						if ((*t)->getName() == "body") {
-							callMechMap[el->getAttributeValue("name") + "@@inject_" + e->getAttributeValue("inject")] =
+							callMechMap[el->getAttributeValue("name") +
+								"@@inject_" + e->getAttributeValue("inject")] =
 								getPcodeSnippet((*t)->getContent(),
 									std::vector<std::pair<std::string, int>>(),
 									std::vector<std::pair<std::string, int>>());
@@ -1944,9 +2029,11 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 					std::vector<std::pair<std::string, int>> outputs;
 					for (t = l.begin(); t != l.end(); ++t) {
 						if ((*t)->getName() == "input") { //name, size
-							inputs.push_back(std::pair<std::string, int>((*t)->getAttributeValue("name"), strtoull((*t)->getAttributeValue("size").c_str(), nullptr, 10)));
+							inputs.push_back(std::pair<std::string, int>((*t)->getAttributeValue("name"),
+								strtoull((*t)->getAttributeValue("size").c_str(), nullptr, 10)));
 						} else if ((*t)->getName() == "output") { //name, size
-							outputs.push_back(std::pair<std::string, int>((*t)->getAttributeValue("name"), strtoull((*t)->getAttributeValue("size").c_str(), nullptr, 10)));
+							outputs.push_back(std::pair<std::string, int>((*t)->getAttributeValue("name"),
+								strtoull((*t)->getAttributeValue("size").c_str(), nullptr, 10)));
 						} else if ((*t)->getName() == "body") {
 							body = (*t)->getContent();
 						}
@@ -1986,11 +2073,13 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 			" name=\"" + as->getName() + "\" index=\"" + std::to_string(i) +//as->getIndex();
 			"\" bigendian=\"" + std::string(as->isBigEndian() ? "true" : "false") +
 			"\" delay=\"" + std::to_string(as->getDelay()) +
-			std::string(as->getDelay() != as->getDeadcodeDelay() ? "\" deadcodedelay=\"" + std::to_string(as->getDeadcodeDelay()) : "") +
+			std::string(as->getDelay() != as->getDeadcodeDelay() ?
+				"\" deadcodedelay=\"" + std::to_string(as->getDeadcodeDelay()) : "") +
 			"\" size=\"" + std::to_string(as->getAddrSize()) +
 			std::string(as->getWordSize() > 1 ? "\" wordsize=\"" + std::to_string(as->getWordSize()) : "") +
 			"\" physical=\"" + std::string(as->hasPhysical() ? "true" : "false") +
-			"\" global=\"" + std::string(globalSpaces.find(as->getName()) != globalSpaces.end() ? "true" : "false") + "\"/>"; //as->getName() == "ram"
+			"\" global=\"" +
+			std::string(globalSpaces.find(as->getName()) != globalSpaces.end() ? "true" : "false") + "\"/>"; //as->getName() == "ram"
 	}
 	procSpaces += "</spaces>";
 	uintm uniqBase = 0x10000000; //trans->getUniqueBase()
@@ -2322,7 +2411,7 @@ string getHasAttributeValue(Element* pEl, const string& nm)
 }
 
 std::string DecompInterface::convertSourceDoc(Element* el,
-	std::string & displayXml, std::string& funcProto)
+	std::string & displayXml, std::string& funcProto, std::string& funcColorProto)
 {
 	//Ghidra/Features/Decompiler/src/decompile/cpp/prettyprint.cc
 	//colors are keyword, comment, type, funcname, var, const, param and global
@@ -2333,18 +2422,19 @@ std::string DecompInterface::convertSourceDoc(Element* el,
 		el = *iter;
 		//"clang_document"
 		if (el->getName() == "function") { //syntax tree is followed by source code
-			s += convertSourceDoc(el, displayXml, funcProto);
+			s += convertSourceDoc(el, displayXml, funcProto, funcColorProto);
 		} else if (el->getName() == "block") {
-			s += convertSourceDoc(el, displayXml, funcProto);
+			s += convertSourceDoc(el, displayXml, funcProto, funcColorProto);
 		} else if (el->getName() == "statement") {
-			s += convertSourceDoc(el, displayXml, funcProto);
+			s += convertSourceDoc(el, displayXml, funcProto, funcColorProto);
 		} else if (el->getName() == "funcproto") {
-			funcProto = convertSourceDoc(el, displayXml, funcProto);
+			funcProto = convertSourceDoc(el, funcColorProto, funcProto, funcColorProto);
 			s += funcProto;
+			displayXml += funcColorProto;
 		} else if (el->getName() == "return_type") {
-			s += convertSourceDoc(el, displayXml, funcProto);
+			s += convertSourceDoc(el, displayXml, funcProto, funcColorProto);
 		} else if (el->getName() == "vardecl") {
-			s += convertSourceDoc(el, displayXml, funcProto);
+			s += convertSourceDoc(el, displayXml, funcProto, funcColorProto);
 		} else if (el->getName() == "syntax") {
 			//el->getAttributeValue("open");
 			//el->getAttributeValue("close");
@@ -2430,8 +2520,7 @@ std::string DecompInterface::getRegisterFromIndex(unsigned long long offs, int s
 //language id and compiler id from ldefs can be used for loading the patterns (for byte searching to find functions though - not a decompiler level issue):
 //data/patterns/patternconstraints.xml
 //patternconstraints -> language id="" -> compiler id="" -> <patternfile>name</patternfile>
-std::string DecompInterface::doDecompile(DecMode dm, std::string base,
-	unsigned long long DecompAddress, std::string & displayXml, std::string& funcProto)
+std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string & displayXml, std::string& funcProto, std::string& funcColorProto)
 {
 	std::vector<uchar> buf;
 	setSimplificationStyle(dm.actionname);
@@ -2472,9 +2561,9 @@ std::string DecompInterface::doDecompile(DecMode dm, std::string base,
 		}
 	}
 	lastdm = dm;
-	startOffs = DecompAddress;
-	buf = sendCommand1ParamTimeout("decompileAt", "<addr space=\"" + base +
-		"\" offset=\"0x" + to_string(DecompAddress, hex) + "\"/>", toutSecs);
+	startOffs = addr;
+	buf = sendCommand1ParamTimeout("decompileAt", "<addr space=\"" + addr.space +
+		"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>", toutSecs);
 	std::string decompXml = std::string(buf.begin(), buf.end());
 	if (decompXml.size() == 0) throw DecompError("Empty decompiler response due to error");
 	istringstream str(decompXml);
@@ -2494,7 +2583,7 @@ std::string DecompInterface::doDecompile(DecMode dm, std::string base,
 	} catch (XmlError& /*err*/) {
 		throw DecompError("Unable to parse XML: " + decompXml);
 	}
-	decompXml = convertSourceDoc(doc->getRoot(), displayXml, funcProto);
+	decompXml = convertSourceDoc(doc->getRoot(), displayXml, funcProto, funcColorProto);
 	delete doc;
 	/**
 	* Tell the decompiler to clear any function and symbol
