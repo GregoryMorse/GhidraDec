@@ -33,6 +33,8 @@
 #define DBL_DECIMAL_DIG __DBL_DECIMAL_DIG__
 #endif
 
+#define min(x, y) ((x <= y) ? (x) : (y))
+
 using namespace retdec;
 
 namespace idaplugin {
@@ -73,7 +75,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		else return 0;
 	}
 
-	std::string getMetaTypeInfo(tinfo_t& ti)
+	std::string getMetaTypeInfo(const tinfo_t& ti)
 	{
 		if (ti.is_void()) return "void";
 		else if (ti.is_char() || is_type_int(ti.get_realtype()) && ti.is_signed()) return "int";
@@ -84,7 +86,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		else if (ti.is_array()) return "array";
 		else if (ti.is_func() || ti.is_funcptr()) return "code";
 		else if (ti.is_ptr() /*|| ti.is_array() && ti.get_size() == 0*/) return "ptr";
-		else if (ti.is_enum()) return "uint";
+		else if (ti.is_enum()) return ti.is_signed() ? "int" : "uint"; //"int" if BTE_SDEC?
 		else return "unknown";
 	}
 	bool isX86()
@@ -360,18 +362,16 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			} while (xr.next_to());
 		}
 	}
-	void IdaCallback::getFuncInfo(AddrInfo addr, func_t* f, std::string & name, FuncProtoInfo & func)
+	void IdaCallback::getFuncInfo(AddrInfo addr, func_t* f, std::string& name, FuncProtoInfo& func)
 	{
-		//name = demangle_name(imports[offset].name.c_str(), MNG_SHORT_FORM).c_str();
-		//name = get_name(offset).c_str();
 		//get_ea_name(&qs, offset, GN_VISIBLE | GN_DEMANGLED | GN_SHORT);
-		if (imports.find((ea_t)addr.offset) != imports.end() && imports[(ea_t)addr.offset].name != "")
-			name = imports[(ea_t)addr.offset].name;
-		else {
-			name = get_short_name((ea_t)addr.offset, GN_STRICT).c_str();
-			if (name.size() != 0) name = name.substr(0, name.find("(", 0));
-			else name = getSymbolName(addr.offset).c_str();
+		if (imports.find((ea_t)addr.offset) != imports.end() && imports[(ea_t)addr.offset].name != "") {
+			name = demangle_name(imports[(ea_t)addr.offset].name.c_str(), MNG_SHORT_FORM).c_str();
+			if (name.size() == 0) name = imports[(ea_t)addr.offset].name;
 		}
+		if (name.size() == 0) name = get_short_name((ea_t)addr.offset, GN_STRICT).c_str();
+		if (name.size() != 0) name = name.substr(0, name.find("(", 0));
+		else name = getSymbolName(addr.offset);
 		func.isInline = false;
 		bool bFuncTinfo = getFuncTypeInfoByAddr(f != nullptr ? f->start_ea : (ea_t)addr.offset, func);
 		func.isNoReturn = (f != nullptr) ? !f->does_return() : (bFuncTinfo ? func.isNoReturn : false);// f->flags& FUNC_NORET ? true : false;
@@ -686,7 +686,12 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				}
 			} else if (msi.kind == KIND_EXTERNALREFERENCE) {
 				if (addr.space == "ram") {
-					if (imports.find((ea_t)addr.offset) != imports.end() && imports[(ea_t)addr.offset].name != "") msi.name = imports[(ea_t)addr.offset].name;
+					if (imports.find((ea_t)addr.offset) != imports.end() && imports[(ea_t)addr.offset].name != "") {
+						msi.name = demangle_name(imports[(ea_t)addr.offset].name.c_str(), MNG_SHORT_FORM).c_str();
+						if (msi.name.size() == 0) msi.name = imports[(ea_t)addr.offset].name;
+					}
+					if (msi.name.size() == 0) msi.name = get_short_name((ea_t)addr.offset, GN_STRICT).c_str();
+					if (msi.name.size() != 0) msi.name = msi.name.substr(0, msi.name.find("(", 0));
 					else msi.name = getSymbolName(addr.offset);
 				}
 				/*fixup_data_t fd;
@@ -722,7 +727,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 		});
 	}
-	void IdaCallback::getFuncTypeInfo(tinfo_t & ti, bool paramOnly, FuncProtoInfo& func)
+	void IdaCallback::getFuncTypeInfo(const tinfo_t & ti, bool paramOnly, FuncProtoInfo& func)
 	{
 		asize_t retSize = 0;
 		func_type_data_t ftd;
@@ -830,7 +835,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 						//get_func_name(&name, f->start_ea);
 						name = get_short_name((ea_t)offset, GN_STRICT);
 						if (name.size() != 0) name = name.substr(0, name.find("(", 0));
-						else get_name(&name, (ea_t)offset);
+						else name = getSymbolName(offset).c_str();
 						funcProtoInfos[u] = FuncInfo{ name.c_str(), innerFunc.model, innerFunc.retType, innerFunc.syminfo };
 					}
 				} else {
@@ -865,7 +870,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 							//get_func_name(&name, f->start_ea);
 							name = get_short_name((ea_t)offset, GN_STRICT);
 							if (name.size() != 0) name = name.substr(0, name.find("(", 0));
-							else get_name(&name, (ea_t)offset);
+							else name = getSymbolName(offset).c_str();
 							funcProtoInfos[u] = FuncInfo{ name.c_str(), innerFunc.model, innerFunc.retType, innerFunc.syminfo };
 						}
 					} else {
@@ -894,7 +899,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		} else if (tc[idx].metaType == "ptr") {
 			std::vector<TypeInfo> nextChain;
 			checkPointer(ea, nextChain, deps); //end recursion since pointer is only recursed through new data type if not already traced
-		} else if (tc[idx].metaType == "array") {
+		} else if (tc[idx].metaType == "array") { //unions and bitfields consumed in this way
 			unsigned long long elSize = tc[idx + 1].size;
 			if (elSize == -1) {
 				tinfo_t ti;
@@ -979,7 +984,22 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		});
 		funcProtoInfos[(ea_t)addr.offset] = FuncInfo{ callName.c_str(), func.model, func.retType, func.syminfo };
 	}
-	void IdaCallback::getType(tinfo_t ti, std::vector<TypeInfo>& typeChain, bool bOuterMost)
+	unsigned long long IdaCallback::getTypeSize(const tinfo_t & ti)
+	{
+		qstring typeName;
+		ti.get_type_name(&typeName);
+		int minSize = 0;
+		if (typeToAddress.find(typeName.c_str()) != typeToAddress.end()) {
+			const std::vector<ea_t>& vec = typeToAddress[typeName.c_str()];
+			for (size_t i = 0; i < vec.size(); i++) {
+				asize_t sz = get_item_size(vec[i]);
+				if (minSize == 0) minSize = (int)sz;
+				else minSize = min(minSize, (int)sz);
+			}
+		}
+		return minSize;
+	}
+	void IdaCallback::getType(const tinfo_t & ti, std::vector<TypeInfo>& typeChain, bool bOuterMost)
 	{
 		TypeInfo typeinf;
 		typeinf.isReadOnly = ti.is_const();
@@ -1001,19 +1021,21 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				typeinf.size = -1;
 				typeChain.push_back(typeinf);
 				return;
-			}
+			} //if size is BADSZIE and realtype is unknown then IDA prints these as dummy structures mostly for structures/classes it does not have type info for
 		} 
 		typeinf.metaType = getMetaTypeInfo(ti);
 		typeinf.size = ti.is_func() || ti.is_funcptr() ? 1 : ti.get_size();
-		if (typeinf.size == BADSIZE) typeinf.size = 0; //0 is void
+		if (typeinf.size == BADSIZE) typeinf.size = ti.get_realtype() == BT_UNK ? getTypeSize(ti) : 0; //0 is void
 		typeinf.isEnum = ti.is_enum();
 
 		//get_str_type() != -1 && (get_str_type() & STRWIDTH_2B);
 		typeinf.isUtf = false;
 		typeinf.isChar = ti.is_char();
 		qstring qs;
-		ti.get_type_name(&qs);
-		typeinf.typeName = qs.c_str();
+		//if (!is_anonymous_udt(ti) || !ti.is_union() && !(ti.is_struct() && hasBitFields)) { //type name needed for later lookup as anonymous type could end up being a union/bitfield structure which is converted to data type/array which will not have a name
+			ti.get_type_name(&qs);
+			typeinf.typeName = qs.c_str();
+		//}
 		//msg(typeinf.typeName + " " + typeinf.metaType + " " << typeChain.size());
 		if (typeinf.metaType == "ptr") {
 			ptr_type_data_t pt;
@@ -1026,9 +1048,11 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			ti.get_udt_details(&udt);
 			bool bHasBitField = false;
 			for (size_t i = 0; i < udt.size(); i++) {
+				if (udt[i].type.is_bitfield() || (udt[i].offset & 7) != 0) {
+					bHasBitField = true; break; //mark but scan for better decompiled type prolog
+				}
 				std::vector<TypeInfo> memberType;
-				getType(udt[i].type, memberType, false);
-				if (udt[i].type.is_bitfield() || (udt[i].offset & 7) != 0) bHasBitField = true; //mark but scan for better decompiled type prolog
+				getType(udt[i].type, memberType, is_anonymous_udt(udt[i].type));
 				typeinf.structMembers.push_back(StructMemberInfo{ udt[i].name.c_str(), udt[i].offset / 8, memberType }); //if not byte multiple bits, round down to nearest byte, what to do as Ghidra uses bytes?
 			}
 			if (udt.is_union || bHasBitField) {
@@ -1038,10 +1062,10 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				} else {
 					typeinf.metaType = "array";
 					typeinf.arraySize = udt.total_size;
-					typeChain.push_back(TypeInfo{ "byte", 1, "uint" });
 				}
 			}
 			typeChain.push_back(typeinf);
+			if ((udt.is_union || bHasBitField) && udt.total_size > 8) typeChain.push_back(TypeInfo{ "byte", 1, "uint" });
 		} else if (typeinf.metaType == "array") {
 			array_type_data_t ai;
 			ti.get_array_details(&ai);
@@ -1051,15 +1075,14 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		} else if (typeinf.metaType == "code") {
 			asize_t retSize = 0;
 			func_type_data_t ftd;
+			ptr_type_data_t pt;
 			if (ti.is_funcptr()) {
-				ptr_type_data_t pt;
 				ti.get_ptr_details(&pt);
-				ti = pt.obj_type;
-			}
-			ti.get_func_details(&ftd);
+				pt.obj_type.get_func_details(&ftd);
+			} else ti.get_func_details(&ftd);
 			typeinf.size = (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm)) ? ph.segreg_size : 0;
 			typeinf.size += inf.is_64bit() ? 8 : (inf.is_32bit() ? 4 : 2);
-			getFuncTypeInfo(ti, true, typeinf.funcInfo);
+			getFuncTypeInfo(ti.is_funcptr() ? pt.obj_type : ti, true, typeinf.funcInfo);
 			typeChain.push_back(typeinf);
 		} else { //size greater than 16 needs to be converted to array, really should be 8 as no core types exist
 			int typ = DecompInterface::coreTypeLookup((size_t)typeinf.size, typeinf.metaType);
@@ -1074,6 +1097,13 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				if (typeinf.typeName.size() == 0) { //dont give type name if already have one
 					qs = typ == -1 ? "undefined" : defaultCoreTypes[typ].name.c_str();
 					typeinf.typeName = typeinf.isEnum ? "enum" : (typeinf.isChar ? "char" : qs.c_str());
+				}
+				if (typeinf.isEnum) {
+					enum_type_data_t etd;
+					ti.get_enum_details(&etd);
+					for (size_t i = 0; i < etd.size(); i++) {
+						typeinf.enumMembers.push_back(std::pair<std::string, unsigned long long>(etd[i].name.c_str(), etd[i].value));
+					}
 				}
 				typeChain.push_back(typeinf);
 			}
@@ -1236,7 +1266,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				qstring qs;
 				ti.get_type_name(&qs);
 				if (qs.size() != 0 && usedT.find(qs.c_str()) != usedT.end() && !usedT[qs.c_str()] && !firstScan) continue;
-				else if (/*!ti.is_anonymous_udt() &&*/ qs.size() != 0) buildDependents(qs.c_str(), usedT, isDependee);
+				else if (/*!is_anonymous_udt(ti) &&*/ qs.size() != 0) buildDependents(qs.c_str(), usedT, isDependee);
 				if (ti.is_typeref()) {
 					qs.clear();
 					ti.get_next_type_name(&qs);
@@ -1319,7 +1349,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	//	qstring qs;
 	//	ti.get_type_name(&qs);
 	//	if (qs.size() != 0 && !usedTypes[qs.c_str()] && !firstScan) return;
-	//	else if (/*!ti.is_anonymous_udt() &&*/ qs.size() != 0) dfsVisit(qs.c_str(), sortedTypes);
+	//	else if (/*!is_anonymous_udt(ti) &&*/ qs.size() != 0) dfsVisit(qs.c_str(), sortedTypes);
 	//	if (ti.is_typeref()) {
 	//		qs.clear();
 	//		ti.get_next_type_name(&qs);
@@ -1386,7 +1416,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				qstring qs;
 				ti.get_type_name(&qs);
 				if (qs.size() != 0 && !unvisited[qs.c_str()] && !firstScan) continue;
-				else if (/*!ti.is_anonymous_udt() &&*/ qs.size() != 0) {
+				else if (/*!is_anonymous_udt(ti) &&*/ qs.size() != 0) {
 					if (unvisited[qs.c_str()] && !firstScan) {
 						unvisited[qs.c_str()] = false; s.push(qs.c_str()); hasUnvisitChdrn = true;
 					}
@@ -1733,7 +1763,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	{
 		return bColor ? std::string({ COLOR_ON, clr }) + str + std::string({ COLOR_OFF, clr }) : str;
 	}
-	std::string printTypeForCode(const tinfo_t & t, std::string name, bool bColor, char NameColor, bool bTop, int64 indnt) //unions, bitfields and typedefs to default built in types require this
+	std::string printTypeForCode(const tinfo_t & t, std::string name, bool bColor, char NameColor, bool bTop, size_t indnt) //unions, bitfields and typedefs to default built in types require this
 	{
 		std::string out;
 		std::stack<std::tuple<std::string, tinfo_t, bool>> s;
@@ -1786,25 +1816,27 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 						bitfield_type_data_t btd;
 						utd[i].type.get_bitfield_details(&btd);
 						str += std::string(indnt + 2, ' ') + colorize(std::string(utd[i].name.c_str()), bColor, NameColor) + ":" + std::to_string(btd.width);
-					} else str += std::string(indnt + 2, ' ') + printTypeForCode(utd[i].type, utd[i].name.c_str(), bColor, NameColor, false, indnt + 2);
+					} else str += std::string(indnt + 2, ' ') + printTypeForCode(utd[i].type, utd[i].name.c_str(), bColor, NameColor, is_anonymous_udt(utd[i].type), indnt + 2);
 					str += ";" + colorize(std::string(utd[i].cmt.size() != 0 ? " //" + std::string(utd[i].cmt.c_str()) : ""), bColor, COLOR_AUTOCMT) + "\n";
 				}
-				out += colorize(utd.is_union ? "union" : "struct", bColor, COLOR_KEYWORD) + " {\n" + str + "}" + (std::get<0>(item).size() != 0 ? " " : "") + colorize(std::get<0>(item), bColor, NameColor);
+				out += colorize(utd.is_union ? "union" : "struct", bColor, COLOR_KEYWORD) + " {\n" + str + std::string(indnt, ' ') + "}" + (std::get<0>(item).size() != 0 ? " " : "") + colorize(std::get<0>(item), bColor, NameColor);
 			} else if (ti.is_enum()) {
 				enum_type_data_t etd;
 				ti.get_enum_details(&etd);
+				out += colorize("enum", bColor, COLOR_KEYWORD) + " {\n";
 				for (size_t i = 0; i < etd.size(); i++) {
-					out += std::string(etd[i].name.c_str()) + " = " + std::to_string(etd[i].value) + (i != etd.size() - 1 ? "," : "") + colorize(std::string(etd[i].cmt.size() != 0 ? " //" + std::string(etd[i].cmt.c_str()) : ""), bColor, COLOR_AUTOCMT);
+					out += std::string(indnt + 2, ' ') + std::string(etd[i].name.c_str()) + " = " + std::to_string(etd[i].value) + (i != etd.size() - 1 ? "," : "") + colorize(std::string(etd[i].cmt.size() != 0 ? " //" + std::string(etd[i].cmt.c_str()) : ""), bColor, COLOR_AUTOCMT) + "\n";
 				}
-			} else if (ti.is_int() || ti.is_uint() || ti.is_floating() || ti.is_void() || ti.is_bool() || ti.is_unknown()) {
+				out += "}" + std::string(std::get<0>(item).size() != 0 ? " " : "") + colorize(std::get<0>(item), bColor, NameColor);
+			} else if (is_type_int(ti.get_realtype()) || ti.is_uint() || ti.is_floating() || ti.is_void() || ti.is_bool() || ti.is_unknown()) {
 				qstring qs;
 				ti.print(&qs, nullptr, PRTYPE_DEF);
-				out += colorize(qs.c_str(), bColor, COLOR_KEYWORD) + " " + colorize(std::get<0>(item), bColor, NameColor);
+				out += colorize(qs.c_str(), bColor, COLOR_KEYWORD) + (std::get<0>(item).size() != 0 ? " " + colorize(std::get<0>(item), bColor, NameColor) : "");
 			}
 		}
 		return out;
 	}
-	std::string printTypeForCode(const std::vector<TypeInfo>& types, std::string name, bool bColor, char NameColor, bool bTop, int64 indnt)
+	std::string printTypeForCode(const std::vector<TypeInfo>& types, std::string name, bool bColor, char NameColor, bool bTop, size_t indnt)
 	{
 		std::string out;
 		std::stack<std::pair<std::string, int>> s;
@@ -1822,8 +1854,25 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				continue;
 			}
 			const TypeInfo& ti = types.at(item.second);
+			tinfo_t tinf;
+			tinf.get_named_type(get_idati(), ti.typeName.c_str());
+			bool bHasBitFields = false;
+			if (tinf.is_struct()) {
+				udt_type_data_t utd;
+				tinf.get_udt_details(&utd);
+				for (size_t i = 0; i < utd.size(); i++) {
+					if (utd[i].type.is_bitfield()) {
+						bHasBitFields = true; break;
+					}
+				}
+			}
 			if ((!bTop || item.second != 0) && ti.typeName.size() != 0) out += (ti.isReadOnly ? colorize("const", bColor, COLOR_KEYWORD) + " " : "") + colorize(ti.typeName, bColor, COLOR_LOCNAME) + (item.first.size() != 0 ? " " : "") + colorize(item.first, bColor, NameColor);
-			else if (ti.metaType == "ptr") {
+			else if (bTop &&
+					(ti.metaType == "int" || ti.metaType == "uint" || ti.metaType == "void" ||
+						ti.metaType == "bool" || ti.metaType == "float" || ti.metaType == "unknown") ||
+						(tinf.is_union() || tinf.is_struct() && bHasBitFields) /*&& !ti.is_typeref()*/) { //&& has_bitfields
+				out += printTypeForCode(tinf, item.first, bColor, NameColor, bTop, indnt);
+			} else if (ti.metaType == "ptr") {
 				s.push(std::pair<std::string, int>(item.first, ~item.second));
 				s.push(std::pair<std::string, int>("", item.second + 1));
 			} else if (ti.metaType == "array") {
@@ -1839,9 +1888,15 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			} else if (ti.metaType == "struct") { //note: bitfields and unions are not handled here except as byte arrays
 				std::string str;
 				for (size_t i = 0; i < ti.structMembers.size(); i++) {
-					str += std::string(indnt + 2, ' ') + printTypeForCode(ti.structMembers[i].ti, ti.structMembers[i].name, bColor, NameColor, false, indnt + 2) + ";\n";
+					str += std::string(indnt + 2, ' ') + printTypeForCode(ti.structMembers[i].ti, ti.structMembers[i].name, bColor, NameColor, ti.structMembers[i].name == "", indnt + 2) + ";\n";
 				}
-				out += colorize("struct", bColor, COLOR_KEYWORD) + " {\n" + str + "}" + (item.first.size() != 0 ? " " : "") + colorize(item.first, bColor, NameColor);
+				out += colorize("struct", bColor, COLOR_KEYWORD) + " {\n" + str + std::string(indnt, ' ') + "}" + (item.first.size() != 0 ? " " : "") + colorize(item.first, bColor, NameColor);
+			} else if (ti.isEnum) {
+				out += colorize("enum", bColor, COLOR_KEYWORD) + " {\n";
+				for (size_t i = 0; i < ti.enumMembers.size(); i++) {
+					out += std::string(indnt + 2, ' ') + std::string(ti.enumMembers[i].first.c_str()) + " = " + std::to_string(ti.enumMembers[i].second) + (i != ti.enumMembers.size() - 1 ? "," : "") + "\n";
+				}
+				out += "}" + std::string(item.first.size() != 0 ? " " : "") + colorize(item.first, bColor, NameColor);
 			} else {}
 		}
 		return out;
@@ -1877,13 +1932,13 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				if (utd.is_union) { //how to choose member? size of each member could be matched with next data, pointers in union could be matched to pointers in data
 					if (utd.size() != 0) str += initForType(utd[0].type, std::get<0>(item), bColor);
 				} else {
-					for (int i = 0; i < utd.size(); i++) {
+					for (size_t i = 0; i < utd.size(); i++) {
 						if (i != 0) str += ", ";
 						if (utd[i].type.is_bitfield()) {
 							bitfield_type_data_t btd;
 							utd[i].type.get_bitfield_details(&btd);
 							uint64 val = 0;
-							uint64 totalSize = (utd[i].offset + btd.width + 7) / 8 - utd[i].offset / 8;
+							size_t totalSize = (size_t)((utd[i].offset + btd.width + 7) / 8 - utd[i].offset / 8);
 							std::vector<uchar> bts(totalSize);
 							get_bytes(bts.data(), totalSize, std::get<0>(item));
 							unsigned long long num, shiftbits = 8 - ((utd[i].offset + btd.width) % 8);
@@ -2123,16 +2178,19 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 		}
 		for (std::map<ea_t, bool>::iterator it = usedImports.begin(); it != usedImports.end(); it++) {
-			qs = imports[it->first].name.c_str();
+			if (imports.find(it->first) != imports.end() && imports[it->first].name != "") {
+				qs = demangle_name(imports[it->first].name.c_str(), MNG_SHORT_FORM);
+				if (qs.size() == 0) qs = imports[it->first].name.c_str();
+			}
 			if (qs.size() == 0) qs = get_short_name(it->first, GN_STRICT);
 			if (qs.size() != 0) qs = qs.substr(0, qs.find("(", 0));
-			else get_name(&qs, it->first);
+			else qs = getSymbolName(it->first).c_str();
 			if (finalFuncs.find(qs.c_str()) != finalFuncs.end()) usedRefFuncs[it->first] = true;
 		}
 		for (std::map<ea_t, bool>::iterator it = usedFuncs.begin(); it != usedFuncs.end(); it++) {
-			get_long_name(&qs, it->first, GN_STRICT);
-			//std::string str = demangle_name(get_name(it->first).c_str(), MNG_LONG_FORM).c_str();
-			if (qs.size() == 0) get_name(&qs, it->first);
+			qs = get_short_name(it->first, GN_STRICT);
+			if (qs.size() != 0) qs = qs.substr(0, qs.find("(", 0));
+			else qs = getSymbolName(it->first).c_str();
 			if (finalFuncs.find(qs.c_str()) != finalFuncs.end()) usedRefFuncs[it->first] = true;
 		}
 		//for any single function failed decompilation with no function prototype - make sure one is printed in comments
@@ -2231,6 +2289,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			//ti.get_type_name(&qt);
 			qstring qs;
 			alreadyDefined[*it] = true;
+			if (is_anonymous_udt(ti)) continue;
 			if (ti.is_udt()) {
 				std::map<std::string, bool> notDefined;
 				checkForwardDecl(ti, alreadyDefined, notDefined);
@@ -2258,24 +2317,20 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					" " + std::string({ COLOR_ON, COLOR_LOCNAME }) + std::string(qt.c_str()) + std::string({ COLOR_OFF, COLOR_LOCNAME }) + ";\n";
 				if (usedRefTypes.find(*it) == usedRefTypes.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
 			} else {
-				//ida has a bug where only the first anonymous member of a union is printed anonymously...
 				//ti.print(&qs, nullptr, (ti.is_udt() ? PRTYPE_MULTI : PRTYPE_1LINE) | PRTYPE_DEF | PRTYPE_TYPE | PRTYPE_RESTORE);				
 				if (usedRefTypes.find(*it) == usedRefTypes.end()) {
 					definitions += "/*"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "/*";
 				}
 				//definitions += std::string((ti.is_udt() ? qs.rtrim('\n') : qs).c_str()) + " " + std::string(qt.c_str()) + ";";
 				std::vector<TypeInfo> typeChain = typeDatabase[it->c_str()];
-				if (typeChain.size() == 0 || (typeChain.begin()->typeName == qt.c_str() &&
-					(typeChain.begin()->metaType == "int" || typeChain.begin()->metaType == "uint" || typeChain.begin()->metaType == "void" ||
-					typeChain.begin()->metaType == "bool" || typeChain.begin()->metaType == "float" || typeChain.begin()->metaType == "unknown")) || (ti.is_union() || ti.is_struct()) && !ti.is_typeref()) { //&& has_bitfields
-					//ti.print(&qs, nullptr, PRTYPE_DEF);
-					definitions += "typedef " + printTypeForCode(ti, "", false, COLOR_LOCNAME, typeChain.size() == 0 || typeChain.begin()->typeName == qt.c_str(), 0) + " " + std::string(qt.c_str()) + ";";
+				//wchar_t is special exception with no entries since its also a core type but nice to have the comment regarding its IDA detected C integral definition
+				if (typeChain.size() == 0) {
+					definitions += "typedef " + printTypeForCode(ti, "", false, COLOR_LOCNAME, true, 0) + " " + std::string(qt.c_str()) + ";";
 					//str = std::string((ti.is_udt() ? qs.rtrim('\n') : qs).c_str()) + " " + std::string(qt.c_str()) + ";";
 					str = std::string({ COLOR_ON, COLOR_KEYWORD }) + "typedef" + std::string({ COLOR_OFF, COLOR_KEYWORD }) +
-						" " + printTypeForCode(ti, "", true, COLOR_LOCNAME, typeChain.size() == 0 || typeChain.begin()->typeName == qt.c_str(), 0) + " " +
+						" " + printTypeForCode(ti, "", true, COLOR_LOCNAME, true, 0) + " " +
 						std::string({ COLOR_ON, COLOR_LOCNAME }) + std::string(qt.c_str()) + std::string({ COLOR_OFF, COLOR_LOCNAME }) + ";";
 				} else {
-					//if (typeChain.begin()->typeName == qt.c_str()) typeChain.begin()->typeName = "";
 					definitions += "typedef " + printTypeForCode(typeChain, "", false, COLOR_LOCNAME, typeChain.begin()->typeName == qt.c_str(), 0) + " " + std::string(qt.c_str()) + ";";
 					//str = std::string((ti.is_udt() ? qs.rtrim('\n') : qs).c_str()) + " " + std::string(qt.c_str()) + ";";
 					str = std::string({ COLOR_ON, COLOR_KEYWORD }) + "typedef" + std::string({ COLOR_OFF, COLOR_KEYWORD }) +
@@ -2328,10 +2383,10 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					//tif.get_func_details(&ftd);
 					definitions += print_func(*it, forDisplay, COLOR_IMPNAME);
 				} else {
-					qs = imports[*it].name.c_str();
+					qs = demangle_name(imports[*it].name.c_str(), MNG_LONG_FORM).c_str();
+					if (qs.size() == 0) qs = imports[*it].name.c_str();
 					if (qs.size() == 0) get_long_name(&qs, *it, GN_STRICT);
-					//std::string str = demangle_name(imports[*it].name.c_str(), MNG_LONG_FORM).c_str();
-					if (qs.size() == 0) get_name(&qs, *it);
+					if (qs.size() == 0) qs = getSymbolName(*it).c_str();
 					//str = get_name(*it).c_str();				
 					if (qs.find("(", 0) == qstring::npos) {
 						definitions += "void" " " + std::string(qs.c_str()) + "(" "void" ")";
@@ -2366,8 +2421,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				qstring qs; //first check decompiler prototypes, then type info, then demangler, then void <name>(void)
 				if (getFuncByGuess(it->first, tif)) print_type(&qs, it->first, PRTYPE_1LINE);
 				if (qs.size() == 0) get_long_name(&qs, it->first, GN_STRICT);
-				//std::string str = demangle_name(get_name(it->first).c_str(), MNG_LONG_FORM).c_str();
-				if (qs.size() == 0) get_name(&qs, it->first);
+				if (qs.size() == 0) qs = getSymbolName(it->first).c_str();
 				if (qs.find("(", 0) == qstring::npos) qs = qstring("void ") + qs + "(void)";
 				//most of the names are not mangled, and thus do not have the needed C declaration information attached
 				definitions += qs.c_str();
@@ -2567,6 +2621,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		modNames.clear();
 		imports.clear();
 		importNames.clear();
+		typeToAddress.clear();
 		usedImports.clear();
 		usedTypes.clear();
 		usedData.clear();
@@ -2620,11 +2675,21 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			ti.print(&qs);
 			//replace_ordinal_typerefs(nullptr, &ti);
 		}*/
+		ea_t ea = inf.min_ea;
+		do {
+			ea = next_head(ea, inf.max_ea);
+			if (ea == BADADDR) break;
+			tinfo_t ti;
+			if (get_tinfo(&ti, ea) && ti.get_type_name(&qs)) {
+				typeToAddress[qs.c_str()].push_back(ea);
+			}
+		} while (true);
+
 		const char* nm = first_named_type(nullptr, NTF_TYPE);
 		while (nm != nullptr) {
 			tinfo_t ti;
 			ti.get_named_type(nullptr, nm);
-			getType(ti, typeDatabase[nm]);
+			if (!is_anonymous_udt(ti)) getType(ti, typeDatabase[nm]);
 			nm = next_named_type(nullptr, nm, NTF_TYPE);
 		}
 		/*num = get_idati()->nbases;
@@ -2639,7 +2704,6 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				nm = next_named_type(get_idati()->base[i], nm, NTF_TYPE);
 			}
 		}*/
-
 		if (ph.has_segregs()) { //initialize segment registers for tracking - vital for x86-16
 			for (int i = 0; i <= ph.reg_last_sreg - ph.reg_first_sreg; i++) {
 				//this is a much more powerful analysis by the processor engine than the default segregs which now are not used
@@ -3297,5 +3361,111 @@ Manually one could enumerate code x-refs to the function and use ida_typeinf.app
 Also an alternative to the processor module may be to use ida_typeinf.delete_wrong_frame_info(f, reanalyze_callback) but it requires a callback which takes instructions as an argument.  Its not really intended for a complete refresh.
 
 Anyway, the wrong far data pointer identification was fixed and I have not found any simpler or more straight forward way to do so. Regardless, the techniques and ideas here could be useful beyond such legacy cases. Happy reversing.
+
+
+import idautils
+def get_lib_funcs():
+  libfuncs = []
+  for segea in Segments():
+    for funcea in idautils.Functions(segea, idc.SegEnd(segea)):
+      functionName = idc.GetFunctionName(funcea)
+      f = idaapi.get_func(funcea)
+      fr = ida_frame.get_frame(f)
+      tinfo = idaapi.tinfo_t()
+      idaapi.get_tinfo2(funcea, tinfo)
+      fi = idaapi.func_type_data_t()
+      tinfo.get_func_details(fi)
+      if (f.flags & idaapi.FUNC_LIB) != 0: libfuncs.append((funcea, functionName, f, fr, fi))
+  return libfuncs
+
+def check_fix_all(b):
+  res = []
+  for (ea, fn, f, fr, fi) in get_lib_funcs():
+    r = check_func_frame((ea, fn, f, fr, fi))
+    #if r:
+	#  print(fn)
+    #  idc.AskStr('', '')
+    if (r and b): repair_func(ea)
+    res.append((fn, r))
+  return res
+
+def check_func_frame((ea, fn, f, fr, fi)):
+  if fr is None: return False
+  for i in range(fr.memqty):
+    if fr.get_member(i).soff < ida_frame.frame_off_args(f): continue
+    xrefs = idaapi.xreflist_t()
+    idaapi.build_stkvar_xrefs(xrefs, f, fr.get_member(i))
+    for xref in xrefs:
+      flags = idc.GetFlags(xref.ea)
+      stkvar = 0 if idc.isStkvar0(flags) else 1 if idc.isStkvar1(flags) else None
+      if stkvar is None: continue
+      ida_ua.decode_insn(xref.ea)
+      op = ida_ua.cmd.Operands[stkvar]
+      if op.type == ida_ua.o_displ and op.dtype == ida_ua.dt_word and fr.get_member(i).eoff - fr.get_member(i).soff == 4: return True
+  return False
+
+
+import ctypes
+def get_dll():
+	# http://www.hexblog.com/?p=695
+	idaname = "ida64" if idc.__EA64__ else "ida"
+	if sys.platform == "win32":
+		return ctypes.windll[idaname + (".dll" if idaapi.IDA_SDK_VERSION >= 700 else ".wll")]
+	elif sys.platform == "linux2":
+		return ctypes.cdll["lib" + idaname + ".so"]
+	elif sys.platform == "darwin":
+		return ctypes.cdll["lib" + idaname + ".dylib"]
+def get_ph(notif):
+#int32 version, id, uint32 flag;
+#uint32 flag2; # >= 7.0
+#int32 cnbits, dnbits;
+#const char *const *psnames, *plnames, const asm_t *const *assemblers; # ptr >= 7.0 is 64-bit
+#hook_cb_t *_notify; # >= 7.0 otherwise its just notify(int, ...) instead of (void*, int, va_list/...)
+#va_list is just a pointer argument to the variadic list which at invocation time would be difficult to achieve by pushing the next stack address onto the stack as such low level operation probably is not in ctypes
+	class processor_t(ctypes.Structure):
+		_fields_ = [ ('padding', ctypes.c_int * (8 + 4 if idaapi.IDA_SDK_VERSION >= 700 else 0)),
+					 ('notify', notif), ]
+	# The exported 'ph' global is the processor_t of the current proc module
+	return processor_t.in_dll(get_dll(), 'ph')
+
+def ph_notify(msgid, *args):
+  if idaapi.IDA_SDK_VERSION >= 700:
+	class VA_LIST(ctypes.Structure):
+	  _fields_ = [("arg_" + str(i), args[i].__class__) for i in range(len(args))]
+	va_list = VA_LIST(*args)
+	return get_ph(ctypes.WINFUNCTYPE(ctypes.c_size_t, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p)).notify(None, msgid, ctypes.pointer(va_list))
+  else:
+	return get_ph(ctypes.WINFUNCTYPE(ctypes.c_size_t, ctypes.c_int, [i.__class__ for i in args])).notify(msgid, *args)
+
+#idaman ssize_t ida_export invoke_callbacks(hook_type_t hook_type, int notification_code, va_list va);
+def invoke_callbacks(msgid, *args):
+  HT_IDP = 0 #Hook to the processor module.
+#AMD64 ABI va_list: unsigned int gp_offset (max 48=6*8), fp_offset (max 304=6*8+16*16), void* overflow_arg_area, reg_save_area
+  #class VA_LIST(ctypes.Structure):
+  #    _fields_ = [("gp_offset", ctypes.c_uint), ("fp_offset", ctypes.c_uint),
+  #      ("overflow_arg_area", ctypes.c_void_p), ("reg_save_area", ctypes.c_void_p)]
+  class VA_OF_LIST(ctypes.Structure):
+	  _fields_ = [("arg_" + str(i), args[i].__class__) for i in range(len(args))]
+  va_of_list = VA_OF_LIST(*args)
+  #va_list = VA_LIST(0, 6*8, ctypes.cast(ctypes.pointer(va_of_list), ctypes.c_void_p), ctypes.cast(ctypes.pointer(va_of_list), ctypes.c_void_p))
+  return get_dll().invoke_callbacks(HT_IDP, msgid, ctypes.pointer(va_of_list))
+def repair_func(ea):
+  tinfo = idaapi.tinfo_t()
+  if not idaapi.get_tinfo2(ea, tinfo): return False
+  fi = idaapi.func_type_data_t()
+  if not tinfo.get_func_details(fi): return False
+  fi.cc = (fi.cc & ~idaapi.CM_M_MASK) | idaapi.CM_M_FN
+  tinfo.create_func(fi)
+  ida_typeinf.apply_tinfo(ea, tinfo, idaapi.TINFO_DEFINITE)
+  f = idaapi.get_func(ea)
+  ida_frame.del_frame(f)
+  ev_create_func_frame = 60
+  ph_notify(ev_create_func_frame, ctypes.c_void_p(int(f.this)))
+  if not ida_typeinf.guess_tinfo(tinfo, ea):
+    if not idaapi.get_tinfo2(ea, tinfo): return False
+  tinfo.get_func_details(fi)
+  fi.cc = (fi.cc & ~idaapi.CM_M_MASK) | idaapi.CM_M_FN
+  tinfo.create_func(fi)
+  ida_typeinf.apply_tinfo(ea, tinfo, idaapi.TINFO_DEFINITE)
 
 */

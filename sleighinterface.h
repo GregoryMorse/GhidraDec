@@ -175,6 +175,7 @@ struct TypeInfo
 	bool isChar = false; //char
 	unsigned long long arraySize = 0; //array
 	std::vector<StructMemberInfo> structMembers; //struct
+	std::vector<std::pair<std::string, unsigned long long>> enumMembers; //enum
 	FuncProtoInfo funcInfo; //code
 
 	bool isReadOnly; //external use only for all except functions, structures, array - decompiler does not need - it tracks symbols not types better to create derived struct

@@ -1409,7 +1409,8 @@ bool PrintC::pushPtrCharConstant(uintb val,const TypePointer *ct,const Varnode *
   if (stringaddr.isInvalid()) return false;
   if (!glb->symboltab->getGlobalScope()->isReadOnly(stringaddr,1,Address()))
     return false;	     // Check that string location is readonly
-
+  SymbolEntry* ent = glb->symboltab->getGlobalScope()->queryContainer(stringaddr, 1, Address());
+  if (ent == (SymbolEntry*)0 || ent->getSymbol() == (Symbol*)0) return false;
   ostringstream str;
   Datatype *subct = ct->getPtrTo();
   if (!printCharacterConstant(str,stringaddr,subct->getSize()))

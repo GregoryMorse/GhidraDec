@@ -647,7 +647,7 @@ std::string DecompInterface::buildTypeXml(std::vector<TypeInfo>& ti)
 		if (typeInfo.metaType == "ptr") {
 			str += "<type name=\"" + typeInfo.typeName + /*"\" id=\"" + std::to_string(hashName(typeInfo.typeName))*/ +
 				"\" metatype=\"" + typeInfo.metaType +
-				"\" size=\"" + std::to_string(typeInfo.size) + "\">";
+				"\" size=\"" + std::to_string(typeInfo.size) + "\">"; //wordsize=\"\" when != 1
 			s.push(-1);
 			s.push(idx + 1);
 		} else if (typeInfo.metaType == "struct") {
@@ -690,7 +690,14 @@ std::string DecompInterface::buildTypeXml(std::vector<TypeInfo>& ti)
 				std::string(typeInfo.isEnum ? " enum=\"true\"" : "") +
 				std::string(typeInfo.isUtf ? " utf=\"true\"" : "") +
 				std::string(typeInfo.isChar ? " char=\"true\"" : "") +
-				">" "</type>\n";
+				">"; //core=\"true\"
+			if (typeInfo.isEnum) {
+				for (size_t i = 0; i < typeInfo.enumMembers.size(); i++) {
+					str += "<val name=\"" + typeInfo.enumMembers[i].first +
+						"\" value=\"" + std::to_string(typeInfo.enumMembers[i].second) + "\"/>\n";
+				}
+			}
+			str += "</type>\n";
 		}
 		//metaType == "uint" && callback->isEnum();
 		//metaType == "code"...

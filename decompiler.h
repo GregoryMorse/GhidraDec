@@ -60,6 +60,7 @@ namespace idaplugin {
 		std::vector<std::string> modNames;
 		std::map<std::string, bool> importNames;
 		std::map<ea_t, ImportInfo> imports;
+		std::map<std::string, std::vector<ea_t>> typeToAddress;
 		std::map<ea_t, bool> usedImports;
 		std::map<std::string, bool> usedTypes;
 		std::vector<bool> coreTypeUsed;
@@ -97,12 +98,13 @@ namespace idaplugin {
 		std::string getSymbol(AddrInfo addr);
 
 		void getFuncInfo(AddrInfo addr, func_t* f, std::string & name, FuncProtoInfo & func);
-		void getFuncTypeInfo(tinfo_t& ti, bool paramOnly, FuncProtoInfo& func);
+		void getFuncTypeInfo(const tinfo_t& ti, bool paramOnly, FuncProtoInfo& func);
 		bool getFuncTypeInfoByAddr(ea_t ea, FuncProtoInfo& func);
 		bool checkPointer(unsigned long long offset, std::vector<TypeInfo>& typeChain, std::vector<ea_t>& deps);
 		void consumeTypeInfo(int idx, std::vector<TypeInfo>& tc, unsigned long long ea, std::vector<ea_t>& deps);
 		std::string lookupDataInfo(unsigned long long offset, bool* readonly, bool* volatil, std::vector<TypeInfo>& typeChain);
-		void getType(tinfo_t ti, std::vector<TypeInfo>& typeChain, bool bOuterMost = true);
+		unsigned long long getTypeSize(const tinfo_t & ti);
+		void getType(const tinfo_t & ti, std::vector<TypeInfo>& typeChain, bool bOuterMost = true);
 
 		void analysisDump(std::string& definitions, std::string& forDisplay, std::string& idaInfo);
 		std::string dumpIdaInfo();
