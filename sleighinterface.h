@@ -265,6 +265,7 @@ public:
 
 	virtual void getInits(std::vector<InitStateItem>& inits) = 0;
 	virtual void launchDecompiler() = 0;
+	virtual void protocolRecorder(std::string data, bool bWrite) {} //command, queryresponse, exception, buffereddata, packed bytes and packed pcode use packedBytes({}) and packedPcode("XmlEncodedPcode")
 	virtual size_t readDec(void* Buf, size_t MaxCharCount) = 0;
 	virtual size_t writeDec(void const* Buf, size_t MaxCharCount) = 0;
 	virtual void terminate() = 0;
@@ -334,11 +335,12 @@ class DecompInterface
 	std::vector<uchar> sendCommand2Params(std::string command, std::string param1, std::string param2);
 	std::vector<uchar> sendCommand1Param(std::string command, std::string param1);
 	std::string convertSourceDoc(Element* el, std::string& displayXml,
-		std::string& funcProto, std::string& funcColorProto);
+		std::string& funcProto, std::string& funcColorProto,
+		std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph);
 	std::string getOptions(Options opt);
 	void adjustUniqueBase(VarnodeTpl* v);
-	std::string buildTypeXml(std::vector<TypeInfo>& typeInfo);
-	std::string writeFuncProto(FuncProtoInfo func, std::string injectstr, bool bUseInternalList);
+	std::string buildTypeXml(std::vector<TypeInfo>& typeInfo, size_t indnt);
+	std::string writeFuncProto(FuncProtoInfo func, std::string injectstr, bool bUseInternalList, size_t indnt);
 	std::string writeFunc(SizedAddrInfo addr, std::string funcname, std::string parentname, FuncProtoInfo func);
 protected:
 	void setupTranslator(DecompileCallback* cb, std::string sleighfilename);
@@ -377,7 +379,8 @@ public:
 
 	//only after setup, and if decompilation process running and registered
 	std::string doDecompile(DecMode dm, AddrInfo addr, std::string& displayXml,
-		std::string& funcProto, std::string& funcColorProto);
+		std::string& funcProto, std::string& funcColorProto, std::vector<SymInfo>& symInf,
+		std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph);
 	void registerProgram();
 	int deregisterProgram();
 	int regNameToIndex(std::string regName);

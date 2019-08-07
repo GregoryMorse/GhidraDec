@@ -140,6 +140,9 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	}
 	IdaCallback::~IdaCallback() {
 		if (decInt != nullptr) delete decInt;
+		if (sendfp != nullptr) qfclose(sendfp);
+		if (recvfp != nullptr) qfclose(recvfp);
+		if (recfp != nullptr) qfclose(recfp);
 	}
 	int IdaCallback::EnumImportNames(ea_t ea, const char* name, uval_t ord, void* param)
 	{
@@ -210,38 +213,42 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		*offset = 0;
 		return "ram";
 	}
-#ifdef _DEBUG
-	FILE* debugfp;
-#endif
 	void IdaCallback::launchDecompiler()
 	{
-#ifdef _DEBUG
-		debugfp = qfopen("d:/source/repos/ghidradec/tests/written", "wb");
-#endif
+		if (PRINT_DEBUG) {
+			sendfp = qfopen("d:/source/repos/ghidradec/tests/written", "wb");
+			recvfp = qfopen("d:/source/repos/ghidradec/tests/received", "wb");
+			recfp = qfopen("d:/source/repos/ghidradec/tests/protorec", "wb");
+		}
 		runCommand(di->decCmd, "",
 			&di->decompPid, &di->hDecomp, &di->rdHandle, &di->wrHandle,
 			true);
 	}
 	size_t IdaCallback::readDec(void* Buf, size_t MaxCharCount)
-	{
-		return _read(di->rdHandle, Buf, (unsigned int)MaxCharCount);
+	{		
+		size_t val = _read(di->rdHandle, Buf, (unsigned int)MaxCharCount);
+		if (recvfp != nullptr) qfwrite(recvfp, Buf, MaxCharCount);
+		return val;
 		//return qpipe_read(di->rdHandle, Buf, MaxCharCount);
 	}
 	size_t IdaCallback::writeDec(void const* Buf, size_t MaxCharCount)
 	{
-#ifdef _DEBUG
-		qfwrite(debugfp, Buf, MaxCharCount);
-		qflush(debugfp);
-#endif
+		if (sendfp != nullptr) qfwrite(sendfp, Buf, MaxCharCount);
 		return _write(di->wrHandle, Buf, (unsigned int)MaxCharCount);
 		//return qpipe_write(di->wrHandle, Buf, MaxCharCount);
 	}
-
+	void IdaCallback::protocolRecorder(std::string data, bool bWrite)
+	{
+		if (recfp != nullptr) {
+			std::string s = ((bWrite ? "Sent: " : "Received: ") + data + "\n");
+			qfwrite(recfp, s.c_str(), s.size());
+		}
+	}
 	void IdaCallback::terminate()
 	{
-#ifdef _DEBUG
-		qfclose(debugfp);
-#endif
+		if (sendfp != nullptr) { qfclose(sendfp); sendfp = nullptr; }
+		if (recvfp != nullptr) { qfclose(recvfp); recvfp = nullptr; }
+		if (recfp != nullptr) { qfclose(recfp); recfp = nullptr; }
 		stopDecompilation(di, false, false, false);
 	}
 	void IdaCallback::getInits(std::vector<InitStateItem>& inits)
@@ -1200,7 +1207,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	}
 
 
-	void checkForwardDecl(tinfo_t ti, const std::map<std::string, bool>& alreadyDefined, std::map<std::string, bool>& needDecl)
+	void checkForwardDecl(const tinfo_t & ti, const std::map<std::string, bool>& alreadyDefined, std::map<std::string, bool>& needDecl)
 	{
 		std::stack<tinfo_t> s;
 		s.push(ti);
@@ -1212,7 +1219,8 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			//prevent infinite recursion
 			qstring qs;
 			t.get_type_name(&qs);
-			if (alreadyDefined.find(qs.c_str()) != alreadyDefined.end()) continue;
+			if (ti == t) {}
+			else if (alreadyDefined.find(qs.c_str()) != alreadyDefined.end()) continue;
 			else needDecl[qs.c_str()] = true;
 			for (size_t i = 0; i < utd.size(); i++) {
 				utd[i].type.get_type_name(&qs);
@@ -1255,17 +1263,16 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			if (usedT.find(st) == usedT.end()) usedT[st] = true;
 			if (!usedT[st]) continue;;
 			usedT[st] = false;
-			tinfo_t ti;
-			ti.get_named_type(get_idati(), st.c_str());
+			tinfo_t tinf;
+			tinf.get_named_type(get_idati(), st.c_str());
 			std::stack<tinfo_t> t;
-			t.push(ti);
-			bool firstScan = true;
+			t.push(tinf);
 			while (!t.empty()) {
-				ti = t.top();
+				tinfo_t ti = t.top();
 				t.pop();
 				qstring qs;
 				ti.get_type_name(&qs);
-				if (qs.size() != 0 && usedT.find(qs.c_str()) != usedT.end() && !usedT[qs.c_str()] && !firstScan) continue;
+				if (qs.size() != 0 && usedT.find(qs.c_str()) != usedT.end() && !usedT[qs.c_str()] && ti != tinf) continue;
 				else if (/*!is_anonymous_udt(ti) &&*/ qs.size() != 0) buildDependents(qs.c_str(), usedT, isDependee);
 				if (ti.is_typeref()) {
 					qs.clear();
@@ -1298,12 +1305,11 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 						t.push(ftd[j].type);
 					t.push(ftd.rettype);
 				}
-				firstScan = false;
 			}
 		}
 	}
 
-	void refTypes(const std::vector<TypeInfo>& types/*tinfo_t ti*/, std::map<std::string, bool>& usedT)
+	void refTypes(const std::vector<TypeInfo>& types/*const tinfo_t & ti*/, std::map<std::string, bool>& usedT)
 	{
 		std::stack<int> s;
 		s.push(0);
@@ -1344,7 +1350,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		}
 	}
 
-	//void IdaCallback::dfsVisitType(tinfo_t ti, std::vector<std::string>& sortedTypes, bool firstScan)
+	//void IdaCallback::dfsVisitType(const tinfo_t & ti, std::vector<std::string>& sortedTypes, bool firstScan)
 	//{
 	//	qstring qs;
 	//	ti.get_type_name(&qs);
@@ -1398,62 +1404,74 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		//std::map<std::string, bool> tempMarkers;
 		//std::copy(unvisited.begin(), unvisited.end(), std::inserter(tempMarkers, tempMarkers.end()));
 		//tempMarkers.insert(unvisited.begin(), unvisited.end());
-		//post order traversal can be considerd to have 3 states - discovered, undiscovered and visited
+		//post order traversal can be considered to have 3 states - discovered, undiscovered and visited
 		if (!unvisited[str]) return;
 		s.push(str);
-		unvisited[str] = false;
+		//unvisited[str] = false;
+		std::map<std::string, bool> unresolved = unvisited; //prevent infinite recursion
 		while (s.size() != 0) {
 			std::string v = s.top();
-			bool hasUnvisitChdrn = false;
 			tinfo_t ti;
 			ti.get_named_type(get_idati(), v.c_str());
 			std::stack<tinfo_t> t;
-			bool firstScan = true;
 			t.push(ti);
-			while (t.size() != 0) {
-				ti = t.top();
-				t.pop();
-				qstring qs;
-				ti.get_type_name(&qs);
-				if (qs.size() != 0 && !unvisited[qs.c_str()] && !firstScan) continue;
-				else if (/*!is_anonymous_udt(ti) &&*/ qs.size() != 0) {
-					if (unvisited[qs.c_str()] && !firstScan) {
-						unvisited[qs.c_str()] = false; s.push(qs.c_str()); hasUnvisitChdrn = true;
-					}
-				}
-				if (ti.is_typeref()) {
-					qs.clear();
-					ti.get_next_type_name(&qs);
-					if (qs.size() != 0) {
-						if (unvisited[qs.c_str()]) {
-							unvisited[qs.c_str()] = false; s.push(qs.c_str()); hasUnvisitChdrn = true;
-						}
-						continue;
-					}
-				}
-				if (ti.is_ptr()) {
+			std::stack<std::string> rev;
+			while (t.size() != 0) { //this also requires a post order traversal or the order will be wrong
+				qstring qs, nm;
+				const tinfo_t & inti = t.top();
+				inti.get_type_name(&nm);
+				unresolved[nm.c_str()] = false;
+				if (!unvisited[nm.c_str()]) { t.pop(); continue; }
+				bool bInnerUnvstChdrn = false;
+				if (inti.is_ptr()) {
 					ptr_type_data_t ptd;
-					ti.get_ptr_details(&ptd);
-					t.push(ptd.obj_type);
-				} else if (ti.is_array()) {
+					inti.get_ptr_details(&ptd);
+					ptd.obj_type.get_type_name(&qs);
+					if (qs.size() != 0 && unresolved[qs.c_str()]) { t.push(ptd.obj_type); bInnerUnvstChdrn = true; }
+				} else if (inti.is_array()) {
 					array_type_data_t atd;
-					ti.get_array_details(&atd);
-					t.push(atd.elem_type);
-				} else if (ti.is_udt()) {
+					inti.get_array_details(&atd);
+					atd.elem_type.get_type_name(&qs);
+					if (qs.size() != 0 && unresolved[qs.c_str()]) { t.push(atd.elem_type); bInnerUnvstChdrn = true; }
+				} else if (inti.is_udt()) {
 					udt_type_data_t utd;
-					ti.get_udt_details(&utd);
-					for (size_t i = 0; i < utd.size(); i++)
-						t.push(utd[i].type);
-				} else if (ti.is_func()) { //funcptr would be handled from is_ptr
+					inti.get_udt_details(&utd);
+					for (size_t i = 0; i < utd.size(); i++) {
+						utd[i].type.get_type_name(&qs);
+						if (/*!is_anonymous_udt(inti) &&*/ qs.size() != 0 && unresolved[qs.c_str()]) { t.push(utd[i].type); bInnerUnvstChdrn = true; }
+					}
+				} else if (inti.is_func()) { //funcptr would be handled from is_ptr
 					func_type_data_t ftd;
 					ti.get_func_details(&ftd);
-					for (size_t j = 0; j < ftd.size(); j++)
-						t.push(ftd[j].type);
+					for (size_t j = 0; j < ftd.size(); j++) {
+						ftd[j].type.get_type_name(&qs);
+						if (qs.size() != 0 && unresolved[qs.c_str()]) { t.push(ftd[j].type); bInnerUnvstChdrn = true; }
+					}
 					t.push(ftd.rettype);
+					ftd.rettype.get_type_name(&qs);
+					if (qs.size() != 0 && unresolved[qs.c_str()]) { t.push(ftd.rettype); bInnerUnvstChdrn = true; }
 				}
-				firstScan = false;
+				if (!bInnerUnvstChdrn) {
+					if (inti.is_typeref()) {
+						qs.clear();
+						inti.get_next_type_name(&qs);
+						if (qs.size() != 0) {
+							if (unvisited[qs.c_str()]) {
+								unvisited[qs.c_str()] = false; rev.push(qs.c_str());
+							}
+						}
+					}
+					unvisited[nm.c_str()] = false;
+					if (inti != ti) rev.push(nm.c_str());
+					t.pop();
+				}
 			}
-			if (!hasUnvisitChdrn) {
+			if (!rev.empty()) {
+				while (!rev.empty()) {
+					s.push(rev.top());
+					rev.pop();
+				}
+			} else {
 				s.pop();
 				sortedTypes.push_back(v);
 			}
@@ -1550,7 +1568,9 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		while (s.size() != 0) {
 			ea_t e = s.top();
 			s.pop();
-			if (alreadyDefined.find(e) != alreadyDefined.end()) continue;
+			if (ea == e) {}
+			else if (depData.find(e) == depData.end()) continue; //function pointers not in here
+			else if (alreadyDefined.find(e) != alreadyDefined.end()) continue;
 			else needDecl[e] = true;
 			const std::vector<ea_t>& vec = depData.at(e);
 			for (size_t i = 0; i < vec.size(); i++) {
@@ -2016,7 +2036,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				//tinfo_t tif;
 				//get_tinfo(&tif, u);
 				qstring qs = get_name(u);
-				str = "&" + colorize(std::string(qs.c_str()), bColor, COLOR_DEFAULT);//initForType(tif, addr);
+				str = qs.size() == 0 ? "0x" + to_string(u, std::hex) : "&" + colorize(std::string(qs.c_str()), bColor, COLOR_DEFAULT);//initForType(tif, addr);
 			}
 			out += str;
 		}
@@ -2113,7 +2133,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				//tinfo_t tif;
 				//get_tinfo(&tif, u);
 				qstring qs = get_name(u);
-				str = "&" + colorize(std::string(qs.c_str()), bColor, COLOR_DEFAULT);//initForType(tif, item.first, bColor);
+				str = qs.size() == 0 ? "0x" + to_string(u, std::hex) : "&" + colorize(std::string(qs.c_str()), bColor, COLOR_DEFAULT);//initForType(tif, item.first, bColor);
 			}
 			out += str;
 		}
@@ -2304,6 +2324,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + std::string(t.is_union() ? "union" : "struct") + std::string({ COLOR_OFF, COLOR_KEYWORD }) +
 						" " + std::string({ COLOR_ON, COLOR_LOCNAME }) + iter->first + std::string({ COLOR_OFF, COLOR_LOCNAME }) + ";\n";
 					if (usedRefTypes.find(*it) == usedRefTypes.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
+					alreadyDefined[iter->first] = true;
 				}
 			} else if (ti.is_func()) { //ti.is_funcptr()
 				//function definitions need the entire definition printed but should be tracked separately
@@ -2451,6 +2472,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				definitions += "extern " + printTypeForCode(usedData[iter->first], std::string(get_name(iter->first).c_str()), false, COLOR_DEFAULT, false, 0) + ";\n";
 				forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + "extern" + std::string({ COLOR_OFF, COLOR_KEYWORD }) + " " + printTypeForCode(usedData[iter->first], std::string(get_name(iter->first).c_str()), true, COLOR_DEFAULT, false, 0) + ";\n";
 				if (usedRefData.find(*it) == usedRefData.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
+				alreadyDefData[iter->first] = true;
 			}
 			if (usedRefData.find(*it) == usedRefData.end()) {
 				definitions += "//"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//";
@@ -2560,7 +2582,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	{
 		executeOnMainThread([this, &definitions, &forDisplay, &idaInfo]() {
 			definitions = getHeaderDefFromAnalysis(di->decompiledFunction == nullptr, forDisplay);
-			idaInfo = dumpIdaInfo();
+			if (PRINT_DEBUG) idaInfo = dumpIdaInfo();
 			});
 	}
 	/// Execute code in the main thread - to be used with execute_sync().
@@ -2649,7 +2671,12 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			enum_import_names((int)i, &EnumImportNames, &imp);
 		}
 		for (std::map<ea_t, ImportInfo>::iterator it = imports.begin(); it != imports.end(); it++) {
-			importNames[it->second.name] = true;
+			if (it->second.name.size() == 0) {
+				std::string name = get_short_name(it->first, GN_STRICT).c_str();
+				if (name.size() != 0) name = name.substr(0, name.find("(", 0));
+				else name = getSymbolName(it->first);
+				importNames[name] = true;
+			} else importNames[it->second.name] = true;
 		}
 		/*num = get_ordinal_qty(nullptr);
 		for (size_t i = 1; i <= num; i++) {
@@ -2747,13 +2774,42 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			allFuncNames[di->decompiledFunction->start_ea] = get_name(di->decompiledFunction->start_ea).c_str();
 		}
 	}
-	std::string IdaCallback::tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err)
+	void IdaCallback::identParams(ea_t ea)
+	{
+		DecMode dm = defaultDecMode;
+		dm.actionname = "paramid";
+		std::string display, funcProto, funcColorProto;
+		std::vector<SymInfo> paramInfo;
+		std::vector<std::pair<std::vector<unsigned int>, std::string>> blockGraph;
+		//should turn off eliminate unreachable opiton switch
+		//Options opt;
+		//opt.decompileUnreachable = true;
+		//decInt->setOptions(opt);
+		//decInt->toggleCCode(false);
+		//decInt->toggleSyntaxTree(false);
+		decInt->doDecompile(dm, AddrInfo{ "ram", ea }, display, funcProto, funcColorProto, paramInfo, blockGraph);
+		for (size_t i = 0; i < paramInfo.size(); i++) {
+			if (paramInfo[i].addr.addr.space == "register") {
+				paramInfo[i].addr.addr.offset;
+			} else if (paramInfo[i].addr.addr.space == "stack") {
+				paramInfo[i].addr.addr.offset;
+			} else if (paramInfo[i].addr.addr.space == "join") {
+				paramInfo[i].joins;
+			}
+			//paramInfo[i].pi.name;
+			paramInfo[i].pi.ti;
+		}
+	}
+	std::string IdaCallback::tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err,
+		std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph)
 	{
 		std::string code, funcProto, funcColorProto;
+		std::vector<SymInfo> paramInfo;
 		definedFuncs[ea] = true;
 		try {
 			if (di->decompPid == 0) decInt->registerProgram();
-			code = decInt->doDecompile(dec, AddrInfo{ "ram", ea }, display, funcProto, funcColorProto);
+			identParams(ea);
+			code = decInt->doDecompile(dec, AddrInfo{ "ram", ea }, display, funcProto, funcColorProto, paramInfo, blockGraph);
 			if (funcProto.size() != 0) {
 				funcProtos[ea] = funcProto;
 				funcColorProtos[ea] = funcColorProto;
@@ -2771,17 +2827,21 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			code = "//Error decompiling function: " + funcName + " @ 0x" + to_string(ea, std::hex) + "\n" "//" + str + "\n";
 			display = "//Error decompiling function: " + funcName + " @ 0x" + to_string(ea, std::hex) + "\n" "//" + str + "\n";
 		}
+		if (recvfp != nullptr) qflush(recvfp);
+		if (sendfp != nullptr) qflush(sendfp);
+		if (recfp != nullptr) qflush(recfp);
 		return code;
 	}
 
 	//graph.hpp and a graph emitter should take care of the AST information...
 
-std::string tryDecomp(RdGlobalInfo* di, DecMode dec, ea_t ea, std::string & display, bool & bSucc)
+std::string tryDecomp(RdGlobalInfo* di, DecMode dec, ea_t ea, std::string & display, bool & bSucc,
+	std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph)
 {
 	std::string code, err;
 	std::string fn = di->idacb->allFuncNames[ea];
 	INFO_MSG("Decompiling function: " << fn.c_str() << " @ " << std::hex << ea << std::endl);
-	code = di->idacb->tryDecomp(dec, ea, fn.c_str(), display, err);
+	code = di->idacb->tryDecomp(dec, ea, fn.c_str(), display, err, blockGraph);
 	if (err.size() != 0) { INFO_MSG(err); }
 	else bSucc = true;
 	return code;
@@ -2824,6 +2884,7 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 {
 	//di->endian == "big", inf.min_ea
 	std::string code, display;
+	std::vector<std::pair<std::vector<unsigned int>, std::string>> blockGraph;
 	if (di->idacb->decInt == nullptr) di->idacb->decInt = new DecompInterface();
 	Options opt = defaultOptions;
 	opt.protoEval = di->customCallStyle.empty() ? ccToStr(inf.cc.cm, 0, true) : di->customCallStyle; //default calling convention can be very important such as on x86-16
@@ -2873,7 +2934,7 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 			std::string disp;
 			total++;
 			bool bSucc = false;
-			code += tryDecomp(di, defaultDecMode, di->idacb->allFuncs[i], disp, bSucc);
+			code += tryDecomp(di, defaultDecMode, di->idacb->allFuncs[i], disp, bSucc, blockGraph);
 			if (di->exiting) return;
 			if (bSucc) successes++;
 			display += disp;
@@ -2882,7 +2943,7 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 			std::dec << (time(NULL) - startTime) << " seconds\n");
 	} else {
 		bool bSucc = false;
-		code = tryDecomp(di, defaultDecMode, (unsigned long long)di->decompiledFunction->start_ea, display, bSucc);
+		code = tryDecomp(di, defaultDecMode, (unsigned long long)di->decompiledFunction->start_ea, display, bSucc, blockGraph);
 		if (di->exiting) return;
 		INFO_MSG("Decompilation completed: " << di->idacb->allFuncNames[di->decompiledFunction->start_ea] << " in " << std::dec << (time(NULL) - startTime) << " seconds\n");
 	}
@@ -2896,11 +2957,15 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 
 	std::string definitions, defdisplay, idaInfo;
 	di->idacb->analysisDump(definitions, defdisplay, idaInfo);
-	code = definitions + code + "\n/*\n" + idaInfo + "\n*/\n";
-	std::string str;
-	idaInfo = "/*\n" + idaInfo + "\n*/";
-	std::for_each(idaInfo.begin(), idaInfo.end(), [&str](char c) { if (c == '\n') str += std::string({ COLOR_OFF, COLOR_AUTOCMT }) + c + std::string({ COLOR_ON, COLOR_AUTOCMT }); else str += c; });
-	display = defdisplay + display + "\n" + std::string({ COLOR_ON, COLOR_AUTOCMT }) + str + std::string({ COLOR_OFF, COLOR_AUTOCMT }) + "\n";
+	code = definitions + code + "\n";
+	display = defdisplay + display + "\n";
+	if (!idaInfo.empty()) {
+		code += "/*\n" + idaInfo + "\n*/\n";
+		std::string str;
+		idaInfo = "/*\n" + idaInfo + "\n*/";
+		std::for_each(idaInfo.begin(), idaInfo.end(), [&str](char c) { if (c == '\n') str += std::string({ COLOR_OFF, COLOR_AUTOCMT }) + c + std::string({ COLOR_ON, COLOR_AUTOCMT }); else str += c; });
+		display += std::string({ COLOR_ON, COLOR_AUTOCMT }) + str + std::string({ COLOR_OFF, COLOR_AUTOCMT }) + "\n";
+	}
 
 	//should save to a .c file?
 	//INFO_MSG("Decompiled file: " << decName << "\n");
@@ -2914,9 +2979,98 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 	if (di->isSelectiveDecompilation())
 	{
 		di->fnc2code[di->decompiledFunction].code = display;
+		di->fnc2code[di->decompiledFunction].blockGraph = blockGraph;
 	}
 
 	di->decompSuccess = true;
+}
+
+ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
+{
+	RdGlobalInfo* di = (RdGlobalInfo*)user_data;
+	if (notification_code == grcode_user_refresh) {
+		mutable_graph_t* mg = va_arg(va, mutable_graph_t*);
+		rect_t r;
+		ea_t ea = di->decompiledFunction->start_ea;
+		const std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph =
+			di->fnc2code[get_func(ea)].blockGraph;
+		for (size_t i = 0; i < blockGraph.size(); i++) {
+			int node = mg->add_node(&r);
+			node_info_t ni;
+			ni.flags = NIFF_SHOW_CONTENTS;
+			ni.text = ("  //" + std::to_string(i) + "\n" + std::get<1>(blockGraph[i])).c_str();
+			set_node_info(mg->gid, node, ni, NIF_TEXT | NIF_FLAGS);
+			//if (std::get<1>(blockGraph[i]).size() == 0) mg->node_flags[node] |= MTG_NON_DISPLAYABLE_NODE;
+		}
+		for (size_t i = 0; i < blockGraph.size(); i++) {
+			for (size_t j = 0; j < std::get<0>(blockGraph[i]).size(); j++) {
+				edge_info_t ei;
+				mg->add_edge(std::get<0>(blockGraph[i])[j], (int)i, &ei);
+			}
+		}
+		for (size_t i = blockGraph.size() - 1; i != -1; i--) {
+			if (std::get<1>(blockGraph[i]).size() == 0) mg->del_node(i);
+		}
+		mg->create_digraph_layout();
+		mg->redo_layout();
+		return 1;
+		//} else if (notification_code == grcode_user_gentext) {
+		//} else if (notification_code == grcode_user_text) {
+		//} else if (notification_code == grcode_user_hint) {
+	} else if (notification_code == grcode_user_title) {
+		mutable_graph_t* mg = va_arg(va, mutable_graph_t*);
+		int node = va_arg(va, int);
+		rect_t* title_rect = va_arg(va, rect_t*);
+		int title_bg_color = va_arg(va, int);
+		void* dc = va_arg(va, void*); //this is not a Windows GDI device context apparently but a QT::QPainter object
+		//QT::QPainter dc
+		//RECT rect = { 0, 0, title_rect->right - title_rect->left, title_rect->bottom - title_rect->top };
+		int invColor = (~title_bg_color & 0xffffff) | (title_bg_color & 0xff000000);
+		//HBRUSH hbr = CreateSolidBrush(invColor);// title_bg_color);
+		//FillRect(dc, &rect, hbr);
+		//HPEN pn = CreatePen(PS_SOLID, 1, invColor);
+		//HFONT fnt = CreateFont();
+		//HGDIOBJ old = SelectObject(dc, pn);
+		//COLORREF oldbk = SetBkColor(dc, invColor);
+		//COLORREF oldfg = SetTextColor(dc, invColor);
+		//std::string str = "//" + std::to_string(node);
+		//DrawTextA(dc, str.c_str(), (int)str.size(), &rect, DT_CENTER | DT_TOP | DT_SINGLELINE);
+		//SetBkColor(dc, oldbk);
+		//SetTextColor(dc, oldfg);
+		//SelectObject(dc, old);
+		//DeleteObject(hbr);
+		return 0;
+	} else if (notification_code == grcode_user_draw) {
+		return 0;
+	}
+	return 0;
+}
+
+void displayBlockGraph(RdGlobalInfo* di, ea_t ea)
+{
+	di->idacb->executeOnMainThread([di, ea]() {
+		if (di->graphWidget != nullptr) {
+			close_widget(di->graphViewer, 0);
+			di->graphViewer = nullptr;
+			close_widget(di->graphWidget, 0);
+			di->graphWidget = nullptr;
+			delete_mutable_graph(di->mg);
+			netnode nn("GhidraGraph", 0, true);
+			nn.kill();
+		}
+		di->graphWidget = create_empty_widget((di->viewerName + " Graph").c_str());
+		netnode nn("GhidraGraph", 0, true);
+		di->mg = create_mutable_graph(nn);
+		di->graphViewer = create_graph_viewer((di->viewerName + "_Graph").c_str(),
+			nn, GraphCallback, di, 12, di->graphWidget);
+		display_widget(di->graphWidget,
+			WOPN_TAB
+#if !defined(IDA_SDK_VERSION) || IDA_SDK_VERSION < 720
+			| WOPN_MENU
+#endif
+		);
+		viewer_fit_window(di->graphViewer);
+	});
 }
 
 /**
@@ -2938,6 +3092,10 @@ static int idaapi threadFunc(void* ud)
 		di->idacb->executeOnMainThread([&show]() {
 			show.execute();
 			});
+		if (di->decompiledFunction != nullptr &&
+			di->fnc2code.find(di->decompiledFunction) != di->fnc2code.end()) {
+			displayBlockGraph(di, di->decompiledFunction->start_ea);
+		}
 	}
 
 	di->outputFile.clear();

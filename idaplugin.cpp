@@ -326,7 +326,7 @@ void runAllDecompilation()
 		if (stat(tmp, &st) == 0) {
 			iChoice = ask_yn(ASKBTN_YES, "Overwrite existing file '%s'?", tmp);
 			if (iChoice == ASKBTN_CANCEL) return;
-		}
+		} else iChoice = ASKBTN_YES;
 	} while (iChoice == ASKBTN_NO);
 
 	decompInfo->outputFile = tmp;
@@ -773,6 +773,15 @@ void idaapi term()
 	if (decompInfo->idacb != nullptr) {
 		delete decompInfo->idacb;
 		decompInfo->idacb = nullptr;
+	}
+	if (decompInfo->graphWidget != nullptr) {
+		close_widget(decompInfo->graphViewer, 0);
+		decompInfo->graphViewer = nullptr;
+		close_widget(decompInfo->graphWidget, 0);
+		decompInfo->graphWidget = nullptr;
+		delete_mutable_graph(decompInfo->mg);
+		netnode nn("GhidraGraph", 0, true);
+		nn.kill();
 	}
 	if (decompInfo->codeViewer)
 	{

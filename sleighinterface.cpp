@@ -175,11 +175,37 @@ uint8 hashName(const std::string& nm)
 }
 
 template <class T>
-string to_string(T t, ios_base& (__cdecl *f)(ios_base&))
+string to_string(T t, ios_base& (__cdecl* f)(ios_base&))
 {
 	ostringstream oss;
 	oss << f << t;
 	return oss.str();
+}
+
+std::string escapeCStr(std::string input)
+{
+	std::string str;
+	for (int i = 0; i < input.size(); i++) {
+		if (isprint(input[i])) {
+			if (input[i] == '\\') str += "\\\\";
+			else if (input[i] == '"') str += "\\\"";
+			else str += input[i];
+		} else {
+			if (isspace(input[i])) str += input[i];
+			//if (input[i] == '\n') str += "\\n";
+			//else if (input[i] == '\r') str += "\\r";
+			else if (input[i] == '\a') str += "\\a";
+			else if (input[i] == '\b') str += "\\b";
+			//else if (input[i] == '\f') str += "\\f";
+			//else if (input[i] == '\t') str += "\\t";
+			//else if (input[i] == '\v') str += "\\v";
+			else {
+				std::string s = to_string((unsigned int)input[i], std::hex);
+				str += "0x" + std::string(2 - s.size(), '0') + s;
+			}
+		}
+	}
+	return str;
 }
 
 // This is a tiny LoadImage class which feeds the executable bytes to the translator
@@ -212,6 +238,7 @@ public:
 	virtual void dump(const Address& addr, OpCode opc,
 		VarnodeData* outvar, VarnodeData* vars, int4 isize);
 	std::string packedPcodes;
+	std::string xmlPcodes;
 };
 
 /*uchar unimpl_tag = 0x20, inst_tag = 0x21, op_tag = 0x22, void_tag = 0x23,
@@ -313,6 +340,19 @@ void PackedPcodeRawOut::dump(const Address& addr, OpCode opc,
 	}
 	packed += PcodeEmit::end_tag;
 	packedPcodes += packed;
+	std::string inpstr;
+	for (int i = opc == CPUI_LOAD || opc == CPUI_STORE ? 1 : 0; i < isize; i++) {
+		inpstr += "    <addr space=\"" + vars[i].space->getName() + "\" offset=\"0x" +
+			to_string(vars[i].offset, hex) +
+			"\" size=\"" + std::to_string(vars[i].size) + "\"/>\n";
+	}
+	xmlPcodes += "  <op code=\"" + std::to_string(opc) + "\">\n" +
+		(outvar != nullptr ? "    <addr space=\"" + outvar->space->getName() + "\" offset=\"0x" +
+			to_string(outvar->offset, hex) +
+			"\" size=\"" + std::to_string(outvar->size) + "\"/>\n" : "    <void/>\n") +
+		(opc == CPUI_LOAD || opc == CPUI_STORE ?
+			"    <spaceid name=\"" + vars[0].space->getName() + "\"/>\n" : "") +
+		inpstr + "  </op>\n";
 }
 
 //PcodeCacher/PcodeBuilder is already resolving all of this on C side
@@ -356,7 +396,7 @@ void resolveRelatives(std::string& buf) {
 //Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/app/plugin/processors/sleigh/SleighInstructionPrototype.java
 //Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/app/plugin/processors/sleigh/PcodeEmit.java
 //Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/app/plugin/processors/sleigh/PcodeEmitPacked.java
-static std::string getPackedPcode(Translate& trans, AddrInfo addr)
+static std::pair<std::string, std::string> getPackedPcode(Translate& trans, AddrInfo addr)
 
 { // Dump pcode translation of machine instructions
 	PackedPcodeRawOut emit;		// Set up the pcode dumper
@@ -379,7 +419,9 @@ static std::string getPackedPcode(Translate& trans, AddrInfo addr)
 	//resolveRelatives(emit.packedPcodes);
 	packed += emit.packedPcodes;
 	packed += PcodeEmit::end_tag;
-	return packed;
+	std::string xml = "<inst" " offset=\"" +
+		std::to_string(addr.offset) + "\">\n" + emit.xmlPcodes + "</inst>\n";
+	return std::pair<std::string, std::string>(packed, xml);
 	//if a failure occurs:
 	//packed += unimpl_tag;
 	//packed += dumpOffset(length);
@@ -417,24 +459,24 @@ public:
 	{
 		std::string inpstr;
 		for (int i = opc == CPUI_LOAD || opc == CPUI_STORE ? 1 : 0; i < isize; i++) {
-			inpstr += "<addr space=\"" + vars[i].space->getName() + "\" offset=\"0x" +
+			inpstr += "    <addr space=\"" + vars[i].space->getName() + "\" offset=\"0x" +
 				to_string(vars[i].offset, hex) +
-				"\" size=\"" + std::to_string(vars[i].size) + "\"/>";
+				"\" size=\"" + std::to_string(vars[i].size) + "\"/>\n";
 		}
-		strs.push_back({ "<op code=\"" + std::to_string(opc) + "\">",
-			(outvar != nullptr ? "<addr space=\"" + outvar->space->getName() + "\" offset=\"0x" +
+		strs.push_back({ "  <op code=\"" + std::to_string(opc) + "\">\n",
+			(outvar != nullptr ? "    <addr space=\"" + outvar->space->getName() + "\" offset=\"0x" +
 				to_string(outvar->offset, hex) +
-				"\" size=\"" + std::to_string(outvar->size) + "\"/>" : "<void/>") +
+				"\" size=\"" + std::to_string(outvar->size) + "\"/>\n" : "    <void/>\n") +
 			(opc == CPUI_LOAD || opc == CPUI_STORE ?
-				"<spaceid name=\"" + vars[0].space->getName() + "\"/>" : "") +
-			inpstr + "</op>" });
+				"    <spaceid name=\"" + vars[0].space->getName() + "\"/>\n" : "") +
+			inpstr + "  </op>\n" });
 	}
 	std::string build(std::string space, uintb addr)
 	{
 		std::string str;
 		for (int i = 0; i < strs.size(); i++) {
-			str += strs[i].pre + "<seqnum space=\"" + space + "\" offset=\"0x" + to_string(addr, hex) +
-				"\" uniq=\"0x" + to_string(i, hex) + "\"/>" + strs[i].post;
+			str += strs[i].pre + "    <seqnum space=\"" + space + "\" offset=\"0x" + to_string(addr, hex) +
+				"\" uniq=\"0x" + to_string(i, hex) + "\"/>\n" + strs[i].post;
 		}
 		return str;
 	}
@@ -568,6 +610,7 @@ std::string DecompInterface::readQueryString() {
 void DecompInterface::generateException() {
 	std::string type = readQueryString();
 	std::string message = readQueryString();
+	callback->protocolRecorder("exception(\"" + escapeCStr(type) + "\", \"" + escapeCStr(message) + "\")", false);
 	readToBurst(); // Read exception terminator
 	if (type == "alignment") {
 		throw DecompError("Alignment error: " + message);
@@ -620,7 +663,7 @@ void DecompInterface::writeBytes(const uchar out[], int outlen) {
 }
 
 //Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/program/model/pcode/PcodeDataTypeManager.java
-std::string DecompInterface::buildTypeXml(std::vector<TypeInfo>& ti)
+std::string DecompInterface::buildTypeXml(std::vector<TypeInfo>& ti, size_t indnt)
 {
 	std::string str;
 	std::stack<int> s;
@@ -628,8 +671,8 @@ std::string DecompInterface::buildTypeXml(std::vector<TypeInfo>& ti)
 	while (!s.empty()) {
 		int idx = s.top();
 		s.pop();
-		if (idx == -1) { //-1 used to indicate coming back up the stack for ptr and array
-			str += "</type>\n";
+		if (idx < 0) { //-1 used to indicate coming back up the stack for ptr and array
+			str += std::string(indnt + ~idx * 2, ' ') + "</type>\n";
 			continue;
 		}
 		TypeInfo& typeInfo = ti.at(idx);
@@ -639,65 +682,65 @@ std::string DecompInterface::buildTypeXml(std::vector<TypeInfo>& ti)
 			for (i = 0; i < numDefCoreTypes; i++) {
 				if (defaultCoreTypes[i].name == typeInfo.typeName) break;
 			} // - (i == numDefCoreTypes ? (1ull << 63) : 0) */
-			str += "<typeref name=\"" + typeInfo.typeName + "\" id=\"0x" +
-				to_string(hashName(typeInfo.typeName), hex) + "\"/>"; //terminates
+			str += std::string(indnt + idx * 2, ' ') + "<typeref name=\"" + typeInfo.typeName + "\" id=\"0x" +
+				to_string(hashName(typeInfo.typeName), hex) + "\"/>\n"; //terminates
 			continue;
 		}
 
 		if (typeInfo.metaType == "ptr") {
-			str += "<type name=\"" + typeInfo.typeName + /*"\" id=\"" + std::to_string(hashName(typeInfo.typeName))*/ +
+			str += std::string(indnt + idx * 2, ' ') + "<type name=\"" + typeInfo.typeName + /*"\" id=\"" + std::to_string(hashName(typeInfo.typeName))*/ +
 				"\" metatype=\"" + typeInfo.metaType +
-				"\" size=\"" + std::to_string(typeInfo.size) + "\">"; //wordsize=\"\" when != 1
-			s.push(-1);
+				"\" size=\"" + std::to_string(typeInfo.size) + "\">\n"; //wordsize=\"\" when != 1
+			s.push(~idx);
 			s.push(idx + 1);
 		} else if (typeInfo.metaType == "struct") {
 			std::string strct;
 			for (int i = 0; i < typeInfo.structMembers.size(); i++) { //core types are not type referenced though
-				strct += "<field name=\"" + typeInfo.structMembers[i].name +
+				strct += std::string(indnt + idx * 2 + 2, ' ') + "<field name=\"" + typeInfo.structMembers[i].name +
 					"\" offset=\"" +
-					std::to_string(typeInfo.structMembers[i].offset) + "\">" +
-					buildTypeXml(typeInfo.structMembers[i].ti) + "</field>\n";
+					std::to_string(typeInfo.structMembers[i].offset) + "\">\n" +
+					buildTypeXml(typeInfo.structMembers[i].ti, indnt + idx * 2 + 4) + std::string(indnt + idx * 2 + 2, ' ') + "</field>\n";
 			}
-			str += "<type name=\"" + typeInfo.typeName +
+			str += std::string(indnt + idx * 2, ' ') + "<type name=\"" + typeInfo.typeName +
 				"\" id=\"" + std::to_string(hashName(typeInfo.typeName)) +
 				"\" metatype=\"" + typeInfo.metaType + "\" size=\"" +
-				std::to_string(typeInfo.size) + "\">" + strct + "</type>\n"; //terminates
+				std::to_string(typeInfo.size) + "\">\n" + strct + std::string(indnt + idx * 2, ' ') + "</type>\n"; //terminates
 		} else if (typeInfo.metaType == "array") {
-			str += "<type name=\"" + typeInfo.typeName +
+			str += std::string(indnt + idx * 2, ' ') + "<type name=\"" + typeInfo.typeName +
 				"\" metatype=\"" + typeInfo.metaType + "\" size=\"" +
 				std::to_string(typeInfo.size) +
-				"\" arraysize=\"" + std::to_string(typeInfo.arraySize) + "\">";
-			s.push(-1);
+				"\" arraysize=\"" + std::to_string(typeInfo.arraySize) + "\">\n";
+			s.push(~idx);
 			s.push(idx + 1);
 		} else if (typeInfo.metaType == "code") {
-			str += "<type name=\"" + typeInfo.typeName +
+			str += std::string(indnt + idx * 2, ' ') + "<type name=\"" + typeInfo.typeName +
 				"\" id=\"" + std::to_string(hashName(typeInfo.typeName)) +
 				"\" metatype=\"" + typeInfo.metaType +
-				"\" size=\"" + std::to_string(typeInfo.size) + "\">" +
-				writeFuncProto(typeInfo.funcInfo, "", true) +
-				"</type>\n";
+				"\" size=\"" + std::to_string(typeInfo.size) + "\">\n" +
+				writeFuncProto(typeInfo.funcInfo, "", true, indnt + idx * 2 + 2) +
+				std::string(indnt + idx * 2, ' ') + "</type>\n";
 		} else if (typeInfo.metaType == "void") {
-			str += "<void/>";
+			str += std::string(indnt + idx * 2, ' ') + "<void/>\n";
 		} else {
 			/*int i;
 			for (i = 0; i < numDefCoreTypes; i++) {
 				if (defaultCoreTypes[i].name == typeInfo.typeName) break;
 			} // - (i == numDefCoreTypes ? (1ull << 63) : 0)*/
-			str += "<type name=\"" + typeInfo.typeName +
+			str += std::string(indnt, ' ') + "<type name=\"" + typeInfo.typeName +
 				"\" id=\"" + to_string(hashName(typeInfo.typeName)) +
 				"\" metatype=\"" + typeInfo.metaType +
 				"\" size=\"" + std::to_string(typeInfo.size) + "\"" +
 				std::string(typeInfo.isEnum ? " enum=\"true\"" : "") +
 				std::string(typeInfo.isUtf ? " utf=\"true\"" : "") +
 				std::string(typeInfo.isChar ? " char=\"true\"" : "") +
-				">"; //core=\"true\"
+				">\n"; //core=\"true\"
 			if (typeInfo.isEnum) {
 				for (size_t i = 0; i < typeInfo.enumMembers.size(); i++) {
-					str += "<val name=\"" + typeInfo.enumMembers[i].first +
+					str += std::string(indnt + 2, ' ') + "<val name=\"" + typeInfo.enumMembers[i].first +
 						"\" value=\"" + std::to_string(typeInfo.enumMembers[i].second) + "\"/>\n";
 				}
 			}
-			str += "</type>\n";
+			str += std::string(indnt, ' ') + "</type>\n";
 		}
 		//metaType == "uint" && callback->isEnum();
 		//metaType == "code"...
@@ -851,6 +894,8 @@ void DecompInterface::processPcodeInject(int type, std::map<std::string, XmlPcod
 {
 	std::string name = readQueryString(); //inject_sleigh.cc
 	std::string context = readQueryString();
+	std::string types[] = { "getCallFixup", "getCallotherFixup", "getCallMech", "getXPcode" };
+	callback->protocolRecorder("query(\"" + escapeCStr(types[type - 1]) + "\", \"" + escapeCStr(name) + "\", \"" + escapeCStr(context) + "\")", false);
 	istringstream str(context);
 	Document* doc;
 	try {
@@ -883,18 +928,20 @@ void DecompInterface::processPcodeInject(int type, std::map<std::string, XmlPcod
 		emitter = getPcodeSnippet(callback->getPcodeInject(type, name,
 			AddrInfo{ space, idx }, fixupspace, fixupidx),
 			emitter->inputs, emitter->outputs);
-	write(query_response_start, sizeof(query_response_start));
-	writeString("<inst" " offset=\"" +
+	std::string s = "<inst" " offset=\"" +
 		std::to_string(trans->instructionLength(Address(trans->getSpaceByName(space), idx))) + "\"" +
 		std::string(emitter->paramShift != 0 ? "paramshift=\"" +
-			std::to_string(emitter->paramShift) + "\"" : "") + ">" +
-		emitter->build(space, idx) + "</inst>"); //" paramshift=\"\"" 
+			std::to_string(emitter->paramShift) + "\"" : "") + ">\n" +
+		emitter->build(space, idx) + "</inst>\n";
+	write(query_response_start, sizeof(query_response_start));
+	writeString(s);
 	write(query_response_end, sizeof(query_response_end));
+	callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
 	if (fixupmap[name] == nullptr) delete emitter;
 }
 
 std::string DecompInterface::writeFuncProto(FuncProtoInfo func,
-	std::string injectstr, bool bUseInternalList)
+	std::string injectstr, bool bUseInternalList, size_t indnt)
 {
 	std::string symbols;
 	std::string joinString;
@@ -902,11 +949,11 @@ std::string DecompInterface::writeFuncProto(FuncProtoInfo func,
 	if (bUseInternalList) {
 		for (std::vector<SymInfo>::iterator it = func.syminfo.begin(); it != func.syminfo.end(); it++) {
 			bool readonly = false;
-			symbols += "<param name=\"" + it->pi.name + "\" typelock=\"" "true"
-				"\" namelock=\"" + std::string(it->pi.name.size() != 0 ? "true" : "false") + "\">\n"
-				"  <addr/>\n" +
-				buildTypeXml(it->pi.ti) +
-				"</param>\n"; //"<type name=\"\" metatype=\"" + "\" size=\"" "\"><typeref name=\"" + it->typeRef + "\" id=\"" + std::string(buf) "\"/></type>"
+			symbols += std::string(indnt + 4, ' ') + "<param name=\"" + it->pi.name + "\" typelock=\"" "true"
+				"\" namelock=\"" + std::string(it->pi.name.size() != 0 ? "true" : "false") + "\">\n" +
+				std::string(indnt + 6, ' ') + "<addr/>\n" +
+				buildTypeXml(it->pi.ti, indnt + 6) +
+				std::string(indnt + 4, ' ') + "</param>\n"; //"<type name=\"\" metatype=\"" + "\" size=\"" "\"><typeref name=\"" + it->typeRef + "\" id=\"" + std::string(buf) "\"/></type>"
 		}
 	} else {
 		if (func.retType.addr.addr.space == "join") {
@@ -921,15 +968,15 @@ std::string DecompInterface::writeFuncProto(FuncProtoInfo func,
 	}
 	std::string killbycall;
 	if (func.killedByCall.size() != 0) {
-		killbycall = "  <killedbycall>\n";
+		killbycall = std::string(indnt + 2, ' ') + "<killedbycall>\n";
 		for (size_t i = 0; i < func.killedByCall.size(); i++) {
-			killbycall += "    <addr space=\"" + func.killedByCall[i].addr.space +
+			killbycall += std::string(indnt + 4, ' ') + "<addr space=\"" + func.killedByCall[i].addr.space +
 				"\" offset=\"0x" + to_string(func.killedByCall[i].addr.offset, hex) +
 				"\" size=\"" + std::to_string(func.killedByCall[i].size) + "\"/>\n";
 		}
-		killbycall += "  </killedbycall>\n";
+		killbycall += std::string(indnt + 2, ' ') + "</killedbycall>\n";
 	}
-	return "<prototype extrapop=\"" +
+	return std::string(indnt, ' ') + "<prototype extrapop=\"" +
 		(func.extraPop != -1 ? std::to_string(func.extraPop) : std::string("unknown")) +
 		"\" model=\"" + func.model + "\" modellock=\"" +
 		(func.model != "default" && func.model != "unknown" ? "true" : "false") +
@@ -942,22 +989,22 @@ std::string DecompInterface::writeFuncProto(FuncProtoInfo func,
 		(func.isConstruct ? "\" constructor=\"true" : "") +
 		(func.isDestruct ? "\" destructor=\"true" : "") +
 		(func.dotdotdot ? "\" dotdotdot=\"true" : "") +
-		"\">\n"
-		"  <returnsym" +
+		"\">\n" +
+		std::string(indnt + 2, ' ') + "<returnsym" +
 		std::string(func.retType.pi.ti.begin()->metaType != "unknown" ? " typelock=\"true\"" : "") +
 		">\n" +
-		std::string(func.retType.addr.size == 0 ? "   <addr/>\n" "   <void/>\n" :
-			((bUseInternalList ? "   <addr/>\n" : 
-			"   <addr space=\"" + func.retType.addr.addr.space + "\" " +
+		std::string(func.retType.addr.size == 0 ? std::string(indnt + 4, ' ') + "<addr/>\n" + std::string(indnt + 4, ' ') + "<void/>\n" :
+			((bUseInternalList ? std::string(indnt + 4, ' ') + "<addr/>\n" :
+				std::string(indnt + 4, ' ') + "<addr space=\"" + func.retType.addr.addr.space + "\" " +
 				(func.retType.addr.addr.space != "join" ? "offset=\"0x" +
 					to_string(func.retType.addr.addr.offset, hex) +
 				"\" size=\"" + std::to_string(func.retType.addr.size) + "\"" : joinString) + "/>\n") +
-			buildTypeXml(func.retType.pi.ti))) +
-		"  </returnsym>\n" +
-		injectstr + //Pcode injection: "<inject>" + "</inject>\n"
+			buildTypeXml(func.retType.pi.ti, indnt + 4))) +
+		std::string(indnt + 2, ' ') + "</returnsym>\n" +
+		(!injectstr.empty() ? std::string(indnt + 2, ' ') + injectstr : "") + //Pcode injection: "<inject>" + "</inject>\n"
 		killbycall +
-		(bUseInternalList ? "  <internallist>\n" + symbols + "  </internallist>\n" : "") +  
-		"</prototype>\n";
+		(bUseInternalList ? std::string(indnt + 2, ' ') + "<internallist>\n" + symbols + std::string(indnt + 2, ' ') + "</internallist>\n" : "") +
+		std::string(indnt, ' ') + "</prototype>\n";
 }
 
 std::string DecompInterface::writeFunc(SizedAddrInfo addr, std::string funcname, std::string parentname, FuncProtoInfo func)
@@ -1000,7 +1047,7 @@ std::string DecompInterface::writeFunc(SizedAddrInfo addr, std::string funcname,
 		//this should be part of the symbol info and not done in here as nuances like type inference effect this
 		//bool bIsCat = idx == startOffs && it->space == "stack" && it->offset != 0 && (it->offset & (1ull << (addrSize * 8 - 1))) == 0;
 		//could assume positive offsets are args but indexes now assigned by callback
-		symbols += "<mapsym><symbol name=\"" + it->pi.name + "\" typelock=\"" +
+		symbols += "            <mapsym>\n              <symbol name=\"" + it->pi.name + "\" typelock=\"" +
 			//the typelock is a size lock for unknown metatype and for category 0 mappings for the primary function being decompiled it is an all or nothing situation - due to design issue in Ghidra
 			(it->pi.ti.begin()->metaType == "unknown" &&
 			(startOffs.space != addr.addr.space || startOffs.offset != addr.addr.offset ||
@@ -1008,40 +1055,40 @@ std::string DecompInterface::writeFunc(SizedAddrInfo addr, std::string funcname,
 			"\" namelock=\"" + std::string(it->pi.name.size() != 0 ? "true" : "false") +
 			"\" readonly=\"" + (readonly ? "true" : "false") +
 			"\" cat=\"" + std::string(it->argIndex != -1 ? "0\" index=\"" +
-				std::to_string(it->argIndex) : "-1") + "\">" +
-			buildTypeXml(it->pi.ti) +
-			"</symbol>"
-			"<addr space=\"" + it->addr.addr.space + "\" " +
+				std::to_string(it->argIndex) : "-1") + "\">\n" +
+			buildTypeXml(it->pi.ti, 16) +
+			"              </symbol>\n"
+			"              <addr space=\"" + it->addr.addr.space + "\" " +
 			(it->addr.addr.space != "join" ? "offset=\"0x" + to_string(it->addr.addr.offset, hex) +
-				"\" size=\"" + std::to_string(it->addr.size) + "\"" : joinString) + "/>" +
-			std::string(it->addr.addr.space == "register" ? "<rangelist>\n<range space=\"" +
+				"\" size=\"" + std::to_string(it->addr.size) + "\"" : joinString) + "/>\n" +
+			std::string(it->addr.addr.space == "register" ? "              <rangelist>\n                <range space=\"" +
 			(it->argIndex != -1 ? addr.addr.space : it->range.space) +
 				"\" first=\"0x" +
 				to_string(it->argIndex != -1 ? addr.addr.offset - 1 : it->range.beginoffset, hex) +
 				"\" last=\"0x" +
 				to_string(it->argIndex != -1 ? addr.addr.offset - 1 : it->range.endoffset, hex) +
-				"\"/></rangelist>\n" : "<rangelist/>") +
-			"</mapsym>";
+				"\"/>\n              </rangelist>\n" : "              <rangelist/>\n") +
+			"            </mapsym>\n";
 	}
 	//callback->status("Extern name: " + externname);
 	//prototype has uponentry and uponreturn tags to inject pcode for call mechanism fixup
-	res = "<result>\n<parent>\n<val/>\n" +
-		std::string(parentname.size() != 0 ? "<val>" + parentnameesc.str() + "</val>" : "") +
-		"</parent>\n<mapsym>\n"
-		"<function name=\"" + nameesc.str() + "\" size=\"" + std::to_string(addr.size) + "\">\n"
-		"<addr space=\"" + addr.addr.space + "\" offset=\"0x" + to_string(addr.addr.offset, hex) + "\"/>"
-		"<localdb lock=\"false\" main=\"" "stack" "\">\n<scope name=\"" + nameesc.str() + "\">\n"
-		"<parent>\n<val/>\n" +
-		std::string(parentname.size() != 0 ? "<val>" + parentnameesc.str() + "</val>" : "") +
-		"</parent>\n<rangelist/>\n"
-		"<symbollist>" + symbols + "\n</symbollist>\n</scope>\n</localdb>\n" +
+	res = "<result>\n  <parent>\n    <val/>\n" +
+		std::string(parentname.size() != 0 ? "    <val>" + parentnameesc.str() + "</val>\n" : "") +
+		"  </parent>\n  <mapsym>\n"
+		"    <function name=\"" + nameesc.str() + "\" size=\"" + std::to_string(addr.size) + "\">\n"
+		"      <addr space=\"" + addr.addr.space + "\" offset=\"0x" + to_string(addr.addr.offset, hex) + "\"/>\n"
+		"      <localdb lock=\"false\" main=\"" "stack" "\">\n        <scope name=\"" + nameesc.str() + "\">\n"
+		"          <parent>\n            <val/>\n" +
+		std::string(parentname.size() != 0 ? "            <val>" + parentnameesc.str() + "</val>\n" : "") +
+		"          </parent>\n          <rangelist/>\n"
+		"          <symbollist>\n" + symbols + "          </symbollist>\n        </scope>\n      </localdb>\n" +
 		writeFuncProto(func, (fixupTargetMap.find(funcname) != fixupTargetMap.end() ?
 			"<inject>" + fixupTargetMap[funcname] + "</inject>" :
 			(callFixupMap.find(funcname) != callFixupMap.end() ?
-				"<inject>" + nameesc.str() + "</inject>" : "")), false) +
-		"</function>\n"
-		"<addr space=\"" + addr.addr.space + "\" offset=\"0x" + to_string(addr.addr.offset, hex) + "\"/>"
-		"<rangelist/></mapsym>\n</result>\n";
+				"<inject>" + nameesc.str() + "</inject>" : "")), false, 6) +
+		"    </function>\n"
+		"    <addr space=\"" + addr.addr.space + "\" offset=\"0x" + to_string(addr.addr.offset, hex) + "\"/>\n"
+		"    <rangelist/>\n  </mapsym>\n</result>\n";
 	return res;
 }
 
@@ -1068,12 +1115,14 @@ std::vector<uchar> DecompInterface::readResponse() {
 			try {
 				//if (name != "getUserOpName" && name != "getRegister") throw DecompError(name);
 				if (name.length() < 4) {
+					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\")", false);
 					throw DecompError("Bad decompiler query: " + name);
 				}
 				switch (name[3]) {
 				case 'B':
 				{
 					addrstring = readQueryString();
+					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
 					SizedAddrInfo addr;
 					getAddrFromString(addrstring, addr);
 					//callback->status("getBytes " + addrstring);
@@ -1091,6 +1140,13 @@ std::vector<uchar> DecompInterface::readResponse() {
 					write(dblres.data(), dblres.size());
 					write(byte_end, sizeof(byte_end));
 					write(query_response_end, sizeof(query_response_end));
+					std::string str;
+					for (int i = 0; i < res.size(); i++) {
+						if (i != 0) str += ", ";
+						std::string s = to_string((unsigned int)res[i], std::hex);
+						str += "0x" + std::string(2 - s.size(), '0') + s;
+					}
+					callback->protocolRecorder("queryresponse(packedBytes({ " + str + " }))", true);
 					//getBytes();						// getBytes
 					break;
 				}
@@ -1099,6 +1155,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 						addrstring = readQueryString();
 						//flags from Ghidra/Features/Decompiler/src/decompile/cpp/comment.hh based on initialization options
 						std::string flags = readQueryString();
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\", \"" + escapeCStr(flags) + "\")", false);
 						AddrInfo addr;
 						getAddrFromString(addrstring, addr);
 						uint8 f = strtoull(flags.c_str(), nullptr, 10);
@@ -1144,9 +1201,11 @@ std::vector<uchar> DecompInterface::readResponse() {
 									"</comment>";
 							}
 						}
+						std::string s = "<commentdb>\n" + commentStr + "</commentdb>";
 						write(query_response_start, sizeof(query_response_start));
-						writeString("<commentdb>\n" + commentStr + "</commentdb>");
+						writeString(s);
 						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
 						//getComments();
 					} else if (name == "getCallFixup") {
 						processPcodeInject(CALLFIXUP_TYPE, callFixupMap);
@@ -1156,6 +1215,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 						processPcodeInject(CALLMECHANISM_TYPE, callMechMap);
 					} else {
 						std::string liststring = readQueryString();
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(liststring) + "\")", false);
 						std::vector<unsigned long long> refs;
 						std::stringstream ss(liststring);
 						std::string item;
@@ -1181,18 +1241,20 @@ std::vector<uchar> DecompInterface::readResponse() {
 						} else {
 							xml_escape(commentesc, rec.token.c_str());
 						}
-						write(query_response_start, sizeof(query_response_start));
-						writeString("<cpoolrec ref=\"" + std::to_string(refs[0]) +
+						std::string s = "<cpoolrec ref=\"" + std::to_string(refs[0]) +
 							"\" tag=\"" + cpoolreftags[rec.tag] + "\"" +
 							std::string(rec.hasThis ? " hasthis=\"true\"" : "") +
 							std::string(rec.constructor ? " constructor=\"true\"" : "") + ">\n" +
-							(rec.tag == PRIMITIVE ? "<value>" +
-								std::to_string(rec.value) + "</value>" : "") +
-							(rec.data.size() != 0 ? "<data length=\"" +
-								std::to_string(rec.data.size()) + "\">\n" + dblres + "</data>\n" :
-								"<token>" + commentesc.str() + "</token>\n") +
-							"</cpoolrec>");
+							(rec.tag == PRIMITIVE ? "  <value>" +
+								std::to_string(rec.value) + "</value>\n" : "") +
+								(rec.data.size() != 0 ? "  <data length=\"" +
+									std::to_string(rec.data.size()) + "\">\n" + dblres + "</data>\n" :
+									"  <token>" + commentesc.str() + "</token>\n") +
+							"</cpoolrec>";
+						write(query_response_start, sizeof(query_response_start));
+						writeString(s);
 						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
 						//getCPoolRef(); //constant pool only implemented currently for JVM/Dalvik
 						//Ghidra/Processors/JVM/src/main/java/ghidra/app/util/pcodeInject/ConstantPoolJava.java
 						//hard coded constants and some sort of record format with tag, token value and type returned for the comman deliminated query
@@ -1201,6 +1263,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 				case 'E':
 				{
 					addrstring = readQueryString();
+					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
 					//callback->status("getExternalRefXML " + addrstring);
 					AddrInfo addr;
 					getAddrFromString(addrstring, addr);
@@ -1212,12 +1275,14 @@ std::vector<uchar> DecompInterface::readResponse() {
 					write(query_response_start, sizeof(query_response_start));
 					writeString(res);
 					write(query_response_end, sizeof(query_response_end));
+					callback->protocolRecorder("queryresponse(\"" + escapeCStr(res) + "\")", true);
 					//getExternalRefXML();			// getExternalRefXML
 					break;
 				}
 				case 'M':
 				{
 					addrstring = readQueryString();
+					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
 					//callback->status("getMappedSymbolsXML " + addrstring);
 					istringstream str(addrstring);
 					AddrInfo addr;
@@ -1248,41 +1313,41 @@ std::vector<uchar> DecompInterface::readResponse() {
 						xml_escape(datanameesc, msi.name.c_str());
 						//typelock, namelock, readonly, volatile also cat (szCoreTypes), index
 						//callback->status("Data name: " + dataname);
-						res = "<result>\n<parent>\n<val/>\n</parent>\n<mapsym>\n" //type=\"dynamic\"/\"equate"
-							"<symbol name=\"" + datanameesc.str() + "\" typelock=\"" +
+						res = "<result>\n  <parent>\n    <val/>\n  </parent>\n  <mapsym>\n" //type=\"dynamic\"/\"equate"
+							"    <symbol name=\"" + datanameesc.str() + "\" typelock=\"" +
 							(msi.typeChain.begin()->metaType == "unknown" ? "true" : "true") +
 							"\" namelock=\"" + std::string(msi.name.size() != 0 ? "true" : "false") +
 							"\" readonly=\"" + (msi.readonly ? "true" : "false") +
 							"\" volatile=\"" +
-							std::string(msi.volatil ? "true" : "false") + "\" cat=\"" "-1" "\">" +
-							buildTypeXml(msi.typeChain) +
-							"</symbol>"
-							"<addr space=\"" + addr.space +
-							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>"
-							"<rangelist/></mapsym>\n</result>\n";
+							std::string(msi.volatil ? "true" : "false") + "\" cat=\"" "-1" "\">\n" +
+							buildTypeXml(msi.typeChain, 6) +
+							"    </symbol>\n"
+							"    <addr space=\"" + addr.space +
+							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>\n"
+							"    <rangelist/>\n  </mapsym>\n</result>\n";
 					} else if (msi.kind == KIND_EXTERNALREFERENCE) {
 						ostringstream nameesc;
 						xml_escape(nameesc, msi.name.c_str());
 						//callback->status("Extern name: " + externname);
-						res = "<result>\n<parent>\n<val/>\n</parent>\n<mapsym>\n"
-							"<externrefsymbol name=\"" + nameesc.str() + "\">"
-							"<addr space=\"" + addr.space +
-							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>"
-							"</externrefsymbol>"
-							"<addr space=\"" + addr.space +
-							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>"
-							"<rangelist/></mapsym>\n</result>\n";
+						res = "<result>\n  <parent>\n    <val/>\n  </parent>\n  <mapsym>\n"
+							"    <externrefsymbol name=\"" + nameesc.str() + "\">\n"
+							"      <addr space=\"" + addr.space +
+							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>\n"
+							"    </externrefsymbol>\n"
+							"    <addr space=\"" + addr.space +
+							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>\n"
+							"    <rangelist/>\n  </mapsym>\n</result>\n";
 					} else if (msi.kind == KIND_LABEL) {
 						ostringstream nameesc;
 						xml_escape(nameesc, msi.name.c_str());
-						res = "<result>\n<parent>\n<val/>\n</parent>\n<mapsym>\n"
-							"<labelsym name=\"" + nameesc.str() +
+						res = "<result>\n  <parent>\n    <val/>\n  </parent>\n  <mapsym>\n"
+							"    <labelsym name=\"" + nameesc.str() +
 							"\" namelock=\"true\" typelock=\"true\" readonly=\"" +
 							std::string(msi.readonly ? "true" : "false") + "\" volatile=\"" +
 							std::string(msi.volatil ? "true" : "false") + "\" cat=\"" "-1" "\"/>\n"
-							"<addr space=\"" + addr.space +
-							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>"
-							"<rangelist/></mapsym>\n</result>\n";
+							"    <addr space=\"" + addr.space +
+							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>\n"
+							"    <rangelist/>\n  </mapsym>\n</result>\n";
 					}
 					if (res.size() == 0) { //KIND_HOLE
 						//get the readonly status
@@ -1311,12 +1376,14 @@ std::vector<uchar> DecompInterface::readResponse() {
 					write(query_response_start, sizeof(query_response_start));
 					writeString(res);
 					write(query_response_end, sizeof(query_response_end));
+					callback->protocolRecorder("queryresponse(\"" + escapeCStr(res) + "\")", true);
 					//getMappedSymbolsXML();			// getMappedSymbolsXML
 					break;
 				}
 				case 'P':
 				{
 					addrstring = readQueryString();
+					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
 					//callback->status("getPcodePacked " + addrstring);
 					istringstream str(addrstring);
 					AddrInfo addr;
@@ -1325,9 +1392,9 @@ std::vector<uchar> DecompInterface::readResponse() {
 					//Instruction instr = getInstruction(addr);
 					//PackedBytes pcode = instr.getPrototype().getPcodePacked(instr.getInstructionContext(),
 					//	new InstructionPcodeOverride(instr), uniqueFactory);
-					std::string packed;
+					std::string packed, xml;
 					try {
-						packed = getPackedPcode(*trans, addr);
+						std::tie(packed, xml) = getPackedPcode(*trans, addr);
 					} catch (SleighError&) {
 					} catch (BadDataError&) {
 					} catch (UnimplError&) {
@@ -1339,12 +1406,14 @@ std::vector<uchar> DecompInterface::readResponse() {
 					write(query_response_start, sizeof(query_response_start));
 					if (packed.size() != 0) writeBytes((const uchar*)packed.data(), packed.size());
 					write(query_response_end, sizeof(query_response_end));
+					callback->protocolRecorder("queryresponse(packedPcode(\"" + escapeCStr(xml) + "\"))", true);
 					//getPcodePacked();				// getPacked
 					break;
 				}
 				case 'R':
 					if (name == "getRegister") {
 						std::string nm = readQueryString();
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(nm) + "\")", false);
 						//in .sla file: <varnode_sym name="REG" id="0xID" scope="0x0" space="register" offset="0xOFFSET" size="SIZE"></varnode_sym>
 						//std::map<std::string, std::string>::const_iterator it = registers.find(nm);
 						//if (it != registers.end()) writeString(it->second + "\n");
@@ -1355,10 +1424,12 @@ std::vector<uchar> DecompInterface::readResponse() {
 						write(query_response_start, sizeof(query_response_start));
 						writeString(res);
 						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(\"" + escapeCStr(res) + "\")", true);
 						//getRegister();
 					} else { //getRegisterName mainly because not all registers enumerated initially with getRegister
 						//however this is probably never a problem, but it could be a problem if there is some highly specialized code with uneven alignment on registers?
 						addrstring = readQueryString(); //is addr the same as offset?
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
 						SizedAddrInfo addr;
 						getAddrFromString(addrstring, addr);
 						//Address addr = Varnode.readXMLAddress(addrstring, addrfactory, nullptr);
@@ -1369,28 +1440,34 @@ std::vector<uchar> DecompInterface::readResponse() {
 						//	if (it->second == addrstring) break;
 						//}
 						//writeString(it == registers.end() ? "" : it->first);
+						std::string s = trans->getRegisterName(trans->getSpaceByName(addr.addr.space),
+							addr.addr.offset, addr.size).c_str();
 						write(query_response_start, sizeof(query_response_start));
-						writeString(trans->getRegisterName(trans->getSpaceByName(addr.addr.space),
-							addr.addr.offset, addr.size).c_str());
+						writeString(s);
 						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
 					}
 					break;
 				case 'S':
 				{
 					addrstring = readQueryString();
+					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
 					AddrInfo addr;
 					getAddrFromString(addrstring, addr);
 					//callback->status("getSymbol " + addrstring);
+					std::string s = callback->getSymbol(addr);
 					write(query_response_start, sizeof(query_response_start));
-					writeString(callback->getSymbol(addr));
+					writeString(s);
 					write(query_response_end, sizeof(query_response_end));
+					callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
 					//getSymbol();					// getSymbol
 					break;
 				}
 				case 'T':
 					if (name == "getType") {
-						std::string name = readQueryString();
+						std::string nm = readQueryString();
 						std::string id = readQueryString();
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(nm) + "\", \"" + escapeCStr(id) + "\")", false);
 						//Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/program/model/pcode/PcodeDataTypeManager.java
 						//getType();
 						//Pointer
@@ -1411,13 +1488,16 @@ std::vector<uchar> DecompInterface::readResponse() {
 						//can use coreTypes
 						//Otherwise < 16: unknown, > 16: Array
 						std::vector<TypeInfo> typeChain;
-						callback->getMetaType(name, typeChain);
+						callback->getMetaType(nm, typeChain);
+						std::string s = typeChain.size() != 0 ? buildTypeXml(typeChain, 0) : "";
 						write(query_response_start, sizeof(query_response_start));
-						writeString(typeChain.size() != 0 ? buildTypeXml(typeChain) : "");
+						writeString(s);
 						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
 					} else {
 						//getTrackedRegisters();
 						addrstring = readQueryString();
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
 						//callback->status("getTrackedRegisters " + addrstring);
 						AddrInfo addr;
 						getAddrFromString(addrstring, addr);
@@ -1442,23 +1522,26 @@ std::vector<uchar> DecompInterface::readResponse() {
 							Address(trans->getSpaceByName(addr.space), addr.offset));
 						std::string track;
 						for (TrackedSet::iterator it = ts.begin(); it != ts.end(); it++) {
-							track += "<set space=\"" + it->loc.space->getName() + "\" offset=\"0x" +
+							track += "  <set space=\"" + it->loc.space->getName() + "\" offset=\"0x" +
 								to_string(it->loc.offset, hex) +
 								"\" size=\"" + std::to_string(it->loc.size) +
 								"\" val=\"0x" + to_string(it->val, hex) + "\"/>\n";
 						}
 						//register values upon entry
-						write(query_response_start, sizeof(query_response_start));
-						writeString(std::string("<tracked_pointset space=\"" + addr.space +
+						std::string s = std::string("<tracked_pointset space=\"" + addr.space +
 							"\" offset=\"0x") + to_string(addr.offset, hex) +
 							"\">\n" + track +
-							"</tracked_pointset>\n");
+							"</tracked_pointset>\n";
+						write(query_response_start, sizeof(query_response_start));
+						writeString(s);
 						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
 					}
 					break;
 				case 'U':
 				{
 					std::string indexStr = readQueryString();
+					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(indexStr) + "\")", false);
 					//in .sla file: <userop_head name = "UserOpName" id = "0xID" scope = "0x0" / >
 					int index = strtol(indexStr.c_str(), nullptr, 10);
 					//std::map<int, std::string>::const_iterator it = userOpNames.find(index);
@@ -1469,13 +1552,15 @@ std::vector<uchar> DecompInterface::readResponse() {
 					write(query_response_start, sizeof(query_response_start));
 					writeString(nm);
 					write(query_response_end, sizeof(query_response_end));
+					callback->protocolRecorder("queryresponse(\"" + escapeCStr(nm) + "\")", true);
 					//getUserOpName();				// getUserOpName
 				}
 				break;
-				case 'X':
+				case 'X': //getXPcode
 					processPcodeInject(EXECUTABLEPCODE_TYPE, callExecPcodeMap);
 					break;
 				default:
+					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\")", false);
 					throw DecompError("Unsupported decompiler query '" + name + "'");
 				}
 			} catch (DecompError& e) { // Catch ANY exception query generates
@@ -1486,6 +1571,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 				writeString(extype.c_str());
 				writeString(e.explain.c_str());
 				write(exception_end, sizeof(exception_end));
+				callback->protocolRecorder("exception(\"" + escapeCStr(extype) + "\", \"" + escapeCStr(e.explain) + "\")", true);
 			}
 			//fflush(nativeOut); // Make sure decompiler receives response
 			readToBurst(); // Read query terminator
@@ -1549,7 +1635,9 @@ std::vector<uchar> DecompInterface::readResponse() {
 			type = readToBurst();
 		}
 		else {
+			size_t pos = buf.size();
 			type = readToBuffer(buf);
+			callback->protocolRecorder("buffereddata(\"" + escapeCStr(std::string(buf.begin() + pos, buf.end())) + "\")", false);
 		}
 	}
 	return retbuf;
@@ -1760,7 +1848,7 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 			std::string(it->isUtf ? "\" utf=\"true" : "") +
 			"\" id=\"" + std::to_string(it->id) + "\"/>\n";
 	}
-	szCoreTypes += "    </coretypes>";
+	szCoreTypes += "    </coretypes>\n";
 	coretypesxml = szCoreTypes;
 	cspecxml = readFileAsString(cspecfilename);
 	pspecxml = readFileAsString(pspecfilename);
@@ -2092,7 +2180,7 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 	uintm uniqBase = 0x10000000; //trans->getUniqueBase()
 	//the problem is the unique base at trans->getUniqueBase() will be used for pcode injections so 0x10000000 is considered a safe distance to allow for an arbitrary amount of them
 	tspecxml = "<sleigh bigendian=\"" + std::string(trans->isBigEndian() ? "true" : "false") +
-		"\" uniqbase=\"0x" + to_string(uniqBase, hex) + "\">\n" + procSpaces + "</sleigh>";
+		"\" uniqbase=\"0x" + to_string(uniqBase, hex) + "\">\n  " + procSpaces + "\n</sleigh>\n";
 
 	delete doc;
 	xmlOptions = getOptions(opt);
@@ -2120,6 +2208,7 @@ void DecompInterface::registerProgram()
 		writeString(tspecxml); //Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/app/plugin/processors/sleigh/SleighLanguage.java
 		writeString(coretypesxml); //Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/program/model/pcode/PcodeDataTypeManager.java
 		write(command_end, sizeof(command_end));
+		callback->protocolRecorder("command(\"registerProgram\", \"" + escapeCStr(pspecxml) + "\", \"" + escapeCStr(cspecxml) + "\", \"" + escapeCStr(tspecxml) + "\", \"" + escapeCStr(coretypesxml) + "\")", true);
 		revec = readResponse();
 	}
 	catch (DecompError& /*e*/) {
@@ -2149,6 +2238,7 @@ int DecompInterface::deregisterProgram() {
 	writeString("deregisterProgram");
 	writeString(std::to_string(archId));
 	write(command_end, sizeof(command_end));
+	callback->protocolRecorder("command(\"deregisterProgram\", \"" + escapeCStr(std::to_string(archId)) + "\")", true);
 	std::vector<uchar> revec = readResponse();
 	return strtol(std::string(revec.begin(), revec.end()).c_str(), nullptr, 10);
 }
@@ -2168,6 +2258,7 @@ std::vector<uchar> DecompInterface::sendCommand(std::string command) {
 		writeString(command);
 		writeString(std::to_string(archId));
 		write(command_end, sizeof(command_end));
+		callback->protocolRecorder("command(\""+ escapeCStr(command) + "\", \"" + escapeCStr(std::to_string(archId)) + "\")", true);
 		resbuf = readResponse();
 	}
 	catch (DecompError& /*e*/) {
@@ -2198,6 +2289,7 @@ std::vector<uchar> DecompInterface::sendCommand1ParamTimeout(std::string command
 			writeString(std::to_string(archId));
 			writeString(param);
 			write(command_end, sizeof(command_end));
+			callback->protocolRecorder("command(\"" + escapeCStr(command) + "\", \"" + escapeCStr(std::to_string(archId)) + "\", \"" + escapeCStr(param) + "\")", true);
 			return readResponse();
 		} catch (BadDataError& e) {
 			err = e.explain;
@@ -2213,7 +2305,7 @@ std::vector<uchar> DecompInterface::sendCommand1ParamTimeout(std::string command
 			return std::vector<uchar>();
 		}
 	});
-	std::future<std::vector<uchar>> future = task.get_future(); //crash occurs here
+	std::future<std::vector<uchar>> future = task.get_future();
 	std::thread t(std::move(task), command, param);
 	//GetProcessMemoryInfo?
 	std::future_status status = future.wait_for(std::chrono::seconds(timeoutSecs));
@@ -2255,6 +2347,7 @@ std::vector<uchar> DecompInterface::sendCommand2Params(std::string command,
 		writeString(param1);
 		writeString(param2);
 		write(command_end, sizeof(command_end));
+		callback->protocolRecorder("command(\"" + escapeCStr(command) + "\", \"" + escapeCStr(std::to_string(archId)) + "\", \"" + escapeCStr(param1) + "\", \"" + escapeCStr(param2) + "\")", true);
 		resbuf = readResponse();
 	}
 	catch (DecompError& /*e*/) {
@@ -2291,6 +2384,7 @@ std::vector<uchar> DecompInterface::sendCommand1Param(std::string command, std::
 		writeString(std::to_string(archId));
 		writeString(param1);
 		write(command_end, sizeof(command_end));
+		callback->protocolRecorder("command(\"" + escapeCStr(command) + "\", \"" + escapeCStr(std::to_string(archId)) + "\", \"" + escapeCStr(param1) + "\")", true);
 		resbuf = readResponse();
 	} catch (DecompError& /*e*/) {
 		statusGood = false;
@@ -2417,31 +2511,147 @@ string getHasAttributeValue(Element* pEl, const string& nm)
 	return "";
 }
 
+void reduceShortCircuits(std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph)
+{
+	std::vector<std::vector<unsigned int>> succs;
+	succs.resize(blockGraph.size());
+	for (size_t i = 0; i < blockGraph.size(); i++) {
+		for (int j = 0; j < blockGraph[i].first.size(); j++) {
+			succs[blockGraph[i].first[j]].push_back(i);
+		}
+	}
+	for (size_t i = 0; i < blockGraph.size(); i++) {
+		if (blockGraph[i].second.empty() && blockGraph[i].first.size() == 1 &&
+			succs[i].size() == succs[blockGraph[i].first[0]].size()) {
+			size_t foundj = -1;
+			for (size_t j = 0; j < succs[i].size(); j++) {
+				size_t k;
+				for (k = 0; k < succs[blockGraph[i].first[0]].size(); k++) {
+					if (succs[blockGraph[i].first[0]][k] == i) continue;
+					if (succs[i][j] == succs[blockGraph[i].first[0]][k]) break;
+				}
+				if (k != succs[blockGraph[i].first[0]].size()) continue;
+				else if (foundj == -1) foundj = j;
+				else {
+					foundj = -1; break;
+				}
+			}
+			if (foundj != -1) {
+				blockGraph[succs[i][foundj]].first.push_back(blockGraph[i].first[0]);
+				succs[blockGraph[i].first[0]].push_back(succs[i][foundj]);
+				for (size_t j = 0; j < succs[blockGraph[i].first[0]].size(); j++) {
+					if (succs[blockGraph[i].first[0]][j] == i) {
+						succs[blockGraph[i].first[0]].erase(succs[blockGraph[i].first[0]].begin() + j);
+						break;
+					}
+				}
+				blockGraph[i].first.erase(blockGraph[i].first.begin());
+				for (size_t j = 0; j < succs[i].size(); j++) {
+					for (size_t k = 0; k < blockGraph[succs[i][j]].first.size(); k++) {
+						if (blockGraph[succs[i][j]].first[k] == i) {
+							blockGraph[succs[i][j]].first.erase(blockGraph[succs[i][j]].first.begin() + k);
+							break;
+						}
+					}
+				}
+				succs[i].erase(succs[i].begin(), succs[i].end());
+			}
+		}
+	}
+}
+
 std::string DecompInterface::convertSourceDoc(Element* el,
-	std::string & displayXml, std::string& funcProto, std::string& funcColorProto)
+	std::string& displayXml, std::string& funcProto, std::string& funcColorProto,
+	std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph)
 {
 	//Ghidra/Features/Decompiler/src/decompile/cpp/prettyprint.cc
 	//colors are keyword, comment, type, funcname, var, const, param and global
 	std::string s;
-	const List& list(el->getChildren());
-	List::const_iterator iter;
-	for (iter = list.begin(); iter != list.end(); ++iter) {
-		el = *iter;
+	std::stack<std::pair<Element*, bool>> elements;
+	elements.push(std::pair<Element*, bool>(el, true));
+	std::stack<std::pair<unsigned int, std::vector<std::pair<size_t, unsigned int>>>> blockPath;
+	size_t protooff, dispprotooff;
+	while (!elements.empty()) {
+		std::pair<Element*, bool>& ref = elements.top();
+		el = ref.first;
+		if (!ref.second) { //emission is not upon leaving a block - an additional containment relationship is present
+			//emission is upon reaching sibling block, or leaving the parent block
+			if (el->getName() == "block") {
+				unsigned int idx = blockPath.top().first;
+				//if (idx & 0x80000000) idx = ~idx;
+				unsigned int lastsib = -1;
+				std::string spc;
+				if (blockGraph[idx].second.size() != 0) {
+					std::string::reverse_iterator lnl = std::find(blockGraph[idx].second.rbegin(), blockGraph[idx].second.rend(), '\n');
+					std::string::iterator it = std::find_if_not(lnl.base(), blockGraph[idx].second.end(), isspace);
+					std::string st;
+					std::copy_if(lnl.base(), it, std::back_inserter(st), [](char ch) { return ch == ' '; });
+					if (!st.empty()) spc = st;
+				}
+				std::string tline;
+				for (int i = 0; i < blockPath.top().second.size(); i++) {
+					if (blockPath.top().second[i].second == -1) {
+						std::string precline;
+						if (i == blockPath.top().second.size() - 1)
+							precline = displayXml.substr(blockPath.top().second[i].first);
+						else
+							precline = displayXml.substr(blockPath.top().second[i].first, blockPath.top().second[i + 1].first - blockPath.top().second[i].first);
+						tline += precline;
+						std::string::reverse_iterator lnl = std::find(precline.rbegin(), precline.rend(), '\n');
+						std::string::iterator it = std::find_if_not(lnl.base(), precline.end(), isspace);
+						std::string st;
+						std::copy_if(lnl.base(), it, std::back_inserter(st), [](char ch) { return ch == ' '; });
+						if (!st.empty()) spc = st;
+					} else if (std::find(blockGraph[blockPath.top().second[i].second].first.begin(), blockGraph[blockPath.top().second[i].second].first.end(), idx) != blockGraph[blockPath.top().second[i].second].first.end()) {
+						//} else if (blockPath.top().second[i].second != idx) {
+						lastsib = blockPath.top().second[i].second;
+						blockGraph[idx].second += tline;
+						tline.clear();
+						blockGraph[idx].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(blockPath.top().second[i].second));
+					} else if (idx == blockPath.top().second[i].second) {
+					} else {
+						if (lastsib != -1) idx = lastsib;
+						blockGraph[idx].second += tline;
+						tline.clear();
+						if (lastsib != -1) blockGraph[idx].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(blockPath.top().second[i].second));
+						lastsib = blockPath.top().second[i].second;
+					}
+				}
+				blockGraph[idx].second += tline;
+				//if (lastsib != -1) blockGraph[lastsib].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(idx));
+				blockPath.pop();
+				//if leaving a parent into the same parent, assume a sibling situation has occurred
+				if (!blockPath.empty()) {
+					blockPath.top().second.push_back(std::pair<size_t, unsigned int>(displayXml.size(), -1));
+					//if (blockPath.top().first != lastsib)
+					//	blockGraph[idx].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(blockPath.top().first));
+						//blockPath.top().first = ~idx; //mark to use next child sibling instead
+					//} else if (blockPath.top().first & 0x80000000) {
+						//blockPath.top().first = ~idx;
+					//}
+				}
+			} else if (el->getName() == "funcproto") {
+				funcProto = s.substr(protooff);
+				funcColorProto = displayXml.substr(dispprotooff);
+			}
+			elements.pop();
+			continue;
+		}
+		ref.second = false;
 		//"clang_document"
 		if (el->getName() == "function") { //syntax tree is followed by source code
-			s += convertSourceDoc(el, displayXml, funcProto, funcColorProto);
 		} else if (el->getName() == "block") {
-			s += convertSourceDoc(el, displayXml, funcProto, funcColorProto);
+			unsigned int newnum = strtoul(el->getAttributeValue("blockref").c_str(), nullptr, 16);
+			//if (blockPath.top().first != newnum) { }
+			if (!blockPath.empty()) blockPath.top().second.push_back(std::pair<size_t, unsigned int>(displayXml.size(), newnum));
+			blockPath.push(std::pair<unsigned int, std::vector<std::pair<size_t, unsigned int>>>(newnum, std::vector<std::pair<size_t, unsigned int>>()));
+			blockPath.top().second.push_back(std::pair<size_t, unsigned int>(displayXml.size(), -1));
 		} else if (el->getName() == "statement") {
-			s += convertSourceDoc(el, displayXml, funcProto, funcColorProto);
 		} else if (el->getName() == "funcproto") {
-			funcProto = convertSourceDoc(el, funcColorProto, funcProto, funcColorProto);
-			s += funcProto;
-			displayXml += funcColorProto;
+			protooff = s.size();
+			dispprotooff = displayXml.size();
 		} else if (el->getName() == "return_type") {
-			s += convertSourceDoc(el, displayXml, funcProto, funcColorProto);
 		} else if (el->getName() == "vardecl") {
-			s += convertSourceDoc(el, displayXml, funcProto, funcColorProto);
 		} else if (el->getName() == "syntax") {
 			//el->getAttributeValue("open");
 			//el->getAttributeValue("close");
@@ -2487,6 +2697,12 @@ std::string DecompInterface::convertSourceDoc(Element* el,
 		} else {
 
 		}
+		const List& list(el->getChildren());
+		List::const_reverse_iterator iter;
+		for (iter = list.rbegin(); iter != list.rend(); ++iter) {
+			el = *iter;
+			elements.push(std::pair<Element*, bool>(el, true));
+		}
 	}
 	return s;
 }
@@ -2524,16 +2740,166 @@ std::string DecompInterface::getRegisterFromIndex(unsigned long long offs, int s
 	return trans->getRegisterName(trans->getSpaceByName("register"), offs, size);
 }
 
+void parseTypeInfo(Element* el, std::vector<TypeInfo>& ti);
+void parseFuncProto(Element* el, FuncProtoInfo& fpi)
+{
+	const List& list(el->getChildren());
+	List::const_iterator iter;
+	for (iter = list.begin(); iter != list.end(); ++iter) {
+		el = *iter;
+		if (el->getName() == "prototype") {
+			fpi.model = el->getAttributeValue("model");
+			fpi.extraPop = el->getAttributeValue("extrapop") == "unknown" ? -1 : strtoull(el->getAttributeValue("extrapop").c_str(), nullptr, 10);
+			for (int i = 0; i < el->getNumAttributes(); i++) {
+				if (el->getAttributeName(i) == "inline" && el->getAttributeValue(i) == "true") fpi.isInline = true;
+				else if (el->getAttributeName(i) == "noreturn" && el->getAttributeValue(i) == "true") fpi.isNoReturn = true;
+				else if (el->getAttributeName(i) == "hasthis" && el->getAttributeValue(i) == "true") fpi.hasThis = true;
+				else if (el->getAttributeName(i) == "custom" && el->getAttributeValue(i) == "true") fpi.customStorage = true;
+				else if (el->getAttributeName(i) == "constructor" && el->getAttributeValue(i) == "true") fpi.isConstruct = true;
+				else if (el->getAttributeName(i) == "destructor" && el->getAttributeValue(i) == "true") fpi.isDestruct = true;
+				else if (el->getAttributeName(i) == "dotdotdot" && el->getAttributeValue(i) == "true") fpi.dotdotdot = true;
+			}
+			const List& lst(el->getChildren());
+			for (iter = lst.begin(); iter != lst.end(); ++iter) {
+				el = *iter;
+				if (el->getName() == "returnsym") {
+					fpi.retType.argIndex = -1;
+					const List& lt(el->getChildren());
+					List::const_iterator it;
+					for (it = lt.begin(); it != lt.end(); ++it) {
+						if ((*it)->getName() == "addr") {
+							fpi.retType.addr.addr.space = (*it)->getAttributeValue("space");
+							if (fpi.retType.addr.addr.space == "join") {
+								for (int i = 0; i < (*it)->getNumAttributes(); i++) {
+									if ((*it)->getAttributeName(i).substr(0, 5) == "piece") {
+										int idx = strtoull((*it)->getAttributeName(5).c_str(), nullptr, 10) - 1;
+										SizedAddrInfo inf;
+										size_t off = (*it)->getAttributeValue(i).find(':');
+										inf.addr.space = (*it)->getAttributeValue(i).substr(0, off);
+										std::string rest = (*it)->getAttributeValue(i).substr(off + 1);
+										off = rest.find(':');
+										inf.addr.offset = strtoull(rest.substr(0, off).c_str(), nullptr, 16);
+										inf.size = strtoull(rest.substr(off + 1).c_str(), nullptr, 10);
+										if (fpi.retType.joins.size() <= idx) fpi.retType.joins.resize(idx + 1);
+										fpi.retType.joins[idx] = inf; //fpi.retType.joins.push_back(inf);
+									}
+								}
+							} else {
+								fpi.retType.addr.addr.offset = strtoull((*it)->getAttributeValue("offset").c_str(), nullptr, 16);
+								fpi.retType.addr.size = strtoull((*it)->getAttributeValue("size").c_str(), nullptr, 10);
+							}
+						}
+					}
+					parseTypeInfo(el, fpi.retType.pi.ti);
+				} else if (el->getName() == "killedbycall") {
+					const List& lt(el->getChildren());
+					List::const_iterator it;
+					for (it = lt.begin(); it != lt.end(); ++it) {
+						if ((*it)->getName() == "addr") {
+							SizedAddrInfo sai;
+							sai.addr.space = (*it)->getAttributeValue("space");
+							sai.addr.offset = strtoull((*it)->getAttributeValue("offset").c_str(), nullptr, 16);
+							sai.size = strtoull((*it)->getAttributeValue("size").c_str(), nullptr, 10);
+							fpi.killedByCall.push_back(sai);
+						}
+					}
+				} else if (el->getName() == "internallist") {
+					const List& lt(el->getChildren());
+					List::const_iterator it;
+					for (it = lt.begin(); it != lt.end(); ++it) {
+						if ((*it)->getName() == "param") {
+							SymInfo sym;
+							sym.pi.name = (*it)->getAttributeValue("name");
+							parseTypeInfo(*it, sym.pi.ti);
+							fpi.syminfo.push_back(sym);
+						}
+					}
+				}
+			}
+			break;
+		}
+	}
+}
+
+void parseTypeInfo(Element* el, std::vector<TypeInfo>& ti)
+{
+	const List& list(el->getChildren());
+	List::const_iterator iter;
+	for (iter = list.begin(); iter != list.end(); ++iter) {
+		el = *iter;
+		if (el->getName() == "type") {
+			TypeInfo typ;
+			typ.typeName = el->getAttributeValue("name");
+			typ.size = strtoull(el->getAttributeValue("size").c_str(), nullptr, 10);
+			typ.metaType = el->getAttributeValue("metatype");
+			if (typ.metaType == "ptr") {
+				ti.push_back(typ);
+				parseTypeInfo(el, ti);
+			} else if (typ.metaType == "struct") {
+				const List& lst(el->getChildren());
+				List::const_iterator it;
+				for (it = lst.begin(); it != lst.end(); ++it) {
+					if ((*it)->getName() == "field") {
+						StructMemberInfo smi;
+						smi.name = (*it)->getAttributeValue("name");
+						smi.offset = strtoull((*it)->getAttributeValue("offset").c_str(), nullptr, 10);
+						parseTypeInfo(*it, smi.ti);
+						typ.structMembers.push_back(smi);
+					}
+				}
+				ti.push_back(typ);
+			} else if (typ.metaType == "array") {
+				typ.arraySize = strtoull(el->getAttributeValue("arraysize").c_str(), nullptr, 10);
+				ti.push_back(typ);
+				parseTypeInfo(el, ti);
+			} else if (typ.metaType == "code") {
+				parseFuncProto(el, typ.funcInfo);
+				ti.push_back(typ);
+			} else if (typ.metaType == "void") {
+				ti.push_back(typ);
+			} else {
+				//enum, utf, char
+				for (int i = 0; i < el->getNumAttributes(); i++) {
+					if (el->getAttributeName(i) == "enum" && el->getAttributeValue(i) == "true") {
+						typ.isEnum = true;
+						const List& lst(el->getChildren());
+						List::const_iterator it;
+						for (it = lst.begin(); it != lst.end(); ++it) {
+							if ((*it)->getName() == "val") {
+								typ.enumMembers.push_back(std::pair<std::string, unsigned long long>
+									((*it)->getAttributeValue("name"), strtoull((*it)->getAttributeValue("value").c_str(), nullptr, 10)));
+							}
+						}
+					} else if (el->getAttributeName(i) == "utf" && el->getAttributeValue(i) == "true")
+						typ.isUtf = true;
+					else if (el->getAttributeName(i) == "char" && el->getAttributeValue(i) == "true")
+						typ.isChar = true;
+				}
+				ti.push_back(typ);
+			}
+			break;
+		} else if (el->getName() == "typeref") {
+			TypeInfo typ;
+			typ.typeName = el->getAttributeValue("name");
+			typ.size = -1;
+			ti.push_back(typ);
+			break;
+		}
+	}
+}
+
 //language id and compiler id from ldefs can be used for loading the patterns (for byte searching to find functions though - not a decompiler level issue):
 //data/patterns/patternconstraints.xml
 //patternconstraints -> language id="" -> compiler id="" -> <patternfile>name</patternfile>
-std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string & displayXml, std::string& funcProto, std::string& funcColorProto)
+std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string & displayXml,
+	std::string& funcProto, std::string& funcColorProto, std::vector<SymInfo>& symInf,
+	std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph)
 {
 	std::vector<uchar> buf;
-	setSimplificationStyle(dm.actionname);
 	if (dm.actionname.empty()) {
 		throw DecompError("Decompile action not specified");
 	}
+	if (dm.actionname == "decompile") setSimplificationStyle(dm.actionname);
 	//Ghidra/Features/Decompiler/src/decompile/cpp/ghidra_process.hh
 	//"normalize", "jumptable", "paramid", "register", "firstpass"
 	if (dm.actionname != "decompile") {
@@ -2590,7 +2956,116 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 	} catch (XmlError& /*err*/) {
 		throw DecompError("Unable to parse XML: " + decompXml);
 	}
-	decompXml = convertSourceDoc(doc->getRoot(), displayXml, funcProto, funcColorProto);
+	Element* el = doc->getRoot();
+	const List& list(el->getChildren());
+	List::const_iterator iter;
+	bool bFirst = true;
+	for (iter = list.begin(); iter != list.end(); ++iter) {
+		if ((*iter)->getName() == "function") { //first function contains prototype, AST, other info, next one is C code
+			if (!bFirst) {
+				reduceShortCircuits(blockGraph);
+				decompXml = convertSourceDoc(*iter, displayXml, funcProto, funcColorProto, blockGraph);
+				break;
+			}
+			bFirst = !bFirst;
+			el = *iter;
+			const List& lst(el->getChildren());
+			List::const_iterator itert;
+			for (itert = lst.begin(); itert != lst.end(); ++itert) {
+				if ((*itert)->getName() == "localdb") {
+					el = *itert;
+					const List& lt(el->getChildren());
+					List::const_iterator itr;
+					for (itr = lt.begin(); itr != lt.end(); ++itr) {
+						if ((*itr)->getName() == "scope") {
+							el = *itr;
+							const List& ls(el->getChildren());
+							for (itr = ls.begin(); itr != ls.end(); ++itr) {
+								if ((*itr)->getName() == "symbollist") {
+									el = *itr;
+									const List& l(el->getChildren());
+									for (itr = l.begin(); itr != l.end(); ++itr) {
+										if ((*itr)->getName() == "mapsym") {
+											SymInfo sym;
+											el = *itr;
+											const List& li(el->getChildren());
+											List::const_iterator it;
+											for (it = li.begin(); it != li.end(); ++it) {
+												el = *it;
+												if (el->getName() == "symbol") {
+													sym.pi.name = el->getAttributeValue("name");
+													if (strtoull(el->getAttributeValue("cat").c_str(), nullptr, 10) == 0)
+														sym.argIndex = strtoull(el->getAttributeValue("index").c_str(), nullptr, 16);
+													else sym.argIndex = -1;
+													parseTypeInfo(el, sym.pi.ti);
+													break;
+												} else if (el->getName() == "addr") {
+													sym.addr.addr.space = el->getAttributeValue("space");
+													if (sym.addr.addr.space == "join") {
+														for (int i = 0; i < el->getNumAttributes(); i++) {
+															if (el->getAttributeName(i).substr(0, 5) == "piece") {
+																int idx = strtoull(el->getAttributeName(5).c_str(), nullptr, 10) - 1;
+																SizedAddrInfo inf;
+																size_t off = el->getAttributeValue(i).find(':');
+																inf.addr.space = el->getAttributeValue(i).substr(0, off);
+																std::string rest = el->getAttributeValue(i).substr(off + 1);
+																off = rest.find(':');
+																inf.addr.offset = strtoull(rest.substr(0, off).c_str(), nullptr, 16);
+																inf.size = strtoull(rest.substr(off + 1).c_str(), nullptr, 10);
+																if (sym.joins.size() <= idx) sym.joins.resize(idx + 1);
+																sym.joins[idx] = inf; //sym.joins.push_back(inf);
+															}
+														}
+													} else
+														sym.addr.addr.offset = strtoull(el->getAttributeValue("offset").c_str(), nullptr, 16);
+												} else if (el->getName() == "rangelist") {
+													const List& li(el->getChildren());
+													List::const_iterator itr;
+													for (itr = li.begin(); itr != li.end(); ++itr) {
+														if ((*itr)->getName() == "range") {
+															sym.range.space = (*itr)->getAttributeValue("space");
+															sym.range.beginoffset = strtoull((*itr)->getAttributeValue("first").c_str(), nullptr, 16);
+															sym.range.endoffset = strtoull((*itr)->getAttributeValue("last").c_str(), nullptr, 16);
+															break;
+														}
+													}
+												}
+											}
+											symInf.push_back(sym);
+										}
+									}
+									break;
+								}
+							}
+							break;
+						}
+					}
+				} else if ((*itert)->getName() == "ast") {
+					const List& lt((*itert)->getChildren());
+					List::const_iterator itr;
+					blockGraph.resize(1); //first node has no in edges and is not included
+					for (itr = lt.begin(); itr != lt.end(); ++itr) {
+						el = *itr;
+						if (el->getName() == "block") {
+							//rangelist -> range...
+							//op...
+						} else if (el->getName() == "blockedge") {
+							unsigned int idx = strtoul(el->getAttributeValue("index").c_str(), nullptr, 10);
+							if (blockGraph.size() <= idx) blockGraph.resize(idx + 1);
+							const List& l(el->getChildren());
+							List::const_iterator it;
+							for (it = l.begin(); it != l.end(); ++it) {
+								el = *it;
+								if (el->getName() == "edge") { //inbound edges
+									blockGraph[idx].first.push_back(strtoul(el->getAttributeValue("end").c_str(), nullptr, 10));
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 	delete doc;
 	/**
 	* Tell the decompiler to clear any function and symbol

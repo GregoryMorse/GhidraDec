@@ -45,6 +45,9 @@ namespace idaplugin {
 		std::string arglocToAddr(argloc_t al, unsigned long long* offset, std::vector<SizedAddrInfo>& joins, bool noResolveReg);
 	public:
 		DecompInterface* decInt = nullptr;
+		FILE* sendfp = nullptr;
+		FILE* recvfp = nullptr;
+		FILE* recfp = nullptr;
 
 		unsigned long long cacheCount = 0;
 		std::map<ea_t, std::pair<unsigned long long, std::vector<unsigned short>>> byteCache;
@@ -84,6 +87,7 @@ namespace idaplugin {
 		void launchDecompiler();
 		size_t readDec(void* Buf, size_t MaxCharCount);
 		size_t writeDec(void const* Buf, size_t MaxCharCount);
+		void protocolRecorder(std::string data, bool bWrite);
 		void terminate();
 		void getInits(std::vector<InitStateItem>& inits);
 		std::string getPcodeInject(int type, std::string name, AddrInfo addr, std::string fixupbase, unsigned long long fixupoffset);
@@ -114,7 +118,9 @@ namespace idaplugin {
 		std::string getHeaderDefFromAnalysis(bool allImports, std::string& forDisplay);
 
 		void init(std::string sleighfilename, std::string pspec, std::string cspec);
-		std::string tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err);
+		void identParams(ea_t ea);
+		std::string tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err,
+			std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph);
 	};
 
 	bool detectProcCompiler(RdGlobalInfo* di, std::string& pspec, std::string& cspec, std::string& sleighfilename);

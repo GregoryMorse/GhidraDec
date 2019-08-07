@@ -833,7 +833,8 @@ SymbolEntry *ActionConstantPtr::isPointer(AddrSpace *spc,Varnode *vn,PcodeOp *op
   bool needexacthit;
   Architecture *glb = data.getArch();
   Varnode *outvn;
-  if (vn->getType()->getMetatype() == TYPE_PTR) { // Are we explicitly marked as a pointer
+  if (vn->getType()->getMetatype() == TYPE_PTR ||
+	  vn->getType()->getMetatype() == TYPE_CODE) { // Are we explicitly marked as a pointer
     rampoint = glb->resolveConstant(spc,vn->getOffset(),vn->getSize(),op->getAddr());
     needexacthit = false;
   }
@@ -1234,18 +1235,19 @@ void ActionFuncLink::funcLinkInput(FuncCallSpecs *fc,Funcdata &data)
       AddrSpace *spc = param->getAddress().getSpace();
       uintb off = param->getAddress().getOffset();
       int4 sz = param->getSize();
-      if (spc->getType() == IPTR_SPACEBASE) { // Param is stack relative
-	Varnode *loadval = data.opStackLoad(spc,off,sz,op,(Varnode *)0,false);
-	data.opInsertInput(op,loadval,op->numInput());
+	  if (spc->getType() == IPTR_SPACEBASE) { // Param is stack relative
+		Varnode* loadval = data.opStackLoad(spc, off, sz, op, (Varnode*)0, false);
+	  data.opInsertInput(op,loadval,op->numInput());
 	if (!setplaceholder) {
 	  setplaceholder = true;
 	  loadval->setSpacebasePlaceholder();
 	  spacebase = (AddrSpace *)0;	// With a locked stack parameter, we don't need a stackplaceholder
 	}
-      }
-      else
-	data.opInsertInput(op,data.newVarnode(param->getSize(),param->getAddress()),op->numInput());
-    }
+	  }
+	  else
+	    data.opInsertInput(op, data.newVarnode(param->getSize(), param->getAddress()), op->numInput());
+	  data.segmentizeFarPtr(param->getType(), param->isTypeLocked(), op->getIn(op->numInput() - 1), false);
+	}
   }
   if (spacebase != (AddrSpace *)0) {	// If we need it, create the stackplaceholder
     PcodeOp *op = fc->getOp();
@@ -1272,7 +1274,8 @@ void ActionFuncLink::funcLinkOutput(FuncCallSpecs *fc,Funcdata &data)
     if (outtype->getMetatype() != TYPE_VOID) {
       int4 sz = outparam->getSize();
       Address addr = outparam->getAddress();
-      data.newVarnodeOut(sz,addr,fc->getOp());
+	  data.newVarnodeOut(sz, addr, fc->getOp());
+	  data.segmentizeFarPtr(outparam->getType(), outparam->isTypeLocked(), fc->getOp()->getOut(), false);
       VarnodeData vdata;
       OpCode res = fc->assumedOutputExtension(addr,sz,vdata);
       if (res == CPUI_PIECE) {		// Pick an extension based on type
@@ -1976,28 +1979,6 @@ int4 ActionSetCasts::castOutput(PcodeOp *op,Funcdata &data,CastStrategy *castStr
       // Preserve implied pointer if it points to a composite
       if ((meta!=TYPE_ARRAY)&&(meta!=TYPE_STRUCT))
 	outvn->updateType(tokenct,false,false); // Otherwise ignore it in favor of the token type
-	} else {
-		if (op->code() == CPUI_PIECE) {
-			Architecture* glb = data.getArch();
-			AddrSpace* rspc = glb->getDefaultSpace();
-			bool arenearpointers = glb->hasNearPointers(rspc);
-			if (arenearpointers && rspc->getAddrSize() == op->getOut()->getSize()) {
-				SegmentOp* segdef = glb->userops.getSegmentOp(rspc->getIndex());
-				if (segdef->getBaseSize() == op->getIn(0)->getSize() &&
-					segdef->getInnerSize() == op->getIn(1)->getSize() &&
-					op->getIn(1)->getType()->getMetatype() == TYPE_PTR) { //far pointer found
-					//data.opSetOpcode(op, CPUI_CALLOTHER); //this is ideal but its way too late
-					//data.opInsertInput(op, op->getIn(1), 2); //need to check size of offset
-					//data.opSetInput(op, op->getIn(0), 1); //need to check size of segment
-					//data.opSetInput(op, data.newConstant(4, glb->userops.getSegmentOp(rspc->getIndex())->getIndex()), 0);
-					//data.opSetOpcode(op, CPUI_SEGMENTOP); //possible but again segmentizing occurs much earlier
-					//data.opSetInput(op, data.newVarnodeSpace(containerid), 0); //spacebase
-					data.opSetOpcode(op, CPUI_COPY);
-					data.opSwapInput(op, 0, 1);
-					data.opRemoveInput(op, 1);
-				}
-			}
-		}
 	}
     if (outvn->getType() != tokenct)
       force=true;		// Make sure not to drop pointer type
@@ -4314,6 +4295,24 @@ int4 ActionInferTypes::apply(Funcdata &data)
     }
     return 0;
   }
+
+  if (localcount == 0) {
+	  Datatype* ct;
+	  Varnode* vn;
+	  VarnodeLocSet::const_iterator iter;
+
+	  for (iter = data.beginLoc(); iter != data.endLoc(); ++iter) {
+		  vn = *iter;
+		  if (vn->isAnnotation()) continue;
+		  if ((!vn->isWritten()) && (vn->hasNoDescend())) continue;
+		  ct = vn->getLocalType();
+		  bool bBegin = false;
+		  if (iter == data.beginLoc()) bBegin = true; else iter--;
+		  data.segmentizeFarPtr(ct, vn->isTypeLock(), vn, true);
+		  if (bBegin) iter = data.beginLoc(); else iter++;
+	  }
+  }
+
   buildLocaltypes(data);	// Set up initial types (based on local info)
   for(iter=data.beginLoc();iter!=data.endLoc();++iter) {
     vn = *iter;
@@ -4326,9 +4325,10 @@ int4 ActionInferTypes::apply(Funcdata &data)
   if (spcvn != (Varnode *)0)
     propagateSpacebaseRef(data,spcvn);
   if (writeBack(data)) {
-    // count += 1;			// Do not consider this a data-flow change
-    localcount += 1;
+	  // count += 1;			// Do not consider this a data-flow change
+	  localcount += 1;
   }
+
   return 0;
 }
 

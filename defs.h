@@ -24,6 +24,7 @@
 #include <diskio.hpp>
 #include <frame.hpp>
 #include <funcs.hpp>
+#include <graph.hpp>
 #include <idp.hpp>
 #include <kernwin.hpp>
 #include <lines.hpp>
@@ -857,7 +858,11 @@ namespace idaplugin {
 
 // General print msg macros.
 //
+#ifdef _DEBUG
+#define PRINT_DEBUG   true
+#else
 #define PRINT_DEBUG   false
+#endif
 #define PRINT_ERROR   false
 #define PRINT_WARNING true
 #define PRINT_INFO    true
@@ -873,12 +878,13 @@ namespace idaplugin {
 /// Use instead of IDA SDK's warning() function.
 #define WARNING_GUI(body) { std::stringstream ss; ss << std::showbase << body; warning("%s", ss.str().c_str()); }
 
-#define RELEASE_VERSION "1.3"
+#define RELEASE_VERSION "1.4"
 
 class FunctionInfo
 {
 	public:
 		std::string code;
+		std::vector<std::pair<std::vector<unsigned int>, std::string>> blockGraph;
 		strvec_t idaCode;
 };
 
@@ -953,6 +959,9 @@ class RdGlobalInfo
 		const std::string viewerName = "GhidraDec";
 		TWidget* custViewer = nullptr;
 		TWidget* codeViewer = nullptr;
+		TWidget* graphWidget = nullptr;
+		graph_viewer_t* graphViewer = nullptr;
+		mutable_graph_t* mg = nullptr;
 
 	// One decompilation information.
 	//
