@@ -126,7 +126,11 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		case CM_CC_STDCALL: return "__stdcall";
 		case CM_CC_CDECL: return "__cdecl";
 		case CM_CC_THISCALL: return "__thiscall";
-		case CM_CC_PASCAL: return "__pascal"; //"__stdcall"
+		case CM_CC_PASCAL: return "__stdcall"; // "__pascal";
+		case CM_CC_ELLIPSIS: return "__cdecl";
+		case CM_CC_SPECIAL: return "__cdecl";
+		case CM_CC_SPECIALE: return "__cdecl";
+		case CM_CC_SPECIALP: return "__stdcall";
 		case CM_CC_UNKNOWN: default: return "unknown";
 		}
 	}
@@ -169,7 +173,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				unsigned long long offs;
 				std::vector<SizedAddrInfo> j; //can have a register reg1() as the is_mixed_scattered indicates
 				std::string spc = arglocToAddr(scat[i], &offs, j, false); //all "ram" - certainly join or reg2 would not make sense
-				joins.push_back(SizedAddrInfo{ spc, scat[i].off, scat[i].size });
+				joins.push_back(SizedAddrInfo{ {spc, scat[i].off}, scat[i].size });
 			}
 			return "join";
 		} else if (al.is_reg1()) {
@@ -199,15 +203,19 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			get_reg_name(&qs1, al.reg1(), ri1.size);
 			get_reg_name(&qs2, al.reg2(), ri2.size);
 			//reg2 is the high value, as in dx for pair dx:ax, so it needs to be added to the join space first
-			joins.push_back(SizedAddrInfo{ "register", noResolveReg ? -1 : (unsigned long long)regNameToIndexIda(qs2.c_str()), (unsigned long long)ri2.size });
-			joins.push_back(SizedAddrInfo{ "register", noResolveReg ? -1 : (unsigned long long)regNameToIndexIda(qs1.c_str()), (unsigned long long)ri1.size });
+			joins.push_back(SizedAddrInfo{ {"register", noResolveReg ? -1 : (unsigned long long)regNameToIndexIda(qs2.c_str())}, (unsigned long long)ri2.size });
+			joins.push_back(SizedAddrInfo{ {"register", noResolveReg ? -1 : (unsigned long long)regNameToIndexIda(qs1.c_str())}, (unsigned long long)ri1.size });
 			return "join";
 		} else if (al.is_rrel()) {
 			*offset = al.get_rrel().off; //some type of spacebase
-			//qstring qs;
-			//get_reg_name(&qs, al.get_rrel().reg, size);
-			//regNameToIndexIda(ph.reg_names[al.get_rrel().reg]);
-			return "ram";
+			bitrange_t bits;
+			const char* regnm = get_reg_info(ph.reg_names[al.get_rrel().reg], &bits); //use default processor name
+			reg_info_t ri;
+			parse_reg_name(&ri, regnm == nullptr ? ph.reg_names[al.get_rrel().reg] : regnm);
+			qstring qs;
+			get_reg_name(&qs, al.get_rrel().reg, ri.size);
+			int regidx = regNameToIndexIda(ph.reg_names[al.get_rrel().reg]);			
+			return decInt->regToSpacebase(regidx);
 		}
 		//al.is_custom() || al.is_badloc();
 		*offset = 0;
@@ -262,7 +270,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				if (s != nullptr) {
 					qstring qs;
 					if (get_segm_class(&qs, s) != -1 && qs == "CODE") {
-						inits.push_back(InitStateItem{ "ram", s->start_ea, "ram", s->end_ea, "register", regtrans, (unsigned long)ph.segreg_size, (unsigned long long)s->sel });
+						inits.push_back(InitStateItem{ {"ram", s->start_ea}, {"ram", s->end_ea}, {{"register", regtrans}, (unsigned long)ph.segreg_size}, (unsigned long long)s->sel });
 					}
 				}
 			}
@@ -273,7 +281,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				for (size_t k = 0; k < sregRanges[i].size(); k++) {
 					if (sregRanges[i][k].val == -1) continue;
 					//if (out.val == ((1 << (ph.segreg_size * 8)) - 1)) continue;
-					inits.push_back(InitStateItem{ "ram", sregRanges[i][k].start_ea, "ram", sregRanges[i][k].end_ea, "register", regtrans, (unsigned long)ph.segreg_size, (unsigned long long)sregRanges[i][k].val });
+					inits.push_back(InitStateItem{ {"ram", sregRanges[i][k].start_ea}, {"ram", sregRanges[i][k].end_ea}, {{"register", regtrans}, (unsigned long)ph.segreg_size}, (unsigned long long)sregRanges[i][k].val });
 				}
 				//if (s->defsr[i] != -1) {
 					//inits.push_back(InitStateItem{ "ram", s->start_ea, "ram", s->end_ea, "register", (unsigned long long)regNameToIndexIda(ph.reg_names[i + ph.reg_first_sreg]), (unsigned long)ph.segreg_size, (unsigned long long)s->defsr[i] });
@@ -457,7 +465,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					}
 					coreTypeUsed[typ == -1 ? 1 : typ] = true;
 				}
-				func.syminfo.push_back(SymInfo{ { nm, typeChain }, "register", offset, size, (int)curArgs++ });
+				func.syminfo.push_back(SymInfo{ { nm, typeChain }, {{"register", offset}, size}, (int)curArgs++ });
 			}
 		}
 		if (f != nullptr && f->frame != BADNODE) { //f->analyzed_sp()
@@ -516,7 +524,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					}
 					coreTypeUsed[typ == -1 ? 1 : typ] = true;
 				}
-				func.syminfo.push_back(SymInfo{ {nm, typeChain}, "stack", frame->members[i].get_soff() - frame_off_retaddr(f), get_member_size(&frame->members[i]),
+				func.syminfo.push_back(SymInfo{ {nm, typeChain}, {{"stack", frame->members[i].get_soff() - frame_off_retaddr(f)}, get_member_size(&frame->members[i])},
 					is_funcarg_off(f, frame->members[i].get_soff()) ? (int)curArgs++ : -1 }); //frame->members[i].get_soff() >= firstarg or f->frsize - f->frregs
 			}
 		} else {
@@ -623,7 +631,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					}
 					coreTypeUsed[typ == -1 ? 1 : typ] = true; //name base is p for pointer, a for array, other wise first char of type name
 					func.syminfo.push_back(SymInfo{ {f->regvars[i].user == nullptr || f->regvars[i].user[0] == 0 ? std::string(1, typ == -1 ? 'u' : defaultCoreTypes[typ].name[0]) + "Var_" + std::string(f->regvars[i].canon) : f->regvars[i].user,typeChain },
-						"register", (unsigned long long)regNameToIndexIda(f->regvars[i].canon), (unsigned long long)ri.size, -1, RangeInfo{ addr.space, f->regvars[i].start_ea, f->regvars[i].end_ea } });
+						{{"register", (unsigned long long)regNameToIndexIda(f->regvars[i].canon)}, (unsigned long long)ri.size}, -1, RangeInfo{ addr.space, f->regvars[i].start_ea, f->regvars[i].end_ea } });
 				}
 			}
 			/*syminfo.erase(std::remove_if(syminfo.begin(), syminfo.end(), [](SymInfo it) { return it.name == ""; }), syminfo.end()); //or should give names - but often not used or necessary - dont mark in argument category at least
@@ -744,7 +752,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				qstring qs;
 				get_reg_name(&qs, ftd.spoiled[i].reg, ftd.spoiled[i].size);
 				unsigned long long offset = regNameToIndexIda(qs.empty() ? ph.reg_names[ftd.spoiled[i].reg] : qs.c_str());
-				func.killedByCall.push_back(SizedAddrInfo{ "register", offset, (unsigned long long)ftd.spoiled[i].size });
+				func.killedByCall.push_back(SizedAddrInfo{ {"register", offset}, (unsigned long long)ftd.spoiled[i].size });
 			}
 			func.dotdotdot = ftd.is_vararg_cc();
 			func.hasThis = (ftd.get_cc() & CM_CC_MASK) == CM_CC_THISCALL;
@@ -767,9 +775,9 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				qstring qs;
 				if (ftd[i].name.size() == 0 && space == "register") get_reg_name(&qs, ftd[i].argloc.reg1(), ftd[i].type.get_size());
 				func.syminfo.push_back(SymInfo{ {ftd[i].name.size() == 0 && space == "register" ? "in_" + std::string(qs.c_str()) : ftd[i].name.c_str(), typeChain },
-					space, offs, ftd[i].type.get_size(), (int)i, {}, joins });
+					{{space, offs, joins}, ftd[i].type.get_size()}, (int)i, {} });
 			}
-			func.retType.addr.addr.space = arglocToAddr(ftd.retloc, &func.retType.addr.addr.offset, func.retType.joins, paramOnly);
+			func.retType.addr.addr.space = arglocToAddr(ftd.retloc, &func.retType.addr.addr.offset, func.retType.addr.addr.joins, paramOnly);
 			func.retType.addr.size = ftd.rettype.get_size();
 			if (func.retType.addr.size == BADSIZE) func.retType.addr.size = 0; //0 is void
 			//qstring qs;
@@ -787,7 +795,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 #else
 			if (ph.notify(ph.calc_retloc3, &t, inf.cc.cm, &al) == 2)
 #endif
-				func.retType.addr.addr.space = arglocToAddr(al, &func.retType.addr.addr.offset, func.retType.joins, false);
+				func.retType.addr.addr.space = arglocToAddr(al, &func.retType.addr.addr.offset, func.retType.addr.addr.joins, false);
 			else {
 				func.retType.addr.addr.space = "register"; // "ram";
 				qstring qs;
@@ -2774,37 +2782,234 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			allFuncNames[di->decompiledFunction->start_ea] = get_name(di->decompiledFunction->start_ea).c_str();
 		}
 	}
+	void IdaCallback::addrToArgLoc(SizedAddrInfo addr, argloc_t & al)
+	{
+		if (addr.addr.space == "register") {
+			std::string reg = decInt->getRegisterFromIndex(addr.addr.offset, (int)addr.size);
+			reg_info_t ri;
+			parse_reg_name(&ri, reg.c_str());
+			al.set_reg1(ri.reg);
+		} else if (addr.addr.space == "ram") {
+			al.set_ea(addr.addr.offset);
+		} else if (addr.addr.space == "stack") {
+			al.set_stkoff(addr.addr.offset);
+		} else if (addr.addr.space == "join") {
+			if (addr.addr.joins.size() == 2 &&
+				addr.addr.joins[0].addr.space == "register" &&
+				addr.addr.joins[1].addr.space == "register") {
+				std::string reg1 = decInt->getRegisterFromIndex(addr.addr.joins[0].addr.offset, (int)addr.addr.joins[0].size);
+				std::string reg2 = decInt->getRegisterFromIndex(addr.addr.joins[1].addr.offset, (int)addr.addr.joins[1].size);
+				reg_info_t ri1, ri2;
+				parse_reg_name(&ri1, reg1.c_str());
+				parse_reg_name(&ri2, reg1.c_str());
+				al.set_reg2(ri2.reg, ri1.reg);
+			} else {
+				scattered_aloc_t sa;
+				for (size_t j = 0; j < addr.addr.joins.size(); j++) {
+					argpart_t ap;
+					if (addr.addr.joins[j].addr.space == "register") {
+						std::string reg = decInt->getRegisterFromIndex(addr.addr.joins[j].addr.offset, (int)addr.addr.joins[j].size);
+						reg_info_t ri;
+						parse_reg_name(&ri, reg.c_str());
+						ap.set_reg1(ri.reg);
+					} else if (addr.addr.joins[j].addr.space == "ram") {
+						ap.set_ea(addr.addr.joins[j].addr.offset);
+					} else if (addr.addr.joins[j].addr.space == "stack") {
+						ap.set_stkoff(addr.addr.joins[j].addr.offset);
+					}
+					sa.push_back(ap);
+				}
+				al.consume_scattered(&sa);
+			}
+		}
+	}
+	void IdaCallback::funcInfoToIDA(FuncProtoInfo& paramInfo, tinfo_t & ti)
+	{
+		func_type_data_t ftd;
+		ti.get_func_details(&ftd);
+		addrToArgLoc(paramInfo.retType.addr, ftd.retloc);
+		typeInfoToIDA(0, paramInfo.retType.pi.ti, ftd.rettype);
+		if (paramInfo.isNoReturn) ftd.flags |= FTI_NORET;
+		ftd.flags |= FTI_ARGLOCS;
+		if (paramInfo.killedByCall.size() != 0) ftd.flags |= FTI_SPOILED;
+		if (paramInfo.model == "__stdcall") {
+			ftd.cc |= CM_CC_STDCALL;
+		} else if (paramInfo.model == "__fastcall" || paramInfo.model == "__regcall" || paramInfo.model == "__vectorcall") {
+			ftd.cc |= CM_CC_FASTCALL;
+		} else if (paramInfo.model == "__thiscall") {
+			ftd.cc |= CM_CC_THISCALL;
+		} else if (paramInfo.model == "__cdecl") {
+			ftd.cc |= (paramInfo.dotdotdot ? CM_CC_ELLIPSIS : CM_CC_CDECL);
+		} else if (paramInfo.model == "__pascal") {
+			ftd.cc |= CM_CC_PASCAL;
+		} else if (paramInfo.model == "unknown") {
+			ftd.cc |= CM_CC_UNKNOWN;
+		} else if (paramInfo.model == "__stdcall16far") {
+			ftd.cc |= CM_CC_STDCALL | CM_N16_F32 | CM_M_FF;
+			ftd.flags |= FTI_FARCALL;
+		} else if (paramInfo.model == "__stdcall16near") {
+			ftd.cc |= CM_CC_STDCALL | CM_N16_F32 | CM_M_NN;
+			ftd.flags |= FTI_NEARCALL;
+		} else if (paramInfo.model == "__cdecl16far") {
+			ftd.cc |= CM_CC_CDECL | CM_N16_F32 | CM_M_FF;
+			ftd.flags |= FTI_FARCALL;
+		} else if (paramInfo.model == "__cdecl16near") {
+			ftd.cc |= CM_CC_CDECL | CM_N16_F32 | CM_M_NN;
+			ftd.flags |= FTI_NEARCALL;
+		}
+		if (paramInfo.customStorage && ((ftd.cc & CM_CC_MASK) == CM_CC_STDCALL ||
+			(ftd.cc & CM_CC_MASK) == CM_CC_PASCAL || (ftd.cc & CM_CC_MASK) == CM_CC_FASTCALL
+			|| (ftd.cc & CM_CC_MASK) == CM_CC_THISCALL)) ftd.cc = (ftd.cc & CM_CC_MASK) | CM_CC_SPECIALP;
+		if (paramInfo.customStorage && (ftd.cc & CM_CC_MASK) != CM_CC_STDCALL) ftd.cc = (ftd.cc & CM_CC_MASK) | CM_CC_SPECIAL;
+		if (paramInfo.dotdotdot && (ftd.cc & CM_CC_MASK) != CM_CC_ELLIPSIS) ftd.cc = (ftd.cc & CM_CC_MASK) | CM_CC_SPECIALE;
+		for (size_t i = 0; i < paramInfo.killedByCall.size(); i++) {
+			reg_info_t ri;
+			std::string reg = decInt->getRegisterFromIndex(paramInfo.killedByCall[i].addr.offset, (int)paramInfo.killedByCall[i].size);
+			parse_reg_name(&ri, reg.c_str());
+			ftd.spoiled.push_back(ri);;
+		}
+		uval_t stkargs = 0;
+		for (size_t i = 0; i < paramInfo.syminfo.size(); i++) {
+			if (paramInfo.syminfo[i].argIndex == -1) continue;
+			funcarg_t fa;
+			addrToArgLoc(paramInfo.syminfo[i].addr, fa.argloc);
+			typeInfoToIDA(0, paramInfo.syminfo[i].pi.ti, fa.type);
+			fa.name = paramInfo.syminfo[i].pi.name.c_str();
+			if (ftd.size() <= paramInfo.syminfo[i].argIndex) ftd.resize(paramInfo.syminfo[i].argIndex + 1);
+			if (paramInfo.syminfo[i].addr.addr.space == "stack") stkargs += paramInfo.syminfo[i].addr.size;
+			ftd[paramInfo.syminfo[i].argIndex] = fa;
+		}
+		ftd.stkargs = stkargs;
+		ti.create_func(ftd);
+	}
+	void IdaCallback::typeInfoToIDA(int idx, std::vector<TypeInfo>& type, tinfo_t & ti)
+	{
+		if (type[idx].size == -1) {
+			ti.get_named_type(get_idati(), type[idx].typeName.c_str());
+			return;
+		}
+		if (type[idx].metaType == "ptr") {
+			ptr_type_data_t ptd;
+			typeInfoToIDA(idx + 1, type, ptd.obj_type);
+			ti.create_ptr(ptd);
+		} else if (type[idx].metaType == "struct") {
+			udt_type_data_t utd;
+			for (size_t i = 0; i < type[idx].structMembers.size(); i++) {
+				udt_member_t um;
+				um.name = type[idx].structMembers[i].name.c_str();
+				um.offset = type[idx].structMembers[i].offset;
+				typeInfoToIDA(0, type[idx].structMembers[i].ti, um.type);
+				utd.push_back(um);
+			}
+			ti.create_udt(utd, BTF_STRUCT);
+		} else if (type[idx].metaType == "array") {
+			array_type_data_t atd;
+			atd.nelems = (uint32)type[idx].arraySize;
+			typeInfoToIDA(idx + 1, type, atd.elem_type);
+			ti.create_array(atd);
+		} else if (type[idx].metaType == "code") {
+			funcInfoToIDA(type[idx].funcInfo, ti);
+		} else if (type[idx].metaType == "void") {
+			ti.create_simple_type(BT_VOID);
+		} else {
+			if (type[idx].isEnum) {
+				enum_type_data_t etd;
+				for (size_t i = 0; i < type[idx].enumMembers.size(); i++) {
+					enum_member_t em;
+					em.name = type[idx].enumMembers[i].first.c_str();
+					em.value = type[idx].enumMembers[i].second;
+					etd.push_back(em);
+				}
+				ti.create_enum(etd);
+			} else {
+				//ti.create_simple_type();
+			}
+		}
+	}
 	void IdaCallback::identParams(ea_t ea)
 	{
 		DecMode dm = defaultDecMode;
 		dm.actionname = "paramid";
 		std::string display, funcProto, funcColorProto;
-		std::vector<SymInfo> paramInfo;
+		FuncProtoInfo paramInfo;
 		std::vector<std::pair<std::vector<unsigned int>, std::string>> blockGraph;
-		//should turn off eliminate unreachable opiton switch
+		//should turn off eliminate unreachable option switch
 		//Options opt;
 		//opt.decompileUnreachable = true;
 		//decInt->setOptions(opt);
 		//decInt->toggleCCode(false);
 		//decInt->toggleSyntaxTree(false);
-		decInt->doDecompile(dm, AddrInfo{ "ram", ea }, display, funcProto, funcColorProto, paramInfo, blockGraph);
-		for (size_t i = 0; i < paramInfo.size(); i++) {
-			if (paramInfo[i].addr.addr.space == "register") {
-				paramInfo[i].addr.addr.offset;
-			} else if (paramInfo[i].addr.addr.space == "stack") {
-				paramInfo[i].addr.addr.offset;
-			} else if (paramInfo[i].addr.addr.space == "join") {
-				paramInfo[i].joins;
+		decInt->doDecompile(dm, AddrInfo{ "ram", ea }, display, funcProto, funcColorProto, paramInfo, blockGraph); //let outer try handle errors
+		executeOnMainThread([this, &paramInfo, ea]() {
+			func_t* f = get_func(ea);
+			if (f != nullptr) {
+				struc_t* frame = nullptr;
+				if (f->frame != BADNODE) frame = get_frame(f);
+				sval_t frsize = 0;
+				asize_t argsize = 0;
+				for (size_t i = 0; i < paramInfo.syminfo.size(); i++) {
+					if (paramInfo.syminfo[i].addr.addr.space != "stack") continue;
+					if (paramInfo.syminfo[i].argIndex == -1)
+						frsize += paramInfo.syminfo[i].pi.ti.begin()->size;
+					else
+						argsize += paramInfo.syminfo[i].pi.ti.begin()->size;
+				}
+				if (frame != nullptr) {
+					set_frame_size(f, frsize, f->frregs /*frame_off_savregs(f) - frame_off_lvars(f)*/, argsize);
+				} else {
+					if (frsize != 0 || argsize != 0) {
+						add_frame(f, frsize, 0, argsize);
+						frame = get_frame(f);
+					}
+				}
+				for (size_t i = 0; i < paramInfo.syminfo.size(); i++) {
+					if (paramInfo.syminfo[i].addr.addr.space == "register") {
+						if (paramInfo.syminfo[i].argIndex == -1) {
+							std::string reg = decInt->getRegisterFromIndex(paramInfo.syminfo[i].addr.addr.offset, (int)paramInfo.syminfo[i].addr.size);
+							regvar_t* rv = find_regvar(f, paramInfo.syminfo[i].range.beginoffset, paramInfo.syminfo[i].range.endoffset, reg.c_str(), nullptr);
+							if (rv == nullptr)
+								add_regvar(f, paramInfo.syminfo[i].range.beginoffset, paramInfo.syminfo[i].range.endoffset,
+									reg.c_str(), paramInfo.syminfo[i].pi.name.c_str(), nullptr);
+						} else {
+							std::string reg = decInt->getRegisterFromIndex(paramInfo.syminfo[i].addr.addr.offset, (int)paramInfo.syminfo[i].addr.size);
+							reg_info_t ri;
+							parse_reg_name(&ri, reg.c_str());
+							read_regargs(f);
+							size_t j;
+							for (j = 0; j < f->regargqty; j++) {
+								if (f->regargs[j].reg == ri.reg) break;
+							}
+							if (j == f->regargqty) {}
+							tinfo_t ti;
+							typeInfoToIDA(0, paramInfo.syminfo[i].pi.ti, ti);
+							add_regarg(f, ri.reg, ti, paramInfo.syminfo[i].pi.name.c_str());
+						}
+					} else if (paramInfo.syminfo[i].addr.addr.space == "stack") {
+						tinfo_t ti;
+						typeInfoToIDA(0, paramInfo.syminfo[i].pi.ti, ti);
+						opinfo_t oi = {};
+						flags_t flag;
+						size_t sz; //size of ti
+						get_idainfo_by_type(&sz, &flag, &oi, ti, nullptr);
+						define_stkvar(f, paramInfo.syminfo[i].pi.name.c_str(),
+							paramInfo.syminfo[i].addr.addr.offset - (frame_off_args(f) - frame_off_retaddr(f)),
+							flag, &oi, paramInfo.syminfo[i].addr.size);
+					} else if (paramInfo.syminfo[i].addr.addr.space == "ram") {
+					}
+				}
 			}
-			//paramInfo[i].pi.name;
-			paramInfo[i].pi.ti;
-		}
+			tinfo_t ti;
+			if (!getFuncByGuess(ea, ti)) {}
+			tinfo_t newti;
+			funcInfoToIDA(paramInfo, newti);
+			apply_tinfo(ea, newti, TINFO_DEFINITE);
+			});
 	}
 	std::string IdaCallback::tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err,
 		std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph)
 	{
 		std::string code, funcProto, funcColorProto;
-		std::vector<SymInfo> paramInfo;
+		FuncProtoInfo paramInfo;
 		definedFuncs[ea] = true;
 		try {
 			if (di->decompPid == 0) decInt->registerProgram();
@@ -3009,7 +3214,7 @@ ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 			}
 		}
 		for (size_t i = blockGraph.size() - 1; i != -1; i--) {
-			if (std::get<1>(blockGraph[i]).size() == 0) mg->del_node(i);
+			if (std::get<1>(blockGraph[i]).size() == 0) mg->del_node((int)i);
 		}
 		mg->create_digraph_layout();
 		mg->redo_layout();

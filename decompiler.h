@@ -118,6 +118,9 @@ namespace idaplugin {
 		std::string getHeaderDefFromAnalysis(bool allImports, std::string& forDisplay);
 
 		void init(std::string sleighfilename, std::string pspec, std::string cspec);
+		void addrToArgLoc(SizedAddrInfo addr, argloc_t& al);
+		void funcInfoToIDA(FuncProtoInfo& paramInfo, tinfo_t & ti);
+		void typeInfoToIDA(int idx, std::vector<TypeInfo>& type, tinfo_t& ti);
 		void identParams(ea_t ea);
 		std::string tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err,
 			std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph);

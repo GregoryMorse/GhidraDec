@@ -957,12 +957,12 @@ std::string DecompInterface::writeFuncProto(FuncProtoInfo func,
 		}
 	} else {
 		if (func.retType.addr.addr.space == "join") {
-			for (int i = 0; i < func.retType.joins.size(); i++) {
+			for (int i = 0; i < func.retType.addr.addr.joins.size(); i++) {
 				if (i != 0) joinString += " ";
 				joinString += "piece" + std::to_string(i + 1) +
-					"=\"" + func.retType.joins[i].addr.space + ":0x" +
-					to_string(func.retType.joins[i].addr.offset) + ":" +
-					std::to_string(func.retType.joins[i].size) + "\"";
+					"=\"" + func.retType.addr.addr.joins[i].addr.space + ":0x" +
+					to_string(func.retType.addr.addr.joins[i].addr.offset) + ":" +
+					std::to_string(func.retType.addr.addr.joins[i].size) + "\"";
 			}
 		}
 	}
@@ -1024,6 +1024,13 @@ std::string DecompInterface::writeFunc(SizedAddrInfo addr, std::string funcname,
 	ostringstream parentnameesc;
 	xml_escape(parentnameesc, parentname.c_str());
 	std::string symbols;
+	bool bTypeLockArgs = true; //for args, either type lock all or none
+	for (std::vector<SymInfo>::iterator it = func.syminfo.begin(); it != func.syminfo.end(); it++) {
+		if (//startOffs.space != addr.addr.space || startOffs.offset != addr.addr.offset ||
+			it->pi.ti.begin()->metaType == "unknown" && it->argIndex != -1) {
+			bTypeLockArgs = false;
+		}
+	}
 	for (std::vector<SymInfo>::iterator it = func.syminfo.begin(); it != func.syminfo.end(); it++) {
 		//must bitmask any negative offsets to the current addressing sizes, for stack, likely pointers and others too
 		int addrSize = 0;
@@ -1037,10 +1044,10 @@ std::string DecompInterface::writeFunc(SizedAddrInfo addr, std::string funcname,
 		bool readonly = false;
 		std::string joinString;
 		if (it->addr.addr.space == "join") {
-			for (int i = 0; i < it->joins.size(); i++) {
+			for (int i = 0; i < it->addr.addr.joins.size(); i++) {
 				if (i != 0) joinString += " ";
-				joinString += "piece" + std::to_string(i + 1) + "=\"" + it->joins[i].addr.space + ":0x" +
-					to_string(it->joins[i].addr.offset) + ":" + std::to_string(it->joins[i].size) + "\"";
+				joinString += "piece" + std::to_string(i + 1) + "=\"" + it->addr.addr.joins[i].addr.space + ":0x" +
+					to_string(it->addr.addr.joins[i].addr.offset) + ":" + std::to_string(it->addr.addr.joins[i].size) + "\"";
 			}
 		}
 		//current function arguments must be added to the category 0 index # in order of function definition parameters
@@ -1050,8 +1057,8 @@ std::string DecompInterface::writeFunc(SizedAddrInfo addr, std::string funcname,
 		symbols += "            <mapsym>\n              <symbol name=\"" + it->pi.name + "\" typelock=\"" +
 			//the typelock is a size lock for unknown metatype and for category 0 mappings for the primary function being decompiled it is an all or nothing situation - due to design issue in Ghidra
 			(it->pi.ti.begin()->metaType == "unknown" &&
-			(startOffs.space != addr.addr.space || startOffs.offset != addr.addr.offset ||
-				it->argIndex == -1) ? "false" : "true") +
+			(//startOffs.space != addr.addr.space || startOffs.offset != addr.addr.offset ||
+				it->argIndex == -1 || (it->argIndex != -1 && !bTypeLockArgs)) ? "false" : "true") +
 			"\" namelock=\"" + std::string(it->pi.name.size() != 0 ? "true" : "false") +
 			"\" readonly=\"" + (readonly ? "true" : "false") +
 			"\" cat=\"" + std::string(it->argIndex != -1 ? "0\" index=\"" +
@@ -1645,7 +1652,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 
 std::string readFileAsString(std::string filename)
 {
-	FILE* fp = fopen(filename.c_str(), "rb");
+	/*FILE* fp = fopen(filename.c_str(), "rb");
 	if (fp == nullptr) return std::string();
 	std::vector<uchar> buf;
 	fseek(fp, 0, SEEK_END);
@@ -1653,7 +1660,14 @@ std::string readFileAsString(std::string filename)
 	buf.resize(size);
 	fseek(fp, 0, SEEK_SET);
 	fread(buf.data(), size, 1, fp);
-	fclose(fp);
+	fclose(fp);*/
+	ifstream ifs(filename, std::ifstream::binary);
+	ifs.seekg(0, ifs.end);
+	std::streampos length = ifs.tellg();
+	ifs.seekg(0, ifs.beg);
+	std::vector<char> buf;
+	buf.resize(length);
+	ifs.read(buf.data(), length);
 	return std::string(buf.begin(), buf.end());
 }
 
@@ -2604,24 +2618,28 @@ std::string DecompInterface::convertSourceDoc(Element* el,
 						if (!st.empty()) spc = st;
 					} else if (std::find(blockGraph[blockPath.top().second[i].second].first.begin(), blockGraph[blockPath.top().second[i].second].first.end(), idx) != blockGraph[blockPath.top().second[i].second].first.end()) {
 						//} else if (blockPath.top().second[i].second != idx) {
+						//if (lastsib != -1) blockGraph[lastsib].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(idx));
 						lastsib = blockPath.top().second[i].second;
 						blockGraph[idx].second += tline;
 						tline.clear();
 						blockGraph[idx].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(blockPath.top().second[i].second));
 					} else if (idx == blockPath.top().second[i].second) {
 					} else {
-						if (lastsib != -1) idx = lastsib;
+						bool bLinked = std::find(blockGraph[blockPath.top().second[i].second].first.begin(), blockGraph[blockPath.top().second[i].second].first.end(), lastsib) != blockGraph[blockPath.top().second[i].second].first.end();
+						if (lastsib != -1 && bLinked) idx = lastsib;
 						blockGraph[idx].second += tline;
 						tline.clear();
-						if (lastsib != -1) blockGraph[idx].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(blockPath.top().second[i].second));
+						if (lastsib != -1 && bLinked) blockGraph[idx].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(blockPath.top().second[i].second));
 						lastsib = blockPath.top().second[i].second;
 					}
 				}
 				blockGraph[idx].second += tline;
-				//if (lastsib != -1) blockGraph[lastsib].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(idx));
+				//if (lastsib != -1 && !tline.empty()) blockGraph[lastsib].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(idx));
+				bool bChanged = idx != blockPath.top().first;
 				blockPath.pop();
 				//if leaving a parent into the same parent, assume a sibling situation has occurred
 				if (!blockPath.empty()) {
+					if (lastsib != -1 && tline.empty() && bChanged) blockPath.top().second.push_back(std::pair<size_t, unsigned int>(displayXml.size(), lastsib));
 					blockPath.top().second.push_back(std::pair<size_t, unsigned int>(displayXml.size(), -1));
 					//if (blockPath.top().first != lastsib)
 					//	blockGraph[idx].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(blockPath.top().first));
@@ -2718,6 +2736,30 @@ int DecompInterface::coreTypeLookup(size_t size, std::string metatype)
 	return -1;
 }
 
+std::string DecompInterface::regToSpacebase(int regidx)
+{
+	for (int4 i = 0; i < trans->numSpaces(); i++) {
+		AddrSpace* as = trans->getSpace(i);
+		if (as->getType() == IPTR_SPACEBASE && as->numSpacebase() == 1) {
+			//as->getSpacebaseFull(0) not yet truncated and would return incorrect register offset
+			const VarnodeData& vd = as->getSpacebase(0);
+			if (vd.space->getName() == "register" && vd.offset == regidx) {
+				return as->getName();
+			}
+		}
+	}
+	return "";
+}
+
+int DecompInterface::spacebaseToReg(std::string name)
+{
+	AddrSpace* as = trans->getSpaceByName(name);
+	if (as != nullptr && as->getType() == IPTR_SPACEBASE && as->numSpacebase() == 1) {
+		return as->getSpacebase(0).offset;
+	}
+	return -1;
+}
+
 int DecompInterface::regNameToIndex(std::string regName)
 {
 //	try {
@@ -2780,8 +2822,8 @@ void parseFuncProto(Element* el, FuncProtoInfo& fpi)
 										off = rest.find(':');
 										inf.addr.offset = strtoull(rest.substr(0, off).c_str(), nullptr, 16);
 										inf.size = strtoull(rest.substr(off + 1).c_str(), nullptr, 10);
-										if (fpi.retType.joins.size() <= idx) fpi.retType.joins.resize(idx + 1);
-										fpi.retType.joins[idx] = inf; //fpi.retType.joins.push_back(inf);
+										if (fpi.retType.addr.addr.joins.size() <= idx) fpi.retType.addr.addr.joins.resize(idx + 1);
+										fpi.retType.addr.addr.joins[idx] = inf; //fpi.retType.joins.push_back(inf);
 									}
 								}
 							} else {
@@ -2892,7 +2934,7 @@ void parseTypeInfo(Element* el, std::vector<TypeInfo>& ti)
 //data/patterns/patternconstraints.xml
 //patternconstraints -> language id="" -> compiler id="" -> <patternfile>name</patternfile>
 std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string & displayXml,
-	std::string& funcProto, std::string& funcColorProto, std::vector<SymInfo>& symInf,
+	std::string& funcProto, std::string& funcColorProto, FuncProtoInfo& symInf,
 	std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph)
 {
 	std::vector<uchar> buf;
@@ -3012,8 +3054,8 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 																off = rest.find(':');
 																inf.addr.offset = strtoull(rest.substr(0, off).c_str(), nullptr, 16);
 																inf.size = strtoull(rest.substr(off + 1).c_str(), nullptr, 10);
-																if (sym.joins.size() <= idx) sym.joins.resize(idx + 1);
-																sym.joins[idx] = inf; //sym.joins.push_back(inf);
+																if (sym.addr.addr.joins.size() <= idx) sym.addr.addr.joins.resize(idx + 1);
+																sym.addr.addr.joins[idx] = inf; //sym.joins.push_back(inf);
 															}
 														}
 													} else
@@ -3031,7 +3073,7 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 													}
 												}
 											}
-											symInf.push_back(sym);
+											symInf.syminfo.push_back(sym);
 										}
 									}
 									break;

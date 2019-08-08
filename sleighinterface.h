@@ -78,10 +78,12 @@ struct Options
 	std::string setLanguage; //"c-language" - also has "java-language"
 	std::string protoEval; //calling convention
 };
+struct SizedAddrInfo;
 struct AddrInfo
 {
 	std::string space;
 	unsigned long long offset;
+	std::vector<SizedAddrInfo> joins; //for join space only
 };
 struct SizedAddrInfo
 {
@@ -143,7 +145,6 @@ struct SymInfo
 	SizedAddrInfo addr; //"ram", "stack", "join" but then need offsets for something like piece1="register:0x8:4" piece2="register:0x0:4"
 	int argIndex; //-1 if local variable
 	RangeInfo range; //for register space only with locals (for arguments, will automatically specify one less than the start address of the function)
-	std::vector<SizedAddrInfo> joins; //for join space only
 };
 struct FuncProtoInfo
 {
@@ -379,10 +380,12 @@ public:
 
 	//only after setup, and if decompilation process running and registered
 	std::string doDecompile(DecMode dm, AddrInfo addr, std::string& displayXml,
-		std::string& funcProto, std::string& funcColorProto, std::vector<SymInfo>& symInf,
+		std::string& funcProto, std::string& funcColorProto, FuncProtoInfo& symInf,
 		std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph);
 	void registerProgram();
 	int deregisterProgram();
+	std::string regToSpacebase(int regidx);
+	int spacebaseToReg(std::string name);
 	int regNameToIndex(std::string regName);
 	std::string getRegisterFromIndex(unsigned long long offs, int size);
 };
