@@ -111,19 +111,20 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	}
 	std::string ccToStr(cm_t c, int callMethod, bool bInit)
 	{
-		//if (!bInit && c == inf.cc.cm) return "default"; //&& ccToStr(inf.cc.cm, 0, true) == modelDefault //if this default is not used its meaningless here
+		//if (!bInit && c == inf.cc.cm) return "default"; //&& ccToStr(inf.cc.cm, is_code_far(inf.cc.cm) ? FTI_FARCALL : FTI_NEARCALL, true) == modelDefault //if this default is not used its meaningless here
 		if (!inf.is_32bit() && !inf.is_64bit() && isX86() && ((c & CM_CC_MASK) == CM_CC_STDCALL || (c & CM_CC_MASK) == CM_CC_PASCAL || (c & CM_CC_MASK) == CM_CC_CDECL)) {//16-bit x86 code needs right model
 			std::string model;
 			if ((c & CM_CC_MASK) == CM_CC_STDCALL || (c & CM_CC_MASK) == CM_CC_PASCAL) model = "__stdcall";
 			else model = "__cdecl";
 			model += "16"; // && is_code_far(inf.cc.cm)
-			model += callMethod == FTI_FARCALL || callMethod == FTI_DEFCALL && is_code_far(c) ? "far" : "near"; //|| (c & (CM_MASK | CM_M_MASK)) == (CM_UNKNOWN | CM_M_NN)
+			model += (callMethod == FTI_FARCALL || callMethod == FTI_DEFCALL && is_code_far(c)) ? "far" : "near"; //|| (c & (CM_MASK | CM_M_MASK)) == (CM_UNKNOWN | CM_M_NN)
 			return model;
 		}
 		//if (!bInit && (c & CM_CC_MASK) == (inf.cc.cm & CM_CC_MASK)) return "default";
 		switch (c & CM_CC_MASK) {
 		case CM_CC_FASTCALL: return !inf.is_32bit() && !inf.is_64bit() ? "__regcall" : "__fastcall"; //return "__vectorcall"; - extension to fastcall
 		case CM_CC_STDCALL: return "__stdcall";
+		case CM_CC_VOIDARG: return "__cdecl";
 		case CM_CC_CDECL: return "__cdecl";
 		case CM_CC_THISCALL: return "__thiscall";
 		case CM_CC_PASCAL: return "__stdcall"; // "__pascal";
@@ -396,10 +397,10 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		size_t curArgs = func.syminfo.size();
 		if (f != nullptr) {
 			if (func.model == "unknown") {
-				if (f->argsize == 0) {
-					func.model = ccToStr(CM_CC_CDECL, f->is_far() ? FTI_FARCALL : FTI_NEARCALL, false);
-				} else {
-					func.model = ccToStr((inf.cc.cm & CM_CC_MASK) == CM_CC_CDECL ? CM_CC_STDCALL : inf.cc.cm, f->is_far() ? FTI_FARCALL : FTI_NEARCALL, false);
+				if (f->argsize == 0) { //|| !f->does_return()
+					func.model = ccToStr((f->flags & FUNC_PURGED_OK) != 0 ? CM_CC_CDECL : CM_CC_UNKNOWN, f->is_far() || (f->flags & FUNC_USERFAR) != 0 ? FTI_FARCALL : FTI_NEARCALL, false);
+				} else { //CM_CC_UNKNOWN is likely better...
+					func.model = ccToStr(CM_CC_STDCALL, f->is_far() || (f->flags & FUNC_USERFAR) != 0 ? FTI_FARCALL : FTI_NEARCALL, false);
 				}
 			}
 			if (func.extraPop == -1) func.extraPop = (unsigned long long)f->argsize; //type unknown but have frame so now can calculate
@@ -529,7 +530,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 		} else {
 			unsigned long long retSize = 0;
-			if (f != nullptr && f->is_far()) retSize += ph.segreg_size;
+			if (f != nullptr && (f->is_far() || (f->flags & FUNC_USERFAR) != 0)) retSize += ph.segreg_size;
 			else if (f == nullptr && bFuncTinfo) {
 				tinfo_t ti;
 				func_type_data_t ftd;
@@ -593,7 +594,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			//return address size based on model
 			//x86-64 bit far/interupt calling aligns everything like flags, error codes, stack pointer and stack register to 64 bits each
 			//if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm)) {
-			//if (f->is_far() || imports.find(offset) != imports.end()) {
+			//if (f->is_far() || (f->flags & FUNC_USERFAR) != 0 || imports.find(offset) != imports.end()) {
 				//ph.max_ptr_size(); - for some reason is 48 bits on 64-bit systems?
 				//ph.get_stkarg_offset();
 				//ph.segreg_size
@@ -757,9 +758,10 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			func.dotdotdot = ftd.is_vararg_cc();
 			func.hasThis = (ftd.get_cc() & CM_CC_MASK) == CM_CC_THISCALL;
 			func.isNoReturn = (ftd.flags & FTI_NORET) != 0;
+			func.customStorage = is_user_cc(ftd.get_cc());
 			//switch (get_cc(inf.cc.cm)) {
 			//switch (get_cc(guess_func_cc(fd, ti.calc_purged_bytes(), CC_CDECL_OK | CC_ALLOW_ARGPERM | CC_ALLOW_REGHOLES | CC_HAS_ELLIPSIS))) {
-			func.model = ccToStr(get_cc(ftd.get_cc()), ftd.get_call_method());
+			func.model = ccToStr(ftd.cc, ftd.get_call_method());
 			for (size_t i = 0; i < ftd.size(); i++) {
 				unsigned long long offs;
 				//int typ = coreTypeLookup((int)ftd[i].type.get_size(), getMetaTypeInfo(ftd[i].type));
@@ -2292,7 +2294,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				dfsVisitData(it->first, dependentData, usedData, sortedData, visited);
 		}
 
-		std::string str = "//Default calling convention set to: " + (di->customCallStyle.empty() ? ccToStr(inf.cc.cm, 0, true) : di->customCallStyle) + "\n\n";
+		std::string str = "//Default calling convention set to: " + (di->customCallStyle.empty() ? ccToStr(inf.cc.cm, is_code_far(inf.cc.cm) ? FTI_FARCALL : FTI_NEARCALL, true) : di->customCallStyle) + "\n\n";
 		definitions += str; //should really use callback interface to get cspec variant
 		forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + str + std::string({ COLOR_OFF, COLOR_AUTOCMT });
 		for (int i = 0; i < numDefCoreTypes; i++) {
@@ -2826,42 +2828,44 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	void IdaCallback::funcInfoToIDA(FuncProtoInfo& paramInfo, tinfo_t & ti)
 	{
 		func_type_data_t ftd;
-		ti.get_func_details(&ftd);
+		//ti.get_func_details(&ftd);
 		addrToArgLoc(paramInfo.retType.addr, ftd.retloc);
 		typeInfoToIDA(0, paramInfo.retType.pi.ti, ftd.rettype);
 		if (paramInfo.isNoReturn) ftd.flags |= FTI_NORET;
 		ftd.flags |= FTI_ARGLOCS;
 		if (paramInfo.killedByCall.size() != 0) ftd.flags |= FTI_SPOILED;
 		if (paramInfo.model == "__stdcall") {
-			ftd.cc |= CM_CC_STDCALL;
+			ftd.cc |= (paramInfo.customStorage ? CM_CC_SPECIALP : CM_CC_STDCALL);
 		} else if (paramInfo.model == "__fastcall" || paramInfo.model == "__regcall" || paramInfo.model == "__vectorcall") {
-			ftd.cc |= CM_CC_FASTCALL;
+			ftd.cc |= (paramInfo.customStorage ? CM_CC_SPECIALP : CM_CC_FASTCALL);
 		} else if (paramInfo.model == "__thiscall") {
-			ftd.cc |= CM_CC_THISCALL;
+			ftd.cc |= (paramInfo.customStorage ? CM_CC_SPECIALP : CM_CC_THISCALL);
 		} else if (paramInfo.model == "__cdecl") {
-			ftd.cc |= (paramInfo.dotdotdot ? CM_CC_ELLIPSIS : CM_CC_CDECL);
+			ftd.cc |= (paramInfo.dotdotdot ? (paramInfo.customStorage ? CM_CC_SPECIALE : CM_CC_ELLIPSIS) : (paramInfo.customStorage ? CM_CC_SPECIAL : CM_CC_CDECL));
 		} else if (paramInfo.model == "__pascal") {
-			ftd.cc |= CM_CC_PASCAL;
+			ftd.cc |= (paramInfo.customStorage ? CM_CC_SPECIALP : CM_CC_PASCAL);
 		} else if (paramInfo.model == "unknown") {
 			ftd.cc |= CM_CC_UNKNOWN;
 		} else if (paramInfo.model == "__stdcall16far") {
-			ftd.cc |= CM_CC_STDCALL | CM_N16_F32 | CM_M_FF;
+			ftd.cc |= (paramInfo.customStorage ? CM_CC_SPECIALP : CM_CC_STDCALL) | CM_N16_F32;
 			ftd.flags |= FTI_FARCALL;
 		} else if (paramInfo.model == "__stdcall16near") {
-			ftd.cc |= CM_CC_STDCALL | CM_N16_F32 | CM_M_NN;
+			ftd.cc |= (paramInfo.customStorage ? CM_CC_SPECIALP : CM_CC_STDCALL) | CM_N16_F32;
 			ftd.flags |= FTI_NEARCALL;
 		} else if (paramInfo.model == "__cdecl16far") {
-			ftd.cc |= CM_CC_CDECL | CM_N16_F32 | CM_M_FF;
+			ftd.cc |= CM_CC_CDECL | CM_N16_F32;
 			ftd.flags |= FTI_FARCALL;
 		} else if (paramInfo.model == "__cdecl16near") {
-			ftd.cc |= CM_CC_CDECL | CM_N16_F32 | CM_M_NN;
+			ftd.cc |= CM_CC_CDECL | CM_N16_F32;
 			ftd.flags |= FTI_NEARCALL;
 		}
-		if (paramInfo.customStorage && ((ftd.cc & CM_CC_MASK) == CM_CC_STDCALL ||
+		ftd.cc |= (inf.cc.cm & CM_M_MASK);
+		ftd.cc |= (inf.cc.cm & CM_MASK);
+		/*if (paramInfo.customStorage && ((ftd.cc & CM_CC_MASK) == CM_CC_STDCALL ||
 			(ftd.cc & CM_CC_MASK) == CM_CC_PASCAL || (ftd.cc & CM_CC_MASK) == CM_CC_FASTCALL
 			|| (ftd.cc & CM_CC_MASK) == CM_CC_THISCALL)) ftd.cc = (ftd.cc & CM_CC_MASK) | CM_CC_SPECIALP;
 		if (paramInfo.customStorage && (ftd.cc & CM_CC_MASK) != CM_CC_STDCALL) ftd.cc = (ftd.cc & CM_CC_MASK) | CM_CC_SPECIAL;
-		if (paramInfo.dotdotdot && (ftd.cc & CM_CC_MASK) != CM_CC_ELLIPSIS) ftd.cc = (ftd.cc & CM_CC_MASK) | CM_CC_SPECIALE;
+		if (paramInfo.dotdotdot && (ftd.cc & CM_CC_MASK) != CM_CC_ELLIPSIS) ftd.cc = (ftd.cc & CM_CC_MASK) | CM_CC_SPECIALE;*/
 		for (size_t i = 0; i < paramInfo.killedByCall.size(); i++) {
 			reg_info_t ri;
 			std::string reg = decInt->getRegisterFromIndex(paramInfo.killedByCall[i].addr.offset, (int)paramInfo.killedByCall[i].size);
@@ -2926,6 +2930,34 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 		}
 	}
+	Options IdaCallback::getOpts()
+	{
+		Options opt = defaultOptions;
+		opt.protoEval = di->customCallStyle.empty() ? ccToStr(inf.cc.cm, is_code_far(inf.cc.cm) ? FTI_FARCALL : FTI_NEARCALL, true) : di->customCallStyle; //default calling convention can be very important such as on x86-16
+		opt.decompileUnreachable = (di->alysChecks & 1) != 0;
+		opt.ignoreUnimplemented = (di->alysChecks & 2) != 0;
+		opt.inferConstPtr = (di->alysChecks & 4) != 0;
+		opt.readonly = (di->alysChecks & 8) != 0;
+		opt.decompileDoublePrecis = (di->alysChecks & 16) != 0;
+		opt.conditionalexe = (di->alysChecks & 32) != 0;
+		opt.inPlaceOps = (di->alysChecks & 64) != 0;
+		opt.commentIndent = (int)di->cmtLevel;
+		opt.noCastPrinting = (di->dispChecks & 1) != 0;
+		opt.commentUser1 = (di->dispChecks & 2) != 0; //EOL
+		opt.commentHeader = (di->dispChecks & 4) != 0;
+		opt.commentInstructionHeader = (di->dispChecks & 32) != 0; //PLATE
+		opt.commentUser3 = (di->dispChecks & 64) != 0; //POST
+		opt.commentUser2 = (di->dispChecks & 128) != 0; //PRE
+		opt.commentWarning = (di->dispChecks & 256) != 0;
+		opt.commentWarningHeader = (di->dispChecks & 256) != 0;
+		opt.nullPrinting = (di->dispChecks & 512) != 0;
+		opt.conventionPrinting = (di->dispChecks & 1024) != 0;
+		opt.commentStyle = (di->comStyle ? "cplusplus" : "c");
+		opt.integerFormat = (di->intFormat ? (di->intFormat == 2 ? "best" : "dec") : "hex");
+		opt.maxLineWidth = (int)di->maxChars;
+		opt.indentIncrement = (int)di->numChars;
+		return opt;
+	}
 	void IdaCallback::identParams(ea_t ea)
 	{
 		DecMode dm = defaultDecMode;
@@ -2934,13 +2966,25 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		FuncProtoInfo paramInfo;
 		std::vector<std::pair<std::vector<unsigned int>, std::string>> blockGraph;
 		//should turn off eliminate unreachable option switch
-		//Options opt;
-		//opt.decompileUnreachable = true;
-		//decInt->setOptions(opt);
+		Options opt = getOpts();
+		bool bChangeOpt = false;
+		if (!opt.decompileUnreachable) {
+			opt.decompileUnreachable = true;
+			decInt->setOptions(opt);
+			bChangeOpt = true;
+		}
 		//decInt->toggleCCode(false);
 		//decInt->toggleSyntaxTree(false);
 		decInt->doDecompile(dm, AddrInfo{ "ram", ea }, display, funcProto, funcColorProto, paramInfo, blockGraph); //let outer try handle errors
+		if (bChangeOpt) decInt->setOptions(getOpts());
 		executeOnMainThread([this, &paramInfo, ea]() {
+			tinfo_t ti;
+			if (!getFuncByGuess(ea, ti)) {}
+			tinfo_t newti;
+			funcInfoToIDA(paramInfo, newti);
+			apply_tinfo(ea, newti, TINFO_DEFINITE);
+			func_type_data_t ftd;
+			newti.get_func_details(&ftd);
 			func_t* f = get_func(ea);
 			if (f != nullptr) {
 				struc_t* frame = nullptr;
@@ -2954,11 +2998,18 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					else
 						argsize += paramInfo.syminfo[i].pi.ti.begin()->size;
 				}
+				if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm) && !f->is_far()) f->flags |= FUNC_USERFAR; //FUNC_FAR
+				if (ftd.is_noret()) f->flags |= FUNC_NORET;
+				if (f->argsize == 0 && (f->flags & FUNC_PURGED_OK) == 0) {
+					f->flags |= FUNC_PURGED_OK;
+					if (is_purging_cc(ftd.cc)) f->argsize = ftd.stkargs;
+				}
+				update_func(f);
 				if (frame != nullptr) {
 					set_frame_size(f, frsize, f->frregs /*frame_off_savregs(f) - frame_off_lvars(f)*/, argsize);
 				} else {
 					if (frsize != 0 || argsize != 0) {
-						add_frame(f, frsize, 0, argsize);
+						add_frame(f, frsize, f->frregs, argsize);
 						frame = get_frame(f);
 					}
 				}
@@ -2998,11 +3049,6 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					}
 				}
 			}
-			tinfo_t ti;
-			if (!getFuncByGuess(ea, ti)) {}
-			tinfo_t newti;
-			funcInfoToIDA(paramInfo, newti);
-			apply_tinfo(ea, newti, TINFO_DEFINITE);
 			});
 	}
 	std::string IdaCallback::tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err,
@@ -3091,33 +3137,9 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 	std::string code, display;
 	std::vector<std::pair<std::vector<unsigned int>, std::string>> blockGraph;
 	if (di->idacb->decInt == nullptr) di->idacb->decInt = new DecompInterface();
-	Options opt = defaultOptions;
-	opt.protoEval = di->customCallStyle.empty() ? ccToStr(inf.cc.cm, 0, true) : di->customCallStyle; //default calling convention can be very important such as on x86-16
-	opt.decompileUnreachable = (di->alysChecks & 1) != 0;
-	opt.ignoreUnimplemented = (di->alysChecks & 2) != 0;
-	opt.inferConstPtr = (di->alysChecks & 4) != 0;
-	opt.readonly = (di->alysChecks & 8) != 0;
-	opt.decompileDoublePrecis = (di->alysChecks & 16) != 0;
-	opt.conditionalexe = (di->alysChecks & 32) != 0;
-	opt.inPlaceOps = (di->alysChecks & 64) != 0;
-	opt.commentIndent = (int)di->cmtLevel;
-	opt.noCastPrinting = (di->dispChecks & 1) != 0;
-	opt.commentUser1 = (di->dispChecks & 2) != 0; //EOL
-	opt.commentHeader = (di->dispChecks & 4) != 0;
-	opt.commentInstructionHeader = (di->dispChecks & 32) != 0; //PLATE
-	opt.commentUser3 = (di->dispChecks & 64) != 0; //POST
-	opt.commentUser2 = (di->dispChecks & 128) != 0; //PRE
-	opt.commentWarning = (di->dispChecks & 256) != 0;
-	opt.commentWarningHeader = (di->dispChecks & 256) != 0;
-	opt.nullPrinting = (di->dispChecks & 512) != 0;
-	opt.conventionPrinting = (di->dispChecks & 1024) != 0;
-	opt.commentStyle = (di->comStyle ? "cplusplus" : "c");
-	opt.integerFormat = (di->intFormat ? (di->intFormat == 2 ? "best" : "dec") : "hex");
-	opt.maxLineWidth = (int)di->maxChars;
-	opt.indentIncrement = (int)di->numChars;
 	std::vector<CoreType> cts(&defaultCoreTypes[0], &defaultCoreTypes[numDefCoreTypes]);
 	try {
-		di->idacb->decInt->setup(di->idacb, di->idacb->sleighfilename, di->idacb->pspec, di->idacb->cspec, cts, opt, (int)di->timeout, (int)di->maxPayload);
+		di->idacb->decInt->setup(di->idacb, di->idacb->sleighfilename, di->idacb->pspec, di->idacb->cspec, cts, di->getOpts(), (int)di->timeout, (int)di->maxPayload);
 	} catch (DecompError& err) {
 		WARNING_GUI("Decompilation FAILED: " << err.explain << ".\n");
 		di->decompSuccess = false;
