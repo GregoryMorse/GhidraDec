@@ -208,7 +208,7 @@ func_t* getIdaFunction(const std::string& word, int color)
 		return nullptr;
 	}
 
-	return get_func(cfgFnc->getStart());
+	return get_func((ea_t)cfgFnc->getStart());
 }
 
 bool isCurrentFunction(func_t* fnc)
@@ -281,7 +281,7 @@ void decompileFunction(
 	if (globVar && globVar->getStorage().isMemory())
 	{
 		INFO_MSG("Global variable -> jump to ASM.\n");
-		jumpto( globVar->getStorage().getAddress() );
+		jumpto((ea_t)globVar->getStorage().getAddress() );
 		return;
 	}
 
@@ -320,7 +320,7 @@ void decompileFunction(
 	// This is import/export or something similar -> jump to IDA disasm view.
 	//
 	INFO_MSG("Not a user-defined function -> jump to ASM.\n");
-	jumpto( cfgFnc->getStart() );
+	jumpto((ea_t)cfgFnc->getStart() );
 }
 
 //
@@ -561,12 +561,12 @@ bool idaapi changeFunctionGlobalName(TWidget* cv)
 	if ((fnc = getWordFunction(word, color)))
 	{
 		askString = "Please enter function name";
-		address = fnc->getStart();
+		address = (ea_t)fnc->getStart();
 	}
 	else if ((gv = getWordGlobal(word, color)))
 	{
 		askString = "Please enter global variable name";
-		address = gv->getStorage().getAddress();
+		address = (ea_t)gv->getStorage().getAddress();
 	}
 	else
 	{
@@ -794,7 +794,7 @@ bool idaapi changeTypeDeclaration(TWidget* cv)
 	ea_t addr = 0;
 	if (cFnc && idaFnc && isCurrentFunction(idaFnc) && cFnc->getName() != "main")
 	{
-		addr = cFnc->getStart();
+		addr = (ea_t)cFnc->getStart();
 	}
 	else if (cGv && cGv->getStorage().isMemory())
 	{
@@ -1026,7 +1026,7 @@ bool idaapi ct_keyboard(TWidget* cv, int key, int shift, void* ud)
 		}
 		else if (cGv)
 		{
-			addr = cGv->getStorage().getAddress();
+			addr = (ea_t)cGv->getStorage().getAddress();
 		}
 		else
 		{
@@ -1099,7 +1099,7 @@ ssize_t idaapi ui_callback(void* ud, int notification_code, va_list va)
 			//
 			else if (cGv)
 			{
-				globalAddress = cGv->getStorage().getAddress();
+				globalAddress = (ea_t)cGv->getStorage().getAddress();
 
 				attach_action_to_popup(view, p, "-");
 

@@ -2951,25 +2951,25 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 		}
 	}
 	//run with noc and notree to just get a document with a function prototype doc -> function -> addr/localdb/prototype as used for queries
-	if (!dm.printSyntaxTree) {
+	if (!dm.printSyntaxTree && lastdm.printSyntaxTree) {
 		buf = sendCommand2Params("setAction", "", "notree"); //"true"
 		if (std::string(buf.begin(), buf.end()) != "t") {
 			throw DecompError("Could not turn off syntax tree");
 		}
 	}
-	if (!dm.printCCode) {
+	if (!dm.printCCode && lastdm.printCCode) {
 		buf = sendCommand2Params("setAction", "", "noc"); //"c"
 		if (std::string(buf.begin(), buf.end()) != "t") {
 			throw DecompError("Could not turn off C printing");
 		}
 	}
-	if (dm.sendParamMeasures) {
+	if (dm.sendParamMeasures && !lastdm.sendParamMeasures) {
 		buf = sendCommand2Params("setAction", "", "parammeasures"); //"noparammeasures"
 		if (std::string(buf.begin(), buf.end()) != "t") {
 			throw DecompError("Could not turn on sending of parameter measures");
 		}
 	}
-	if (dm.jumpLoad) {
+	if (dm.jumpLoad && !lastdm.jumpLoad) {
 		buf = sendCommand2Params("setAction", "", "jumpload"); //"nojumpload"
 		if (std::string(buf.begin(), buf.end()) != "t") {
 			throw DecompError("Could not turn on jumptable loads");
@@ -3011,6 +3011,7 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 			}
 			bFirst = !bFirst;
 			el = *iter;
+			parseFuncProto(el, symInf);
 			const List& lst(el->getChildren());
 			List::const_iterator itert;
 			for (itert = lst.begin(); itert != lst.end(); ++itert) {

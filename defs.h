@@ -60,6 +60,8 @@ struct stkpnt_t
 #define hook_to_notification_point(x, y, z) hook_to_notification_point(x, (hook_cb_t*)y, z)
 #define unhook_from_notification_point(x, y) unhook_from_notification_point(x, (hook_cb_t*)y)
 #define create_code_viewer(x) create_code_viewer(NULL, x, 0)
+#define create_empty_widget(x) (TWidget*)create_tform(x, NULL)
+#define create_graph_viewer(u, v, w, x, y, z) create_graph_viewer((Forms::TForm*)z, v, w, x, y)
 #define ui_populating_widget_popup ui_populating_tform_popup
 #define ask_form AskUsingForm_c
 #define ask_file askfile2_c
@@ -84,6 +86,11 @@ struct stkpnt_t
 #define get_name get_true_name
 #define get_tinfo(x, y) get_tinfo2(y, x)
 #define guess_tinfo(x, y) guess_tinfo2(y, x)
+#define apply_tinfo apply_tinfo2
+#define set_node_info set_node_info2
+#define add_regarg add_regarg2
+#define get_idainfo_by_type(v, w, x, y, z) get_idainfo_by_type3(y, v, w, x, z)
+#define define_stkvar add_stkvar2
 #define get_data_value(x, y, z) get_data_value(y, x, z)
 #define find_udt_member(x, y) find_udt_member(y, x)
 #define print_type print_type3
@@ -108,6 +115,8 @@ struct stkpnt_t
 #define get_fixup(x, y) get_fixup(y, x)
 #define auto_is_ok autoIsOk
 #define save_database save_database_ex
+#define BTMT_BOOL8 0
+#define NIF_FLAGS 0
 #define STRCONV_ESCAPE ACFOPT_ESCAPE
 #define PRTYPE_RESTORE 0
 #define LP_HIDE_WINDOW 0

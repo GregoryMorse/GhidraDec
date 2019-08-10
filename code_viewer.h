@@ -92,7 +92,7 @@ struct ShowOutput : public exec_request_t
 
 		simpleline_place_t minPlace;
 		simpleline_place_t curPlace = minPlace;
-		simpleline_place_t maxPlace(contents.size()-1);
+		simpleline_place_t maxPlace((int)contents.size()-1);
 
 		di->custViewer = create_custom_viewer(
 				di->viewerName.c_str(), // name of viewer
