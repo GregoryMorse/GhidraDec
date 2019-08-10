@@ -737,8 +737,13 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 						rangeset_t rangeset;
 						msi.size = get_func_ranges(&rangeset, f) == BADADDR ? f->size() : rangeset.begin()->size();
 					} else msi.size = 1; //Ghidra uses 1 always despite its commentary
-					getFuncInfo(addr, f, msi.name, msi.func);
-					funcProtoInfos[(ea_t)msi.entryPoint] = FuncInfo{ msi.name.c_str(), false, msi.func };
+					if (funcProtoInfos.find((ea_t)msi.entryPoint) != funcProtoInfos.end()) {
+						msi.name = funcProtoInfos[(ea_t)msi.entryPoint].name;
+						msi.func = funcProtoInfos[(ea_t)msi.entryPoint].fpi;
+					} else {
+						getFuncInfo(addr, f, msi.name, msi.func);
+						funcProtoInfos[(ea_t)msi.entryPoint] = FuncInfo{ msi.name.c_str(), false, msi.func };
+					}
 				}
 			}
 		});
@@ -994,12 +999,17 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	{
 		if (addr.space != "ram") return;
 		modName = modNames[imports[(ea_t)addr.offset].idx];
-		executeOnMainThread([this, addr, &callName, &func]() {
-			//ids folder contains some basic information for common imports and its in comments in the disassembly but how to properly access the info?
-			func_t* f = get_func((ea_t)addr.offset);
-			getFuncInfo(addr, f, callName, func);
-		});
-		funcProtoInfos[(ea_t)addr.offset] = FuncInfo{ callName.c_str(), false, func };
+		if (funcProtoInfos.find((ea_t)addr.offset) != funcProtoInfos.end()) {
+			callName = funcProtoInfos[(ea_t)addr.offset].name;
+			func = funcProtoInfos[(ea_t)addr.offset].fpi;
+		} else {
+			executeOnMainThread([this, addr, &callName, &func]() {
+				//ids folder contains some basic information for common imports and its in comments in the disassembly but how to properly access the info?
+				func_t* f = get_func((ea_t)addr.offset);
+				getFuncInfo(addr, f, callName, func);
+				});
+			funcProtoInfos[(ea_t)addr.offset] = FuncInfo{ callName.c_str(), false, func };
+		}
 	}
 	unsigned long long IdaCallback::getTypeSize(const tinfo_t & ti)
 	{
@@ -3028,6 +3038,12 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	}
 	void IdaCallback::identParams(ea_t ea)
 	{
+		//if (funcProtoInfos.find(ea) != funcProtoInfos.end() && funcProtoInfos[ea].bFromParamId) return;
+		//how to avoid excessive repeated calls?
+		//if all types in frame are known, its a very good indicator
+		//however sometimes specifically IDA will choose a wrong data model for libraries - far instead of near, and the frame and type both have bad information
+		//perhaps this peculiar case should be solved by a simple database script which correlates the stack frame pointers to its specific usages
+		//as largely it is just working around and fixing a bug in this particular area
 		DecMode dm = defaultDecMode;
 		dm.actionname = "paramid";
 		std::string display, funcProto, funcColorProto;
@@ -3048,6 +3064,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		decInt->doDecompile(dm, AddrInfo{ "ram", ea }, display, funcProto, funcColorProto, paramInfo, blockGraph); //let outer try handle errors
 		funcProtoInfos[ea] = FuncInfo{ funcProtoInfos[ea].name, true, paramInfo };
 		if (bChangeOpt) decInt->setOptions(getOpts());
+		if (!di->bSaveParamIdToIDA) return;
 		executeOnMainThread([this, &paramInfo, ea]() {
 			tinfo_t ti;
 			if (!getFuncByGuess(ea, ti)) {}
@@ -3143,9 +3160,9 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				std::vector<ea_t> notIded;
 				for (std::map<ea_t, FuncInfo>::iterator it = funcProtoInfos.begin(); it != funcProtoInfos.end(); it++)
 					if (!it->second.bFromParamId) notIded.push_back(it->first);
-				for (size_t i = 0; i < notIded.size(); i++) {
-					identParams(notIded[i]);
-				}
+				for (size_t i = 0; i < notIded.size(); i++) identParams(notIded[i]);
+				for (std::map<ea_t, FuncInfo>::iterator it = funcProtoInfos.begin(); it != funcProtoInfos.end(); )
+					if (!it->second.bFromParamId) funcProtoInfos.erase(it++); else it++;
 			}
 			code = decInt->doDecompile(dec, AddrInfo{ "ram", ea }, display, funcProto, funcColorProto, paramInfo, blockGraph);
 			if (funcProto.size() != 0) {
@@ -3243,6 +3260,9 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 		//can decompile entry points first
 		std::map<ea_t, size_t> entries;
 		size_t num = di->idacb->allFuncs.size();
+		for (size_t i = 0; i < num; i++) {
+			di->idacb->identParams(di->idacb->allFuncs[i]);
+		}
 		int successes = 0, total = 0;
 		for (size_t i = 0; i < num; i++) {
 			std::string disp;
@@ -3364,6 +3384,7 @@ ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 
 void displayBlockGraph(RdGlobalInfo* di, ea_t ea)
 {
+	if (!di->bShowGraph) return;
 	di->idacb->executeOnMainThread([di, ea]() {
 		if (di->graphWidget != nullptr) {
 			close_widget(di->graphViewer, 0);
