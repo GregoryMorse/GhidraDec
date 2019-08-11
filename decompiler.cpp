@@ -1243,8 +1243,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			else if (alreadyDefined.find(qs.c_str()) != alreadyDefined.end()) continue;
 			else needDecl[qs.c_str()] = true;
 			for (size_t i = 0; i < utd.size(); i++) {
-				utd[i].type.get_type_name(&qs);
-				if (qs.size() == 0) {
+				if (!utd[i].type.get_type_name(&qs) || qs.size() == 0) {
 					if (utd[i].type.is_typeref()) {
 						utd[i].type.get_next_type_name(&qs);
 						if (qs.size() != 0) continue;
@@ -2218,6 +2217,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 		}
 		for (std::map<ea_t, bool>::iterator it = usedImports.begin(); it != usedImports.end(); it++) {
+			qs.clear();
 			if (imports.find(it->first) != imports.end() && imports[it->first].name != "") {
 				qs = demangle_name(imports[it->first].name.c_str(), MNG_SHORT_FORM);
 				if (qs.size() == 0) qs = imports[it->first].name.c_str();
@@ -2459,7 +2459,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				definitions += print_func(it->first, forDisplay, COLOR_DEFAULT);
 			} else { //only function pointers currently but after fixed this case should never occur
 				tinfo_t tif;
-				qstring qs; //first check decompiler prototypes, then type info, then demangler, then void <name>(void)
+				qs.clear(); //first check decompiler prototypes, then type info, then demangler, then void <name>(void)
 				if (getFuncByGuess(it->first, tif)) print_type(&qs, it->first, PRTYPE_1LINE);
 				if (qs.size() == 0) get_long_name(&qs, it->first, GN_STRICT);
 				if (qs.size() == 0) qs = getSymbolName(it->first).c_str();
@@ -2914,7 +2914,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			funcarg_t fa;
 			addrToArgLoc(paramInfo.syminfo[i].addr, fa.argloc);
 			typeInfoToIDA(0, paramInfo.syminfo[i].pi.ti, fa.type);
-			fa.name = paramInfo.syminfo[i].pi.name.c_str();
+			fa.name = qstring(paramInfo.syminfo[i].pi.name.c_str());
 			if (ftd.size() <= paramInfo.syminfo[i].argIndex) ftd.resize(paramInfo.syminfo[i].argIndex + 1);
 			if (paramInfo.syminfo[i].addr.addr.space == "stack") stkargs += (uval_t)paramInfo.syminfo[i].addr.size;
 			ftd[paramInfo.syminfo[i].argIndex] = fa;
@@ -3047,8 +3047,8 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		DecMode dm = defaultDecMode;
 		dm.actionname = "paramid";
 		std::string display, funcProto, funcColorProto;
-		FuncProtoInfo paramInfo;
-		std::vector<std::pair<std::vector<unsigned int>, std::string>> blockGraph;
+		FuncProtoInfo paramInfo = {};
+		std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>> blockGraph;
 		//should turn off eliminate unreachable option switch
 		Options opt = getOpts();
 		bool bChangeOpt = false;
@@ -3061,7 +3061,8 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		//decInt->toggleSyntaxTree(false);
 		dm.printCCode = false;
 		dm.printSyntaxTree = false;
-		decInt->doDecompile(dm, AddrInfo{ "ram", ea }, display, funcProto, funcColorProto, paramInfo, blockGraph); //let outer try handle errors
+		decInt->doDecompile(dm, AddrInfo{ "ram", ea }, display, funcProto,
+			funcColorProto, paramInfo, blockGraph); //let outer try handle errors
 		funcProtoInfos[ea] = FuncInfo{ funcProtoInfos[ea].name, true, paramInfo };
 		if (bChangeOpt) decInt->setOptions(getOpts());
 		if (!di->bSaveParamIdToIDA) return;
@@ -3148,7 +3149,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			});
 	}
 	std::string IdaCallback::tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err,
-		std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph)
+		std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph)
 	{
 		std::string code, funcProto, funcColorProto;
 		FuncProtoInfo paramInfo;
@@ -3159,10 +3160,17 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				identParams(ea);
 				std::vector<ea_t> notIded;
 				for (std::map<ea_t, FuncInfo>::iterator it = funcProtoInfos.begin(); it != funcProtoInfos.end(); it++)
-					if (!it->second.bFromParamId) notIded.push_back(it->first);
+					if (!it->second.bFromParamId) {
+						if (imports.find(it->first) == imports.end()) notIded.push_back(it->first);
+					}
 				for (size_t i = 0; i < notIded.size(); i++) identParams(notIded[i]);
 				for (std::map<ea_t, FuncInfo>::iterator it = funcProtoInfos.begin(); it != funcProtoInfos.end(); )
 					if (!it->second.bFromParamId) funcProtoInfos.erase(it++); else it++;
+				//usage tracking obviously should not be affected by sub-functions
+				usedImports.clear();
+				usedTypes.clear();
+				usedData.clear();
+				usedFuncs.clear();
 			}
 			code = decInt->doDecompile(dec, AddrInfo{ "ram", ea }, display, funcProto, funcColorProto, paramInfo, blockGraph);
 			if (funcProto.size() != 0) {
@@ -3191,7 +3199,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	//graph.hpp and a graph emitter should take care of the AST information...
 
 std::string tryDecomp(RdGlobalInfo* di, DecMode dec, ea_t ea, std::string & display, bool & bSucc,
-	std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph)
+	std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph)
 {
 	std::string code, err;
 	std::string fn = di->idacb->allFuncNames[ea];
@@ -3239,7 +3247,7 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 {
 	//di->endian == "big", inf.min_ea
 	std::string code, display;
-	std::vector<std::pair<std::vector<unsigned int>, std::string>> blockGraph;
+	std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>> blockGraph;
 	if (di->idacb->decInt == nullptr) di->idacb->decInt = new DecompInterface();
 	std::vector<CoreType> cts(&defaultCoreTypes[0], &defaultCoreTypes[numDefCoreTypes]);
 	try {
@@ -3260,6 +3268,7 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 		//can decompile entry points first
 		std::map<ea_t, size_t> entries;
 		size_t num = di->idacb->allFuncs.size();
+		if (di->decompPid == 0) di->idacb->decInt->registerProgram();
 		for (size_t i = 0; i < num; i++) {
 			di->idacb->identParams(di->idacb->allFuncs[i]);
 		}
@@ -3269,7 +3278,9 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 			total++;
 			bool bSucc = false;
 			code += tryDecomp(di, defaultDecMode, di->idacb->allFuncs[i], disp, bSucc, blockGraph);
-			if (di->exiting) return;
+			if (di->exiting) {
+				di->decompSuccess = false; return;
+			}
 			if (bSucc) successes++;
 			display += disp;
 		}
@@ -3277,8 +3288,14 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 			std::dec << (time(NULL) - startTime) << " seconds\n");
 	} else {
 		bool bSucc = false;
+		if (di->idacb->imports.find(di->decompiledFunction->start_ea) != di->idacb->imports.end()) {
+			di->decompSuccess = false;
+			return;
+		}
 		code = tryDecomp(di, defaultDecMode, (unsigned long long)di->decompiledFunction->start_ea, display, bSucc, blockGraph);
-		if (di->exiting) return;
+		if (di->exiting) {
+			di->decompSuccess = false; return;
+		}
 		INFO_MSG("Decompilation completed: " << di->idacb->allFuncNames[di->decompiledFunction->start_ea] << " in " << std::dec << (time(NULL) - startTime) << " seconds\n");
 	}
 
@@ -3326,9 +3343,10 @@ ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 		mutable_graph_t* mg = va_arg(va, mutable_graph_t*);
 		rect_t r;
 		ea_t ea = di->decompiledFunction->start_ea;
-		const std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph =
+		const std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph =
 			di->fnc2code[get_func(ea)].blockGraph;
-		for (size_t i = 0; i < blockGraph.size(); i++) {
+		mg->resize(blockGraph.size());
+		/*for (size_t i = 0; i < blockGraph.size(); i++) {
 			int node = mg->add_node(&r);
 			node_info_t ni;
 #ifdef __X64__
@@ -3337,21 +3355,38 @@ ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 			ni.text = ("  //" + std::to_string(i) + "\n" + std::get<1>(blockGraph[i])).c_str();
 			set_node_info(mg->gid, node, ni, NIF_TEXT | NIF_FLAGS);
 			//if (std::get<1>(blockGraph[i]).size() == 0) mg->node_flags[node] |= MTG_NON_DISPLAYABLE_NODE;
-		}
+		}*/
 		for (size_t i = 0; i < blockGraph.size(); i++) {
 			for (size_t j = 0; j < std::get<0>(blockGraph[i]).size(); j++) {
 				edge_info_t ei;
 				mg->add_edge(std::get<0>(blockGraph[i])[j], (int)i, &ei);
 			}
 		}
-		for (size_t i = blockGraph.size() - 1; i != -1; i--) {
-			if (std::get<1>(blockGraph[i]).size() == 0) mg->del_node((int)i);
-		}
+		//for (size_t i = blockGraph.size() - 1; i != -1; i--) {
+			//if (std::get<1>(blockGraph[i]).size() == 0) mg->del_node((int)i);
+		//}
 		mg->create_digraph_layout();
 		mg->redo_layout();
+		//refresh_viewer(di->graphViewer);
 		return 1;
-		//} else if (notification_code == grcode_user_gentext) {
-		//} else if (notification_code == grcode_user_text) {
+	} else if (notification_code == grcode_user_gentext) {
+		mutable_graph_t* mg = va_arg(va, mutable_graph_t*);
+		ea_t ea = di->decompiledFunction->start_ea;
+		const std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph =
+			di->fnc2code[get_func(ea)].blockGraph;
+		di->graphText.resize(blockGraph.size());
+		for (size_t i = 0; i < blockGraph.size(); i++) {
+			if (std::get<1>(blockGraph[i]).size() != 0)
+				di->graphText[i] = ("  //" + std::to_string(std::get<2>(blockGraph[i])) + "\n" + std::get<1>(blockGraph[i])).c_str();
+		}
+		return 1;
+	} else if (notification_code == grcode_user_text) {
+		mutable_graph_t* mg = va_arg(va, mutable_graph_t*);
+		int node = va_argi(va, int);
+		const char** text = va_arg(va, const char**);
+		bgcolor_t* bgcolor = va_arg(va, bgcolor_t*);
+		*text = (di->graphText[node].size() == 0) ? nullptr : di->graphText[node].c_str();
+		return 1;
 		//} else if (notification_code == grcode_user_hint) {
 	} else if (notification_code == grcode_user_title) {
 		mutable_graph_t* mg = va_arg(va, mutable_graph_t*);
@@ -3392,9 +3427,15 @@ void displayBlockGraph(RdGlobalInfo* di, ea_t ea)
 			close_widget(di->graphWidget, 0);
 			di->graphWidget = nullptr;
 			delete_mutable_graph(di->mg);
+			di->graphText.clear();
 			netnode nn("GhidraGraph", 0, true);
 			nn.kill();
 		}
+		ea_t ea = di->decompiledFunction->start_ea;
+		const std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph =
+			di->fnc2code[get_func(ea)].blockGraph;
+		if (blockGraph.size() == 0) return;
+
 		di->graphWidget = create_empty_widget((di->viewerName + " Graph").c_str());
 		netnode nn("GhidraGraph", 0, true);
 		di->mg = create_mutable_graph(nn);

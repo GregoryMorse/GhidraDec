@@ -780,6 +780,7 @@ void idaapi term()
 		close_widget(decompInfo->graphWidget, 0);
 		decompInfo->graphWidget = nullptr;
 		delete_mutable_graph(decompInfo->mg);
+		decompInfo->graphText.clear();
 		netnode nn("GhidraGraph", 0, true);
 		nn.kill();
 	}

@@ -893,7 +893,7 @@ class FunctionInfo
 {
 	public:
 		std::string code;
-		std::vector<std::pair<std::vector<unsigned int>, std::string>> blockGraph;
+		std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>> blockGraph;
 		strvec_t idaCode;
 };
 
@@ -971,6 +971,7 @@ class RdGlobalInfo
 		TWidget* graphWidget = nullptr;
 		graph_viewer_t* graphViewer = nullptr;
 		mutable_graph_t* mg = nullptr;
+		std::vector<std::string> graphText;
 
 	// One decompilation information.
 	//

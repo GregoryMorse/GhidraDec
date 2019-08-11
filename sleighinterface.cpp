@@ -1626,7 +1626,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 				//need to replace all new lines with "//"
 				std::replace_if(buf.begin() + 2, buf.end(),
 					[](uchar it) { return it == '\n'; }, ' ');
-				std::string str = "<doc><function><comment color=\"comment\">\n"
+				std::string str = "\n\n\n<doc><function><comment color=\"comment\">\n"
 					"//Decompiler native message: " + std::string(buf.begin()+2, buf.end()) +
 					"\n</comment></function></doc>";
 				retbuf = std::vector<uchar>(str.begin(), str.end());
@@ -2525,45 +2525,45 @@ string getHasAttributeValue(Element* pEl, const string& nm)
 	return "";
 }
 
-void reduceShortCircuits(std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph)
+void reduceShortCircuits(std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph)
 {
 	std::vector<std::vector<unsigned int>> succs;
 	succs.resize(blockGraph.size());
 	for (size_t i = 0; i < blockGraph.size(); i++) {
-		for (int j = 0; j < blockGraph[i].first.size(); j++) {
-			succs[blockGraph[i].first[j]].push_back(i);
+		for (int j = 0; j < std::get<0>(blockGraph[i]).size(); j++) {
+			succs[std::get<0>(blockGraph[i])[j]].push_back(i);
 		}
 	}
 	for (size_t i = 0; i < blockGraph.size(); i++) {
-		if (blockGraph[i].second.empty() && blockGraph[i].first.size() == 1 &&
-			succs[i].size() == succs[blockGraph[i].first[0]].size()) {
+		if (std::get<1>(blockGraph[i]).empty() && std::get<0>(blockGraph[i]).size() == 1 &&
+			succs[i].size() == succs[std::get<0>(blockGraph[i])[0]].size()) {
 			size_t foundj = -1;
 			for (size_t j = 0; j < succs[i].size(); j++) {
 				size_t k;
-				for (k = 0; k < succs[blockGraph[i].first[0]].size(); k++) {
-					if (succs[blockGraph[i].first[0]][k] == i) continue;
-					if (succs[i][j] == succs[blockGraph[i].first[0]][k]) break;
+				for (k = 0; k < succs[std::get<0>(blockGraph[i])[0]].size(); k++) {
+					if (succs[std::get<0>(blockGraph[i])[0]][k] == i) continue;
+					if (succs[i][j] == succs[std::get<0>(blockGraph[i])[0]][k]) break;
 				}
-				if (k != succs[blockGraph[i].first[0]].size()) continue;
+				if (k != succs[std::get<0>(blockGraph[i])[0]].size()) continue;
 				else if (foundj == -1) foundj = j;
 				else {
 					foundj = -1; break;
 				}
 			}
 			if (foundj != -1) {
-				blockGraph[succs[i][foundj]].first.push_back(blockGraph[i].first[0]);
-				succs[blockGraph[i].first[0]].push_back(succs[i][foundj]);
-				for (size_t j = 0; j < succs[blockGraph[i].first[0]].size(); j++) {
-					if (succs[blockGraph[i].first[0]][j] == i) {
-						succs[blockGraph[i].first[0]].erase(succs[blockGraph[i].first[0]].begin() + j);
+				std::get<0>(blockGraph[succs[i][foundj]]).push_back(std::get<0>(blockGraph[i])[0]);
+				succs[std::get<0>(blockGraph[i])[0]].push_back(succs[i][foundj]);
+				for (size_t j = 0; j < succs[std::get<0>(blockGraph[i])[0]].size(); j++) {
+					if (succs[std::get<0>(blockGraph[i])[0]][j] == i) {
+						succs[std::get<0>(blockGraph[i])[0]].erase(succs[std::get<0>(blockGraph[i])[0]].begin() + j);
 						break;
 					}
 				}
-				blockGraph[i].first.erase(blockGraph[i].first.begin());
+				std::get<0>(blockGraph[i]).erase(std::get<0>(blockGraph[i]).begin());
 				for (size_t j = 0; j < succs[i].size(); j++) {
-					for (size_t k = 0; k < blockGraph[succs[i][j]].first.size(); k++) {
-						if (blockGraph[succs[i][j]].first[k] == i) {
-							blockGraph[succs[i][j]].first.erase(blockGraph[succs[i][j]].first.begin() + k);
+					for (size_t k = 0; k < std::get<0>(blockGraph[succs[i][j]]).size(); k++) {
+						if (std::get<0>(blockGraph[succs[i][j]])[k] == i) {
+							std::get<0>(blockGraph[succs[i][j]]).erase(std::get<0>(blockGraph[succs[i][j]]).begin() + k);
 							break;
 						}
 					}
@@ -2574,9 +2574,38 @@ void reduceShortCircuits(std::vector<std::pair<std::vector<unsigned int>, std::s
 	}
 }
 
+void removeUnusedNodes(std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph)
+{
+	std::vector<std::vector<unsigned int>> succs;
+	succs.resize(blockGraph.size());
+	for (size_t i = 0; i < blockGraph.size(); i++) {
+		for (int j = 0; j < std::get<0>(blockGraph[i]).size(); j++) {
+			succs[std::get<0>(blockGraph[i])[j]].push_back(i);
+		}
+	}
+	//now renumber the graph to remove the holes
+	std::map<size_t, size_t> nodeMap;
+	std::vector<size_t> eraseVec;
+	int num = 0;
+	for (size_t i = 0; i < blockGraph.size(); i++) {
+		if (std::get<1>(blockGraph[i]).empty() && std::get<0>(blockGraph[i]).size() == 0 && succs[i].size() == 0)
+			eraseVec.push_back(i);
+		else
+			nodeMap[i] = num++;
+	}
+	for (size_t i = 0; i < blockGraph.size(); i++) {
+		std::get<2>(blockGraph[i]) = i;
+		for (size_t j = 0; j < std::get<0>(blockGraph[i]).size(); j++) {
+			std::get<0>(blockGraph[i])[j] = nodeMap[std::get<0>(blockGraph[i])[j]];
+
+		}
+	}
+	for (size_t i = eraseVec.size() - 1; i != ~0; i--) blockGraph.erase(blockGraph.begin() + eraseVec[i]);
+}
+
 std::string DecompInterface::convertSourceDoc(Element* el,
 	std::string& displayXml, std::string& funcProto, std::string& funcColorProto,
-	std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph)
+	std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph)
 {
 	//Ghidra/Features/Decompiler/src/decompile/cpp/prettyprint.cc
 	//colors are keyword, comment, type, funcname, var, const, param and global
@@ -2595,9 +2624,9 @@ std::string DecompInterface::convertSourceDoc(Element* el,
 				//if (idx & 0x80000000) idx = ~idx;
 				unsigned int lastsib = -1;
 				std::string spc;
-				if (blockGraph[idx].second.size() != 0) {
-					std::string::reverse_iterator lnl = std::find(blockGraph[idx].second.rbegin(), blockGraph[idx].second.rend(), '\n');
-					std::string::iterator it = std::find_if_not(lnl.base(), blockGraph[idx].second.end(), isspace);
+				if (std::get<1>(blockGraph[idx]).size() != 0) {
+					std::string::reverse_iterator lnl = std::find(std::get<1>(blockGraph[idx]).rbegin(), std::get<1>(blockGraph[idx]).rend(), '\n');
+					std::string::iterator it = std::find_if_not(lnl.base(), std::get<1>(blockGraph[idx]).end(), isspace);
 					std::string st;
 					std::copy_if(lnl.base(), it, std::back_inserter(st), [](char ch) { return ch == ' '; });
 					if (!st.empty()) spc = st;
@@ -2616,24 +2645,24 @@ std::string DecompInterface::convertSourceDoc(Element* el,
 						std::string st;
 						std::copy_if(lnl.base(), it, std::back_inserter(st), [](char ch) { return ch == ' '; });
 						if (!st.empty()) spc = st;
-					} else if (std::find(blockGraph[blockPath.top().second[i].second].first.begin(), blockGraph[blockPath.top().second[i].second].first.end(), idx) != blockGraph[blockPath.top().second[i].second].first.end()) {
+					} else if (std::find(std::get<0>(blockGraph[blockPath.top().second[i].second]).begin(), std::get<0>(blockGraph[blockPath.top().second[i].second]).end(), idx) != std::get<0>(blockGraph[blockPath.top().second[i].second]).end()) {
 						//} else if (blockPath.top().second[i].second != idx) {
 						//if (lastsib != -1) blockGraph[lastsib].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(idx));
 						lastsib = blockPath.top().second[i].second;
-						blockGraph[idx].second += tline;
+						std::get<1>(blockGraph[idx]) += tline;
 						tline.clear();
-						blockGraph[idx].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(blockPath.top().second[i].second));
+						std::get<1>(blockGraph[idx]) += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(blockPath.top().second[i].second));
 					} else if (idx == blockPath.top().second[i].second) {
 					} else {
-						bool bLinked = std::find(blockGraph[blockPath.top().second[i].second].first.begin(), blockGraph[blockPath.top().second[i].second].first.end(), lastsib) != blockGraph[blockPath.top().second[i].second].first.end();
+						bool bLinked = std::find(std::get<0>(blockGraph[blockPath.top().second[i].second]).begin(), std::get<0>(blockGraph[blockPath.top().second[i].second]).end(), lastsib) != std::get<0>(blockGraph[blockPath.top().second[i].second]).end();
 						if (lastsib != -1 && bLinked) idx = lastsib;
-						blockGraph[idx].second += tline;
+						std::get<1>(blockGraph[idx]) += tline;
 						tline.clear();
-						if (lastsib != -1 && bLinked) blockGraph[idx].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(blockPath.top().second[i].second));
+						if (lastsib != -1 && bLinked) std::get<1>(blockGraph[idx]) += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(blockPath.top().second[i].second));
 						lastsib = blockPath.top().second[i].second;
 					}
 				}
-				blockGraph[idx].second += tline;
+				std::get<1>(blockGraph[idx]) += tline;
 				//if (lastsib != -1 && !tline.empty()) blockGraph[lastsib].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(idx));
 				bool bChanged = idx != blockPath.top().first;
 				blockPath.pop();
@@ -2809,12 +2838,12 @@ void parseFuncProto(Element* el, FuncProtoInfo& fpi)
 					const List& lt(el->getChildren());
 					List::const_iterator it;
 					for (it = lt.begin(); it != lt.end(); ++it) {
-						if ((*it)->getName() == "addr") {
-							fpi.retType.addr.addr.space = (*it)->getAttributeValue("space");
+						if ((*it)->getName() == "addr") {							
+							fpi.retType.addr.addr.space = getHasAttributeValue(*it, "space");
 							if (fpi.retType.addr.addr.space == "join") {
 								for (int i = 0; i < (*it)->getNumAttributes(); i++) {
 									if ((*it)->getAttributeName(i).substr(0, 5) == "piece") {
-										int idx = strtoull((*it)->getAttributeName(5).c_str(), nullptr, 10) - 1;
+										int idx = strtoull((*it)->getAttributeName(i).substr(5).c_str(), nullptr, 10) - 1;
 										SizedAddrInfo inf;
 										size_t off = (*it)->getAttributeValue(i).find(':');
 										inf.addr.space = (*it)->getAttributeValue(i).substr(0, off);
@@ -2826,7 +2855,7 @@ void parseFuncProto(Element* el, FuncProtoInfo& fpi)
 										fpi.retType.addr.addr.joins[idx] = inf; //fpi.retType.joins.push_back(inf);
 									}
 								}
-							} else {
+							} else if (fpi.retType.addr.addr.space.size() != 0) {
 								fpi.retType.addr.addr.offset = strtoull((*it)->getAttributeValue("offset").c_str(), nullptr, 16);
 								fpi.retType.addr.size = strtoull((*it)->getAttributeValue("size").c_str(), nullptr, 10);
 							}
@@ -2935,7 +2964,7 @@ void parseTypeInfo(Element* el, std::vector<TypeInfo>& ti)
 //patternconstraints -> language id="" -> compiler id="" -> <patternfile>name</patternfile>
 std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string & displayXml,
 	std::string& funcProto, std::string& funcColorProto, FuncProtoInfo& symInf,
-	std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph)
+	std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph)
 {
 	std::vector<uchar> buf;
 	if (dm.actionname.empty()) {
@@ -2956,25 +2985,29 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 		if (std::string(buf.begin(), buf.end()) != "t") {
 			throw DecompError("Could not turn off syntax tree");
 		}
-	}
+	} else if (dm.printSyntaxTree && !lastdm.printSyntaxTree)
+		toggleSyntaxTree(dm.printSyntaxTree);
 	if (!dm.printCCode && lastdm.printCCode) {
 		buf = sendCommand2Params("setAction", "", "noc"); //"c"
 		if (std::string(buf.begin(), buf.end()) != "t") {
 			throw DecompError("Could not turn off C printing");
 		}
-	}
+	} else if (dm.printCCode && !lastdm.printCCode)
+		toggleCCode(dm.printCCode);
 	if (dm.sendParamMeasures && !lastdm.sendParamMeasures) {
 		buf = sendCommand2Params("setAction", "", "parammeasures"); //"noparammeasures"
 		if (std::string(buf.begin(), buf.end()) != "t") {
 			throw DecompError("Could not turn on sending of parameter measures");
 		}
-	}
+	} else if (!dm.sendParamMeasures && lastdm.sendParamMeasures)
+		toggleParamMeasures(dm.sendParamMeasures);
 	if (dm.jumpLoad && !lastdm.jumpLoad) {
 		buf = sendCommand2Params("setAction", "", "jumpload"); //"nojumpload"
 		if (std::string(buf.begin(), buf.end()) != "t") {
 			throw DecompError("Could not turn on jumptable loads");
 		}
-	}
+	} else if (!dm.jumpLoad && lastdm.jumpLoad)
+		toggleJumpLoads(dm.jumpLoad);
 	lastdm = dm;
 	startOffs = addr;
 	buf = sendCommand1ParamTimeout("decompileAt", "<addr space=\"" + addr.space +
@@ -3007,6 +3040,7 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 			if (!bFirst) {
 				reduceShortCircuits(blockGraph);
 				decompXml = convertSourceDoc(*iter, displayXml, funcProto, funcColorProto, blockGraph);
+				removeUnusedNodes(blockGraph);
 				break;
 			}
 			bFirst = !bFirst;
@@ -3015,7 +3049,8 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 			const List& lst(el->getChildren());
 			List::const_iterator itert;
 			for (itert = lst.begin(); itert != lst.end(); ++itert) {
-				if ((*itert)->getName() == "localdb") {
+				if ((*itert)->getName() == "addr") {
+				} else if ((*itert)->getName() == "localdb") {
 					el = *itert;
 					const List& lt(el->getChildren());
 					List::const_iterator itr;
@@ -3029,25 +3064,25 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 									const List& l(el->getChildren());
 									for (itr = l.begin(); itr != l.end(); ++itr) {
 										if ((*itr)->getName() == "mapsym") {
-											SymInfo sym;
+											SymInfo sym = {};
 											el = *itr;
 											const List& li(el->getChildren());
 											List::const_iterator it;
 											for (it = li.begin(); it != li.end(); ++it) {
 												el = *it;
 												if (el->getName() == "symbol") {
-													sym.pi.name = el->getAttributeValue("name");
+													if (el->getAttributeValue("name").compare(0, 7, "$$undef") != 0)
+														sym.pi.name = el->getAttributeValue("name");
 													if (strtoull(el->getAttributeValue("cat").c_str(), nullptr, 10) == 0)
 														sym.argIndex = strtoull(el->getAttributeValue("index").c_str(), nullptr, 16);
 													else sym.argIndex = -1;
 													parseTypeInfo(el, sym.pi.ti);
-													break;
 												} else if (el->getName() == "addr") {
-													sym.addr.addr.space = el->getAttributeValue("space");
+													sym.addr.addr.space = getHasAttributeValue(el, "space");
 													if (sym.addr.addr.space == "join") {
 														for (int i = 0; i < el->getNumAttributes(); i++) {
 															if (el->getAttributeName(i).substr(0, 5) == "piece") {
-																int idx = strtoull(el->getAttributeName(5).c_str(), nullptr, 10) - 1;
+																int idx = strtoull(el->getAttributeName(i).substr(5).c_str(), nullptr, 10) - 1;
 																SizedAddrInfo inf;
 																size_t off = el->getAttributeValue(i).find(':');
 																inf.addr.space = el->getAttributeValue(i).substr(0, off);
@@ -3059,12 +3094,12 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 																sym.addr.addr.joins[idx] = inf; //sym.joins.push_back(inf);
 															}
 														}
-													} else
+													} else if (sym.addr.addr.space != "")
 														sym.addr.addr.offset = strtoull(el->getAttributeValue("offset").c_str(), nullptr, 16);
 												} else if (el->getName() == "rangelist") {
-													const List& li(el->getChildren());
+													const List& lii(el->getChildren());
 													List::const_iterator itr;
-													for (itr = li.begin(); itr != li.end(); ++itr) {
+													for (itr = lii.begin(); itr != lii.end(); ++itr) {
 														if ((*itr)->getName() == "range") {
 															sym.range.space = (*itr)->getAttributeValue("space");
 															sym.range.beginoffset = strtoull((*itr)->getAttributeValue("first").c_str(), nullptr, 16);
@@ -3100,7 +3135,7 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 							for (it = l.begin(); it != l.end(); ++it) {
 								el = *it;
 								if (el->getName() == "edge") { //inbound edges
-									blockGraph[idx].first.push_back(strtoul(el->getAttributeValue("end").c_str(), nullptr, 10));
+									std::get<0>(blockGraph[idx]).push_back(strtoul(el->getAttributeValue("end").c_str(), nullptr, 10));
 								}
 							}
 						}

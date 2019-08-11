@@ -337,7 +337,7 @@ class DecompInterface
 	std::vector<uchar> sendCommand1Param(std::string command, std::string param1);
 	std::string convertSourceDoc(Element* el, std::string& displayXml,
 		std::string& funcProto, std::string& funcColorProto,
-		std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph);
+		std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph);
 	std::string getOptions(Options opt);
 	void adjustUniqueBase(VarnodeTpl* v);
 	std::string buildTypeXml(std::vector<TypeInfo>& typeInfo, size_t indnt);
@@ -381,7 +381,7 @@ public:
 	//only after setup, and if decompilation process running and registered
 	std::string doDecompile(DecMode dm, AddrInfo addr, std::string& displayXml,
 		std::string& funcProto, std::string& funcColorProto, FuncProtoInfo& symInf,
-		std::vector<std::pair<std::vector<unsigned int>, std::string>>& blockGraph);
+		std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph);
 	void registerProgram();
 	int deregisterProgram();
 	std::string regToSpacebase(int regidx);
