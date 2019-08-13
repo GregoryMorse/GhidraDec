@@ -403,7 +403,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					func.model = ccToStr(CM_CC_STDCALL, f->is_far() || (f->flags & FUNC_USERFAR) != 0 ? FTI_FARCALL : FTI_NEARCALL, false);
 				}
 			}
-			if (func.extraPop == -1) func.extraPop = (unsigned long long)f->argsize; //type unknown but have frame so now can calculate
+			if (func.extraPop == -1 && (f->flags & FUNC_PURGED_OK) != 0) func.extraPop = (unsigned long long)f->argsize; //type unknown but have frame so now can calculate
 			if (f->regargs == nullptr) read_regargs(f); //populates regargs, similar to how get_spd or the like with f specified populate stkpts
 			for (int i = 0; i < f->regargqty; i++) { //name can be a nullptr!
 				std::string nm = f->regargs[i].name == nullptr ? "" : f->regargs[i].name;
@@ -472,8 +472,6 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		if (f != nullptr && f->frame != BADNODE) { //f->analyzed_sp()
 			struc_t* frame = get_frame(f);
 			func.extraPop += get_frame_retsize(f);
-			//ea_t firstarg = frame->members[frame->memqty - 1].eoff - f->argsize;
-			//unsigned long long offset = frame->members[i].soff - firstarg;
 			ea_t firstarg = frame_off_args(f);
 			//generalized for any arguments not found in the frame
 			for (size_t i = 0; i < func.syminfo.size(); i++) {
@@ -2835,38 +2833,175 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 		}
 	}
-	void getPtrSizes(tinfo_t& ti, std::vector<unsigned long long>& ptrSizes)
+	void getPtrSizes(tinfo_t& ti, std::vector<unsigned long long>& ptrSizes, std::vector<unsigned long long>& funcPtrSizes)
 	{
 		if (ti.is_typeref()) {
 			qstring qs;
 			ti.get_next_type_name(&qs);
 			if (qs.size() != 0) {
 				ti.get_named_type(get_idati(), qs.c_str());
-				getPtrSizes(ti, ptrSizes);
+				getPtrSizes(ti, ptrSizes, funcPtrSizes);
 			}
 		} else if (ti.is_funcptr()) { //code pointer not data
+			funcPtrSizes.push_back(ti.get_size());
 		} else if (ti.is_ptr()) { //cannot trace into pointers without fixing infinite recursion due to structure members
 			ptrSizes.push_back(ti.get_size());
 		} else if (ti.is_struct()) {
 			udt_type_data_t utd;
 			ti.get_udt_details(&utd);
 			for (size_t i = 0; i < utd.size(); i++) {
-				getPtrSizes(utd[i].type, ptrSizes);
+				getPtrSizes(utd[i].type, ptrSizes, funcPtrSizes);
 			}
 		} else if (ti.is_array()) {
 			array_type_data_t atd;
 			ti.get_array_details(&atd);
-			getPtrSizes(atd.elem_type, ptrSizes);
+			getPtrSizes(atd.elem_type, ptrSizes, funcPtrSizes);
 		}
+	}
+	void fixPtrSizes(tinfo_t& ti, unsigned long long nearsize, unsigned long long farsize,
+		bool isNear, bool isFar, bool isCodeNear, bool isCodeFar)
+	{
+		if (ti.is_typeref()) {
+			qstring qs;
+			ti.get_next_type_name(&qs);
+			if (qs.size() != 0) {
+				ti.get_named_type(get_idati(), qs.c_str());
+				fixPtrSizes(ti, nearsize, farsize, isNear, isFar, isCodeNear, isCodeFar);
+			}
+		} else if (ti.is_funcptr()) { //code pointer not data
+			//type_t bt2 = (ftd[i].type.is_const() ? BTM_CONST : 0) | (ftd[i].type.is_volatile() ? BTM_VOLATILE : 0);
+			ptr_type_data_t ptd;
+			ti.get_ptr_details(&ptd); //what to do about BTMT_CLOSURE?
+			if (ptd.based_ptr_size == farsize && isCodeNear) {
+				ptd.based_ptr_size -= ph.segreg_size;
+				tinfo_t newti;
+				newti.create_ptr(ptd, BT_PTR | BTMT_NEAR);
+				ti = newti;
+			} else if (ptd.based_ptr_size == nearsize && isCodeFar) {
+				ptd.based_ptr_size += ph.segreg_size;
+				tinfo_t newti;
+				newti.create_ptr(ptd, BT_PTR | BTMT_FAR);
+				ti = newti;
+			}
+		} else if (ti.is_ptr()) { //cannot trace into pointers without fixing infinite recursion due to structure members
+			ptr_type_data_t ptd;
+			ti.get_ptr_details(&ptd);
+			if (ptd.based_ptr_size == farsize && isNear) {
+				ptd.based_ptr_size -= ph.segreg_size;
+				tinfo_t newti;
+				newti.create_ptr(ptd, BT_PTR | BTMT_NEAR);
+				ti = newti;
+			} else if (ptd.based_ptr_size == nearsize && isFar) {
+				ptd.based_ptr_size += ph.segreg_size;
+				tinfo_t newti;
+				newti.create_ptr(ptd, BT_PTR | BTMT_FAR);
+				ti = newti;
+			}
+		} else if (ti.is_struct()) {
+			udt_type_data_t utd;
+			ti.get_udt_details(&utd);
+			for (size_t i = 0; i < utd.size(); i++) {
+				fixPtrSizes(utd[i].type, nearsize, farsize, isNear, isFar, isCodeNear, isCodeFar);
+			}
+		} else if (ti.is_array()) {
+			array_type_data_t atd;
+			ti.get_array_details(&atd);
+			fixPtrSizes(atd.elem_type, nearsize, farsize, isNear, isFar, isCodeNear, isCodeFar);
+		}
+	}
+	bool tryFixFuncModel(func_type_data_t& ftd, int argSize) //argSize -1 for not trying to toggle pointer sizes
+	{
+		bool bFrameChange = false;
+		std::vector<unsigned long long> ptrSizes, funcPtrSizes;
+		getPtrSizes(ftd.rettype, ptrSizes, funcPtrSizes);
+		for (size_t i = 0; i < ftd.size(); i++) {
+			getPtrSizes(ftd[i].type, ptrSizes, funcPtrSizes);
+		}
+		unsigned long long nearsize = inf.is_64bit() ? 8 : (inf.is_32bit() ? 4 : 2),
+			farsize = nearsize + ph.segreg_size;
+		bool isNear = false, isFar = false, isCodeNear = false, isCodeFar = false;
+		for (size_t i = 0; i < ptrSizes.size(); i++) {
+			if (ptrSizes[i] == farsize) {
+				if (isNear) { isNear = false; break; }
+				isFar = true;
+			} else if (ptrSizes[i] == nearsize) {
+				if (isFar) { isFar = false; break; }
+				isNear = true;
+			}
+		}
+		for (size_t i = 0; i < funcPtrSizes.size(); i++) {
+			if (funcPtrSizes[i] == farsize) {
+				if (isCodeNear) { isCodeNear = false; break; }
+				isCodeFar = true;
+			} else if (funcPtrSizes[i] == nearsize) {
+				if (isCodeFar) { isCodeFar = false; break; }
+				isCodeNear = true;
+			}
+		}
+		if (argSize != -1 && ftd.stkargs != argSize) {
+			if (isFar && ftd.stkargs - ptrSizes.size() * ph.segreg_size == argSize) {
+				isNear = true;
+				isFar = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			} else if (isNear && ftd.stkargs + ptrSizes.size() * ph.segreg_size == argSize) {
+				isFar = true;
+				isNear = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			} else if (isCodeFar && ftd.stkargs - funcPtrSizes.size() * ph.segreg_size == argSize) {
+				isCodeNear = true;
+				isCodeFar = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			} else if (isCodeNear && ftd.stkargs + funcPtrSizes.size() * ph.segreg_size == argSize) {
+				isCodeFar = true;
+				isCodeNear = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			} else if (isFar && isCodeFar && ftd.stkargs - (ptrSizes.size() + funcPtrSizes.size()) * ph.segreg_size == argSize) {
+				isNear = true; isCodeNear = true;
+				isFar = false; isCodeFar = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			} else if (isNear && isCodeNear && ftd.stkargs + (ptrSizes.size() + funcPtrSizes.size()) * ph.segreg_size == argSize) {
+				isFar = true; isCodeFar = true;
+				isNear = false; isCodeNear = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			} else if (isNear && isCodeFar && ftd.stkargs + (ptrSizes.size() - funcPtrSizes.size()) * ph.segreg_size == argSize) {
+				isFar = true; isCodeNear = true;
+				isNear = false; isCodeFar = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			} else if (isFar && isCodeNear && ftd.stkargs + (funcPtrSizes.size() - ptrSizes.size()) * ph.segreg_size == argSize) {
+				isNear = true; isCodeFar = true;
+				isFar = false; isCodeNear = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			}
+			if (bFrameChange) {
+				for (size_t i = 0; i < ftd.size(); i++) {
+					fixPtrSizes(ftd[i].type, nearsize, farsize, isNear, isFar, isCodeNear, isCodeFar);
+				}
+			}
+		}
+		if ((ftd.cc & CM_M_MASK) == CM_M_FN && isFar) ftd.cc = (ftd.cc & ~CM_M_MASK) | CM_M_FF;
+		else if ((ftd.cc & CM_M_MASK) == CM_M_NN && isFar) ftd.cc = (ftd.cc & ~CM_M_MASK) | CM_M_NF;
+		else if ((ftd.cc & CM_M_MASK) == CM_M_NF && isNear) ftd.cc = (ftd.cc & ~CM_M_MASK) | CM_M_NN;
+		else if ((ftd.cc & CM_M_MASK) == CM_M_FF && isNear) ftd.cc = (ftd.cc & ~CM_M_MASK) | CM_M_FN;
+		if ((ftd.cc & CM_M_MASK) == CM_M_NF && isCodeFar) ftd.cc = (ftd.cc & ~CM_M_MASK) | CM_M_FF;
+		else if ((ftd.cc & CM_M_MASK) == CM_M_NN && isCodeFar) ftd.cc = (ftd.cc & ~CM_M_MASK) | CM_M_FN;
+		else if ((ftd.cc & CM_M_MASK) == CM_M_FN && isCodeNear) ftd.cc = (ftd.cc & ~CM_M_MASK) | CM_M_NN;
+		else if ((ftd.cc & CM_M_MASK) == CM_M_FF && isCodeNear) ftd.cc = (ftd.cc & ~CM_M_MASK) | CM_M_NF;
+		return bFrameChange;
 	}
 	void IdaCallback::funcInfoToIDA(FuncProtoInfo& paramInfo, tinfo_t & ti)
 	{
-		std::vector<unsigned long long> ptrSizes;
 		func_type_data_t ftd;
 		//ti.get_func_details(&ftd);
 		addrToArgLoc(paramInfo.retType.addr, ftd.retloc);
 		typeInfoToIDA(0, paramInfo.retType.pi.ti, ftd.rettype);
-		getPtrSizes(ftd.rettype, ptrSizes);
 		if (paramInfo.isNoReturn) ftd.flags |= FTI_NORET;
 		ftd.flags |= FTI_ARGLOCS;
 		if (paramInfo.killedByCall.size() != 0) ftd.flags |= FTI_SPOILED;
@@ -2918,17 +3053,16 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			if (ftd.size() <= paramInfo.syminfo[i].argIndex) ftd.resize(paramInfo.syminfo[i].argIndex + 1);
 			if (paramInfo.syminfo[i].addr.addr.space == "stack") stkargs += (uval_t)paramInfo.syminfo[i].addr.size;
 			ftd[paramInfo.syminfo[i].argIndex] = fa;
-			getPtrSizes(fa.type, ptrSizes);
 		}
 		ftd.stkargs = stkargs;
-		
-		if ((ftd.cc & CM_M_MASK) == CM_M_FN) ftd.cc = (ftd.cc & ~CM_M_MASK) | CM_M_FF;
-		if ((ftd.cc & CM_M_MASK) == CM_M_NN) ftd.cc = (ftd.cc & ~CM_M_MASK) | CM_M_NF;
-		type_t t = BTMT_DEFCALL; //FTI_DEFCALL
-		if ((ftd.flags & FTI_NEARCALL) != 0) t = BTMT_NEARCALL;
-		else if ((ftd.flags & FTI_FARCALL) != 0) t = BTMT_FARCALL;
-		else if ((ftd.flags & FTI_INTCALL) != 0) t = BTMT_INTCALL;
-		ti.create_func(ftd, BT_FUNC | t);
+		//the far/near data/call method is basically irrelevant unless there are arguments/return value containing data or function pointers
+		//either the default as above, or the prior value would be fine
+		tryFixFuncModel(ftd, -1);
+		//type_t t = BTMT_DEFCALL; //FTI_DEFCALL
+		//if ((ftd.flags & FTI_NEARCALL) != 0) t = BTMT_NEARCALL;
+		//else if ((ftd.flags & FTI_FARCALL) != 0) t = BTMT_FARCALL;
+		//else if ((ftd.flags & FTI_INTCALL) != 0) t = BTMT_INTCALL;
+		ti.create_func(ftd, BT_FUNC | (ftd.get_call_method() >> 2));
 	}
 	void IdaCallback::typeInfoToIDA(int idx, std::vector<TypeInfo>& type, tinfo_t & ti)
 	{
@@ -3036,6 +3170,75 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		opt.indentIncrement = (int)di->numChars;
 		return opt;
 	}
+	void checkNearFarFuncModelInfo(ea_t ea)
+	{
+		func_t* f = get_func(ea);
+		if (f == nullptr) return;
+		tinfo_t ti;
+		if (getFuncByGuess(ea, ti)) {
+			func_type_data_t ftd;
+			bool bChanged = false, bFrameChange = false;
+			ti.get_func_details(&ftd);
+			if (f->is_far() && (ftd.get_call_method() == FTI_NEARCALL || ftd.get_call_method() == FTI_DEFCALL && !is_code_far(inf.cc.cm)) ||
+				!f->is_far() && (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm))) {
+				ftd.flags &= ~FTI_CALLTYPE;
+				ftd.flags |= (f->is_far() ? FTI_FARCALL : FTI_NEARCALL);
+				bChanged = true;
+			}
+			if (f->frame != BADNODE) {
+				struc_t* s = get_frame(f);
+				//range_t range;
+				//get_frame_part(&range, f, FPC_ARGS);
+				//int argSize = range.end_ea - range.start_ea;
+				ea_t argSize = s->memqty == 0 ? 0 : s->members[s->memqty - 1].eoff - frame_off_args(f);
+				unsigned long long nearsize = inf.is_64bit() ? 8 : (inf.is_32bit() ? 4 : 2),
+					farsize = nearsize + ph.segreg_size;
+				if (ftd.stkargs != argSize) {
+					//ftd.cc = (ftd.cc & ~CM_M_MASK) | (is_code_far(ftd.cc) ? CM_M_FN : CM_M_NN);
+					//ftd.guess_cc(f->argsize, 0);
+					//if (!is_user_cc(ftd.cc)) ph.calc_arglocs(&ftd);
+					/*if (ftd.is_vararg_cc()) {
+						regobjs_t rego;
+						relobj_t relo;
+						ph.calc_varglocs(&ftd, &rego, &relo, ftd.size());
+					}*/					
+				}
+				bFrameChange = tryFixFuncModel(ftd, argSize);
+				/*for (size_t i = 0; i < s->memqty; i++) {
+					xreflist_t xlt;
+					build_stkvar_xrefs(&xlt, f, &s->members[i]);
+					for (size_t j = 0; j < xlt.size(); j++) {
+						flags_t fl = get_flags(xlt[j].ea);
+						int stkvar = is_stkvar0(fl) ? 0 : (is_stkvar1(fl) ? 1 : -1);
+						if (stkvar == -1) continue;
+						insn_t insn;
+						decode_insn(&insn, xlt[j].ea);
+						op_t op = insn.ops[stkvar];
+						if (op.type == o_displ && op.dtype == dt_word && s->members[i].eoff - s->members[i].soff == nearsize) {
+							//weak indicator: 2 byte near pointer detected as 4 bytes
+						} else if (op.type == o_displ && op.dtype == dt_dword && s->members[i].eoff - s->members[i].soff == farsize) {
+							//weak indicator: 4 byte near pointer detected as 6 bytes
+						} else if (op.type == o_displ && op.dtype == dt_dword && s->members[i].eoff - s->members[i].soff == nearsize) {
+							//strong indicator: 4 byte far pointer
+						} else if (op.type == o_displ && op.dtype == dt_fword && s->members[i].eoff - s->members[i].soff == farsize) {
+							//strong indicator: 6 byte far pointer
+						}
+							//lds/les/lfs/lgs/lss are the normal way of loading a far pointer, second operand is m16:16/32
+					}
+				}*/
+			}
+			if (bChanged || bFrameChange) {
+				tinfo_t newti;
+				newti.create_func(ftd, BT_FUNC | (ftd.get_call_method() >> 2));
+				apply_tinfo(ea, newti, TINFO_DEFINITE);
+				if (bFrameChange) {
+					del_frame(f);
+					ph.create_func_frame(f);
+				}
+
+			}
+		}
+	}
 	void IdaCallback::identParams(ea_t ea)
 	{
 		//if (funcProtoInfos.find(ea) != funcProtoInfos.end() && funcProtoInfos[ea].bFromParamId) return;
@@ -3044,6 +3247,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		//however sometimes specifically IDA will choose a wrong data model for libraries - far instead of near, and the frame and type both have bad information
 		//perhaps this peculiar case should be solved by a simple database script which correlates the stack frame pointers to its specific usages
 		//as largely it is just working around and fixing a bug in this particular area
+		executeOnMainThread([ea]() { checkNearFarFuncModelInfo(ea); });
 		DecMode dm = defaultDecMode;
 		dm.actionname = "paramid";
 		std::string display, funcProto, funcColorProto;
@@ -3345,7 +3549,7 @@ ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 		ea_t ea = di->decompiledFunction->start_ea;
 		const std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph =
 			di->fnc2code[get_func(ea)].blockGraph;
-		mg->resize(blockGraph.size());
+		mg->resize((int)blockGraph.size());
 		/*for (size_t i = 0; i < blockGraph.size(); i++) {
 			int node = mg->add_node(&r);
 			node_info_t ni;
@@ -3802,8 +4006,8 @@ const cm_t  CM_CC_CDECL    = 0x30;  ///< stack
 So it is marked as near 16/far 32 pointers and CDECL both of which are correct.
 
 Code:
-fi.cc = (fi.cc & ~idaapi.CM_M_MASK) | idaapi.CM_M_FN
-tinfo.create_func(fi)
+fi.cc = (fi.cc & ~idaapi.CM_M_MASK) | (idaapi.CM_M_FN if ida_typeinf.is_code_far(fi.cc) else idaapi.CM_M_NN)
+tinfo.create_func(fi, ida_typeinf.BT_FUNC | (fi.get_call_method() >> 2))
 ida_typeinf.apply_tinfo(ea, tinfo, idaapi.TINFO_DEFINITE)
 This works in IDA (creating a new tinfo would crash it because data would be missing). If you use apply_tinfo without creating a newtinfo it does nothing as the fi needs to be rebound to a tinfo to work. If you do not change fi.cc to far code near data, it also works. So the code is correct, can query the type again and it is changed.
 
@@ -3888,8 +4092,8 @@ The 'int(f.this)' is a tricky point to as it actually yields the true func_t* st
 Now to get this to take place in the callers of the function still the type has stale stack offsets (its separate from the frame):
 Code:
 ida_typeinf.guess_tinfo(tinfo, ea)
-fi.cc = (fi.cc & ~idaapi.CM_M_MASK) | idaapi.CM_M_FN
-tinfo.create_func(fi)
+fi.cc = (fi.cc & ~idaapi.CM_M_MASK) | (idaapi.CM_M_FN if ida_typeinf.is_code_far(fi.cc) else idaapi.CM_M_NN)
+tinfo.create_func(fi, ida_typeinf.BT_FUNC | (fi.get_call_method() >> 2))
 ida_typeinf.apply_tinfo(ea, tinfo, idaapi.TINFO_DEFINITE)
 
 Manually one could enumerate code x-refs to the function and use ida_typeinf.apply_callee_tinfo(callee_ea, tinfo).
@@ -3927,6 +4131,12 @@ def check_fix_all(b):
 
 def check_func_frame((ea, fn, f, fr, fi)):
   if fr is None: return False
+  #import ida_range
+  #r = ida_range.range_t()
+  #ida_frame.get_frame_part(r, f, ida_frame.FPC_ARGS)
+  #argSize = r.end_ea - r.start_ea
+  argSize = fr.get_member(fr.memqty - 1).eoff - ida_frame.frame_off_args(f) if fr.memqty != 0 else 0
+  return (fi.stkargs != argSize)
   for i in range(fr.memqty):
     if fr.get_member(i).soff < ida_frame.frame_off_args(f): continue
     xrefs = idaapi.xreflist_t()
@@ -3963,7 +4173,6 @@ def get_ph(notif):
 					 ('notify', notif), ]
 	# The exported 'ph' global is the processor_t of the current proc module
 	return processor_t.in_dll(get_dll(), 'ph')
-
 def ph_notify(msgid, *args):
   if idaapi.IDA_SDK_VERSION >= 700:
 	class VA_LIST(ctypes.Structure):
@@ -3985,23 +4194,43 @@ def invoke_callbacks(msgid, *args):
   va_of_list = VA_OF_LIST(*args)
   #va_list = VA_LIST(0, 6*8, ctypes.cast(ctypes.pointer(va_of_list), ctypes.c_void_p), ctypes.cast(ctypes.pointer(va_of_list), ctypes.c_void_p))
   return get_dll().invoke_callbacks(HT_IDP, msgid, ctypes.pointer(va_of_list))
+
+
 def repair_func(ea):
   tinfo = idaapi.tinfo_t()
-  if not idaapi.get_tinfo2(ea, tinfo): return False
+  if not idaapi.get_tinfo2(ea, tinfo):
+    if not ida_typeinf.guess_tinfo(tinfo, ea): return False
   fi = idaapi.func_type_data_t()
   if not tinfo.get_func_details(fi): return False
-  fi.cc = (fi.cc & ~idaapi.CM_M_MASK) | idaapi.CM_M_FN
-  tinfo.create_func(fi)
-  ida_typeinf.apply_tinfo(ea, tinfo, idaapi.TINFO_DEFINITE)
-  f = idaapi.get_func(ea)
-  ida_frame.del_frame(f)
-  ev_create_func_frame = 60
-  ph_notify(ev_create_func_frame, ctypes.c_void_p(int(f.this)))
-  if not ida_typeinf.guess_tinfo(tinfo, ea):
-    if not idaapi.get_tinfo2(ea, tinfo): return False
-  tinfo.get_func_details(fi)
-  fi.cc = (fi.cc & ~idaapi.CM_M_MASK) | idaapi.CM_M_FN
-  tinfo.create_func(fi)
-  ida_typeinf.apply_tinfo(ea, tinfo, idaapi.TINFO_DEFINITE)
+  f = ida_funcs.get_func(ea)
+  bChanged = False
+  if f.is_far() and (fi.get_call_method() == ida_typeinf.FTI_NEARCALL or fi.get_call_method() == ida_typeinf.FTI_DEFCALL and not idaapi.is_code_far(idaapi.get_inf_structure().cc.cm)) or not f.is_far() and (fi.get_call_method() == ida_typeinf.FTI_FARCALL or fi.get_call_method() == ida_typeinf.FTI_DEFCALL and idaapi.is_code_far(idaapi.get_inf_structure().cc.cm)):
+    fi.flags &= ~ida_typeinf.FTI_CALLTYPE
+    fi.flags |= ida_typeinf.FTI_FARCALL if f.is_far() else ida_typeinf.FTI_NEARCALL
+    bChanged = True
+  fi.cc = (fi.cc & ~idaapi.CM_M_MASK) | (idaapi.CM_M_FN if ida_typeinf.is_code_far(fi.cc) else idaapi.CM_M_NN)
+  bFrameChange = False
+  for i in range(fi.size()):
+    if fi[i].type.is_funcptr(): pass
+    elif fi[i].type.is_ptr():
+      ptd = ida_typeinf.ptr_type_data_t()
+      fi[i].type.get_ptr_details(ptd)
+      if ptd.based_ptr_size == 4:
+        ptd.based_ptr_size -= 2
+        fi.stkargs -= 2
+        newti = idaapi.tinfo_t()
+        newti.create_ptr(ptd, ida_typeinf.BT_PTR | (ida_typeinf.BTMT_NEAR if idaapi.is_data_far(idaapi.get_inf_structure().cc.cm) else ida_typeinf.BTMT_DEFPTR))
+        fi[i].type = newti
+        bFrameChange = True
+  #ev_calc_arglocs = 2011
+  #ph_notify(ev_calc_arglocs, ctypes.c_void_p(int(fi.this)))
+  if bChanged or bFrameChange:
+    tinfo.create_func(fi, ida_typeinf.BT_FUNC | (fi.get_call_method() >> 2))
+    ida_typeinf.apply_tinfo(ea, tinfo, idaapi.TINFO_DEFINITE)
+  if bFrameChange:
+    f = idaapi.get_func(ea)
+    ida_frame.del_frame(f)
+    ev_create_func_frame = 60
+    ph_notify(ev_create_func_frame, ctypes.c_void_p(int(f.this)))
 
 */

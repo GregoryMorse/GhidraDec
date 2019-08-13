@@ -2550,7 +2550,7 @@ void reduceShortCircuits(std::vector<std::tuple<std::vector<unsigned int>, std::
 					foundj = -1; break;
 				}
 			}
-			if (foundj != -1) {
+			if (foundj != -1 && succs[i][foundj] != std::get<0>(blockGraph[i])[0]) { //if successor found is also predecessor it matches a do { if (cond) break; ... }, any other undetectable false patterns?
 				std::get<0>(blockGraph[succs[i][foundj]]).push_back(std::get<0>(blockGraph[i])[0]);
 				succs[std::get<0>(blockGraph[i])[0]].push_back(succs[i][foundj]);
 				for (size_t j = 0; j < succs[std::get<0>(blockGraph[i])[0]].size(); j++) {
@@ -3111,6 +3111,10 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 											}
 											symInf.syminfo.push_back(sym);
 										}
+										std::sort(symInf.syminfo.begin(), symInf.syminfo.end(),
+											[](const SymInfo & a, const SymInfo & b) { 
+												int r = a.addr.addr.space.compare(b.addr.addr.space);
+												return r == 0 ? a.addr.addr.offset < b.addr.addr.offset : r < 0; });
 									}
 									break;
 								}

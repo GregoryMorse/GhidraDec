@@ -777,7 +777,7 @@ void idaapi term()
 	if (decompInfo->graphWidget != nullptr) {
 		close_widget(decompInfo->graphViewer, 0);
 		decompInfo->graphViewer = nullptr;
-		close_widget(decompInfo->graphWidget, 0);
+		close_widget(decompInfo->graphWidget, 0); //can cause crashes
 		decompInfo->graphWidget = nullptr;
 		delete_mutable_graph(decompInfo->mg);
 		decompInfo->graphText.clear();
