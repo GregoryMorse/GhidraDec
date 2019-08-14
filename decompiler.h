@@ -123,7 +123,7 @@ namespace idaplugin {
 		Options getOpts();
 		void identParams(ea_t ea);
 		std::string tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err,
-			std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph);
+			std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph, bool paramOnly = false);
 	};
 
 	bool detectProcCompiler(RdGlobalInfo* di, std::string& pspec, std::string& cspec, std::string& sleighfilename);

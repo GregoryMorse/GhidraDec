@@ -405,6 +405,8 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 			if (func.extraPop == -1 && (f->flags & FUNC_PURGED_OK) != 0) func.extraPop = (unsigned long long)f->argsize; //type unknown but have frame so now can calculate
 			if (f->regargs == nullptr) read_regargs(f); //populates regargs, similar to how get_spd or the like with f specified populate stkpts
+			//callregs_t cr;
+			//cr.init_regs(inf.cc.cm);
 			for (int i = 0; i < f->regargqty; i++) { //name can be a nullptr!
 				std::string nm = f->regargs[i].name == nullptr ? "" : f->regargs[i].name;
 				unsigned long long offset;
@@ -1262,13 +1264,13 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 						for (size_t j = 0; j < ftd.size(); j++) {
 							s.push(ftd[j].type);
 						}
-						s.push(ftd.rettype);
-					}
-				} else if (alreadyDefined.find(qs.c_str()) == alreadyDefined.end())
-					needDecl[qs.c_str()] = true;
+							s.push(ftd.rettype);
+						}
+					} else if (alreadyDefined.find(qs.c_str()) == alreadyDefined.end())
+						needDecl[qs.c_str()] = true;
+				}
 			}
 		}
-	}
 
 	void buildDependents(std::string str, std::map<std::string, bool>& usedT, std::map<std::string, bool>& isDependee)
 	{
@@ -3178,22 +3180,26 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		if (getFuncByGuess(ea, ti)) {
 			func_type_data_t ftd;
 			bool bChanged = false, bFrameChange = false;
-			ti.get_func_details(&ftd);
-			if (f->is_far() && (ftd.get_call_method() == FTI_NEARCALL || ftd.get_call_method() == FTI_DEFCALL && !is_code_far(inf.cc.cm)) ||
-				!f->is_far() && (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm))) {
-				ftd.flags &= ~FTI_CALLTYPE;
-				ftd.flags |= (f->is_far() ? FTI_FARCALL : FTI_NEARCALL);
-				bChanged = true;
+			if (ti.get_func_details(&ftd)) {
+				if (f->is_far() && (ftd.get_call_method() == FTI_NEARCALL || ftd.get_call_method() == FTI_DEFCALL && !is_code_far(inf.cc.cm)) ||
+					!f->is_far() && (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm))) {
+					ftd.flags &= ~FTI_CALLTYPE;
+					ftd.flags |= (f->is_far() ? FTI_FARCALL : FTI_NEARCALL);
+					bChanged = true;
+				}
 			}
 			if (f->frame != BADNODE) {
 				struc_t* s = get_frame(f);
 				//range_t range;
 				//get_frame_part(&range, f, FPC_ARGS);
 				//int argSize = range.end_ea - range.start_ea;
+				//argloc_t al;
+				//const tinfo_t t(inf.is_64bit() ? BT_INT64 : (inf.is_32bit() ? BT_INT32 : BT_INT16)); //or use BT_INT8 - 1 byte like Ghidra?
+				//ph.calc_retloc(&al, t, inf.cc.cm) == 1;
 				ea_t argSize = s->memqty == 0 ? 0 : s->members[s->memqty - 1].eoff - frame_off_args(f);
-				unsigned long long nearsize = inf.is_64bit() ? 8 : (inf.is_32bit() ? 4 : 2),
-					farsize = nearsize + ph.segreg_size;
-				if (ftd.stkargs != argSize) {
+				//unsigned long long nearsize = inf.is_64bit() ? 8 : (inf.is_32bit() ? 4 : 2),
+					//farsize = nearsize + ph.segreg_size;
+				//if (ftd.stkargs != argSize) {
 					//ftd.cc = (ftd.cc & ~CM_M_MASK) | (is_code_far(ftd.cc) ? CM_M_FN : CM_M_NN);
 					//ftd.guess_cc(f->argsize, 0);
 					//if (!is_user_cc(ftd.cc)) ph.calc_arglocs(&ftd);
@@ -3202,7 +3208,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 						relobj_t relo;
 						ph.calc_varglocs(&ftd, &rego, &relo, ftd.size());
 					}*/					
-				}
+				//}
 				bFrameChange = tryFixFuncModel(ftd, argSize);
 				/*for (size_t i = 0; i < s->memqty; i++) {
 					xreflist_t xlt;
@@ -3281,7 +3287,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			func_t* f = get_func(ea);
 			if (f != nullptr) {
 				bool bChanged = false;
-				if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm) && !f->is_far()) {
+				if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm) && !f->is_far() && (f->flags & FUNC_USERFAR) == 0) {
 					f->flags |= FUNC_FAR; //FUNC_USERFAR
 					bChanged = true;
 				}
@@ -3353,7 +3359,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			});
 	}
 	std::string IdaCallback::tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err,
-		std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph)
+		std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph, bool paramOnly)
 	{
 		std::string code, funcProto, funcColorProto;
 		FuncProtoInfo paramInfo;
@@ -3376,6 +3382,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				usedData.clear();
 				usedFuncs.clear();
 			}
+			if (paramOnly) return code;
 			code = decInt->doDecompile(dec, AddrInfo{ "ram", ea }, display, funcProto, funcColorProto, paramInfo, blockGraph);
 			if (funcProto.size() != 0) {
 				funcProtos[ea] = funcProto;
@@ -3403,12 +3410,12 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	//graph.hpp and a graph emitter should take care of the AST information...
 
 std::string tryDecomp(RdGlobalInfo* di, DecMode dec, ea_t ea, std::string & display, bool & bSucc,
-	std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph)
+	std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph, bool paramOnly = false)
 {
 	std::string code, err;
 	std::string fn = di->idacb->allFuncNames[ea];
 	INFO_MSG("Decompiling function: " << fn.c_str() << " @ " << std::hex << ea << std::endl);
-	code = di->idacb->tryDecomp(dec, ea, fn.c_str(), display, err, blockGraph);
+	code = di->idacb->tryDecomp(dec, ea, fn.c_str(), display, err, blockGraph, paramOnly);
 	if (err.size() != 0) { INFO_MSG(err); }
 	else bSucc = true;
 	return code;
@@ -3474,7 +3481,9 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 		size_t num = di->idacb->allFuncs.size();
 		if (di->decompPid == 0) di->idacb->decInt->registerProgram();
 		for (size_t i = 0; i < num; i++) {
-			di->idacb->identParams(di->idacb->allFuncs[i]);
+			bool bSucc = false;
+			std::string disp;
+			tryDecomp(di, defaultDecMode, di->idacb->allFuncs[i], disp, bSucc, blockGraph, true);
 		}
 		int successes = 0, total = 0;
 		for (size_t i = 0; i < num; i++) {

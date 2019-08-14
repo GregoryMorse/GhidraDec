@@ -2621,6 +2621,12 @@ std::string DecompInterface::convertSourceDoc(Element* el,
 			//emission is upon reaching sibling block, or leaving the parent block
 			if (el->getName() == "block") {
 				unsigned int idx = blockPath.top().first;
+				std::vector<std::pair<size_t, unsigned int>> pairVec = blockPath.top().second;
+				blockPath.pop();
+				if (!blockPath.empty() && idx == blockPath.top().first) { //cannot process if parent is same block as display can be out of order
+					blockPath.top().second.insert(blockPath.top().second.end(), pairVec.begin(), pairVec.end());
+					pairVec.clear();
+				}
 				//if (idx & 0x80000000) idx = ~idx;
 				unsigned int lastsib = -1;
 				std::string spc;
@@ -2631,41 +2637,43 @@ std::string DecompInterface::convertSourceDoc(Element* el,
 					std::copy_if(lnl.base(), it, std::back_inserter(st), [](char ch) { return ch == ' '; });
 					if (!st.empty()) spc = st;
 				}
+				bool bChanged = false;
 				std::string tline;
-				for (int i = 0; i < blockPath.top().second.size(); i++) {
-					if (blockPath.top().second[i].second == -1) {
+				for (int i = 0; i < pairVec.size(); i++) {
+					if (pairVec[i].second == -1) {
 						std::string precline;
-						if (i == blockPath.top().second.size() - 1)
-							precline = displayXml.substr(blockPath.top().second[i].first);
+						if (i == pairVec.size() - 1)
+							precline = displayXml.substr(pairVec[i].first);
 						else
-							precline = displayXml.substr(blockPath.top().second[i].first, blockPath.top().second[i + 1].first - blockPath.top().second[i].first);
+							precline = displayXml.substr(pairVec[i].first, pairVec[i + 1].first - pairVec[i].first);
 						tline += precline;
 						std::string::reverse_iterator lnl = std::find(precline.rbegin(), precline.rend(), '\n');
 						std::string::iterator it = std::find_if_not(lnl.base(), precline.end(), isspace);
 						std::string st;
 						std::copy_if(lnl.base(), it, std::back_inserter(st), [](char ch) { return ch == ' '; });
 						if (!st.empty()) spc = st;
-					} else if (std::find(std::get<0>(blockGraph[blockPath.top().second[i].second]).begin(), std::get<0>(blockGraph[blockPath.top().second[i].second]).end(), idx) != std::get<0>(blockGraph[blockPath.top().second[i].second]).end()) {
-						//} else if (blockPath.top().second[i].second != idx) {
+					} else if (std::find(std::get<0>(blockGraph[pairVec[i].second]).begin(), std::get<0>(blockGraph[pairVec[i].second]).end(), idx) != std::get<0>(blockGraph[pairVec[i].second]).end()) {
+						//} else if (pairVec[i].second != idx) {
 						//if (lastsib != -1) blockGraph[lastsib].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(idx));
-						lastsib = blockPath.top().second[i].second;
+						lastsib = pairVec[i].second;
 						std::get<1>(blockGraph[idx]) += tline;
 						tline.clear();
-						std::get<1>(blockGraph[idx]) += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(blockPath.top().second[i].second));
-					} else if (idx == blockPath.top().second[i].second) {
+						std::get<1>(blockGraph[idx]) += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(pairVec[i].second));
+					} else if (idx == pairVec[i].second) {
 					} else {
-						bool bLinked = std::find(std::get<0>(blockGraph[blockPath.top().second[i].second]).begin(), std::get<0>(blockGraph[blockPath.top().second[i].second]).end(), lastsib) != std::get<0>(blockGraph[blockPath.top().second[i].second]).end();
-						if (lastsib != -1 && bLinked) idx = lastsib;
+						bool bLinked = std::find(std::get<0>(blockGraph[pairVec[i].second]).begin(), std::get<0>(blockGraph[pairVec[i].second]).end(), lastsib) != std::get<0>(blockGraph[pairVec[i].second]).end();
+						if (lastsib != -1 && bLinked && idx != lastsib) {
+							idx = lastsib;
+							bChanged = true;
+						}
 						std::get<1>(blockGraph[idx]) += tline;
 						tline.clear();
-						if (lastsib != -1 && bLinked) std::get<1>(blockGraph[idx]) += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(blockPath.top().second[i].second));
-						lastsib = blockPath.top().second[i].second;
+						if (lastsib != -1 && bLinked) std::get<1>(blockGraph[idx]) += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(pairVec[i].second));
+						lastsib = pairVec[i].second;
 					}
 				}
 				std::get<1>(blockGraph[idx]) += tline;
 				//if (lastsib != -1 && !tline.empty()) blockGraph[lastsib].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(idx));
-				bool bChanged = idx != blockPath.top().first;
-				blockPath.pop();
 				//if leaving a parent into the same parent, assume a sibling situation has occurred
 				if (!blockPath.empty()) {
 					if (lastsib != -1 && tline.empty() && bChanged) blockPath.top().second.push_back(std::pair<size_t, unsigned int>(displayXml.size(), lastsib));
@@ -2953,6 +2961,13 @@ void parseTypeInfo(Element* el, std::vector<TypeInfo>& ti)
 			TypeInfo typ;
 			typ.typeName = el->getAttributeValue("name");
 			typ.size = -1;
+			ti.push_back(typ);
+			break;
+		} else if (el->getName() == "void") {
+			TypeInfo typ;
+			typ.typeName = "void";
+			typ.size = 0;
+			typ.metaType = "void";
 			ti.push_back(typ);
 			break;
 		}
