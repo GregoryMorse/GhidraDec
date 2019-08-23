@@ -979,8 +979,8 @@ std::string DecompInterface::writeFuncProto(FuncProtoInfo func,
 	return std::string(indnt, ' ') + "<prototype extrapop=\"" +
 		(func.extraPop != -1 ? std::to_string(func.extraPop) : std::string("unknown")) +
 		"\" model=\"" + func.model + "\" modellock=\"" +
-		(func.model != "default" && func.model != "unknown" ? "true" : "false") +
-		(func.model != "default" && func.model != "unknown" && func.syminfo.size() == 0 ?
+		(func.model != "default" && func.model != "unknown" && lastdm.actionname != "paramid" ? "true" : "false") +
+		(func.model != "default" && func.model != "unknown" && lastdm.actionname != "paramid" && func.syminfo.size() == 0 ?
 			"\" voidlock=\"true" : "") +
 		(func.isInline ? "\" inline=\"true" : "") +
 		(func.isNoReturn ? "\" noreturn=\"true" : "") +
@@ -991,7 +991,7 @@ std::string DecompInterface::writeFuncProto(FuncProtoInfo func,
 		(func.dotdotdot ? "\" dotdotdot=\"true" : "") +
 		"\">\n" +
 		std::string(indnt + 2, ' ') + "<returnsym" +
-		std::string(func.retType.pi.ti.begin()->metaType != "unknown" ? " typelock=\"true\"" : "") +
+		std::string(func.retType.pi.ti.begin()->metaType != "unknown" && lastdm.actionname != "paramid" ? " typelock=\"true\"" : "") +
 		">\n" +
 		std::string(func.retType.addr.size == 0 ? std::string(indnt + 4, ' ') + "<addr/>\n" + std::string(indnt + 4, ' ') + "<void/>\n" :
 			((bUseInternalList ? std::string(indnt + 4, ' ') + "<addr/>\n" :
@@ -1024,7 +1024,7 @@ std::string DecompInterface::writeFunc(SizedAddrInfo addr, std::string funcname,
 	ostringstream parentnameesc;
 	xml_escape(parentnameesc, parentname.c_str());
 	std::string symbols;
-	bool bTypeLockArgs = true; //for args, either type lock all or none
+	bool bTypeLockArgs = lastdm.actionname != "paramid"; //for args, either type lock all or none
 	for (std::vector<SymInfo>::iterator it = func.syminfo.begin(); it != func.syminfo.end(); it++) {
 		if (//startOffs.space != addr.addr.space || startOffs.offset != addr.addr.offset ||
 			it->pi.ti.begin()->metaType == "unknown" && it->argIndex != -1) {
@@ -1057,8 +1057,8 @@ std::string DecompInterface::writeFunc(SizedAddrInfo addr, std::string funcname,
 		symbols += "            <mapsym>\n              <symbol name=\"" + it->pi.name + "\" typelock=\"" +
 			//the typelock is a size lock for unknown metatype and for category 0 mappings for the primary function being decompiled it is an all or nothing situation - due to design issue in Ghidra
 			(it->pi.ti.begin()->metaType == "unknown" &&
-			(//startOffs.space != addr.addr.space || startOffs.offset != addr.addr.offset ||
-				it->argIndex == -1 || (it->argIndex != -1 && !bTypeLockArgs)) ? "false" : "true") +
+			//startOffs.space != addr.addr.space || startOffs.offset != addr.addr.offset ||
+				it->argIndex == -1 || (it->argIndex != -1 && !bTypeLockArgs) ? "false" : "true") +
 			"\" namelock=\"" + std::string(it->pi.name.size() != 0 ? "true" : "false") +
 			"\" readonly=\"" + (readonly ? "true" : "false") +
 			"\" cat=\"" + std::string(it->argIndex != -1 ? "0\" index=\"" +
@@ -1626,7 +1626,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 				//need to replace all new lines with "//"
 				std::replace_if(buf.begin() + 2, buf.end(),
 					[](uchar it) { return it == '\n'; }, ' ');
-				std::string str = "\n\n\n<doc><function><comment color=\"comment\">\n"
+				std::string str = "\n\n\n<doc><function/><function><comment color=\"comment\">\n"
 					"//Decompiler native message: " + std::string(buf.begin()+2, buf.end()) +
 					"\n</comment></function></doc>";
 				retbuf = std::vector<uchar>(str.begin(), str.end());
@@ -3064,7 +3064,9 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 			const List& lst(el->getChildren());
 			List::const_iterator itert;
 			for (itert = lst.begin(); itert != lst.end(); ++itert) {
-				if ((*itert)->getName() == "addr") {
+				if ((*itert)->getName() == "comment") { //indicates an error message was thrown
+					//return decompXml;
+				} else if ((*itert)->getName() == "addr") {
 				} else if ((*itert)->getName() == "localdb") {
 					el = *itert;
 					const List& lt(el->getChildren());

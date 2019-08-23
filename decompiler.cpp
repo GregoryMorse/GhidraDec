@@ -2911,11 +2911,12 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			fixPtrSizes(atd.elem_type, nearsize, farsize, isNear, isFar, isCodeNear, isCodeFar);
 		}
 	}
-	bool tryFixFuncModel(func_type_data_t& ftd, int argSize) //argSize -1 for not trying to toggle pointer sizes
+	bool tryFixFuncModel(func_type_data_t& ftd, ea_t argSize) //argSize -1 for not trying to toggle pointer sizes
 	{
 		bool bFrameChange = false;
 		std::vector<unsigned long long> ptrSizes, funcPtrSizes;
-		getPtrSizes(ftd.rettype, ptrSizes, funcPtrSizes);
+		//cannot include return pointer or will throw off comparison - need separate check but how?
+		//getPtrSizes(ftd.rettype, ptrSizes, funcPtrSizes);
 		for (size_t i = 0; i < ftd.size(); i++) {
 			getPtrSizes(ftd[i].type, ptrSizes, funcPtrSizes);
 		}
@@ -2983,6 +2984,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				ftd.stkargs = argSize;
 			}
 			if (bFrameChange) {
+				fixPtrSizes(ftd.rettype, nearsize, farsize, isNear, isFar, isCodeNear, isCodeFar);
 				for (size_t i = 0; i < ftd.size(); i++) {
 					fixPtrSizes(ftd[i].type, nearsize, farsize, isNear, isFar, isCodeNear, isCodeFar);
 				}
@@ -3059,7 +3061,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		ftd.stkargs = stkargs;
 		//the far/near data/call method is basically irrelevant unless there are arguments/return value containing data or function pointers
 		//either the default as above, or the prior value would be fine
-		tryFixFuncModel(ftd, -1);
+		tryFixFuncModel(ftd, BADADDR);
 		//type_t t = BTMT_DEFCALL; //FTI_DEFCALL
 		//if ((ftd.flags & FTI_NEARCALL) != 0) t = BTMT_NEARCALL;
 		//else if ((ftd.flags & FTI_FARCALL) != 0) t = BTMT_FARCALL;
@@ -3236,14 +3238,76 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			if (bChanged || bFrameChange) {
 				tinfo_t newti;
 				newti.create_func(ftd, BT_FUNC | (ftd.get_call_method() >> 2));
-				apply_tinfo(ea, newti, TINFO_DEFINITE);
+				apply_tinfo(ea, newti, TINFO_DEFINITE); //if a structure name has the function name, seems to be causing a warning message - very long standing issue in IDA apparently
 				if (bFrameChange) {
 					del_frame(f);
 					ph.create_func_frame(f);
 				}
-
 			}
 		}
+	}
+	bool compareFuncInfo(const FuncProtoInfo& f1, const FuncProtoInfo& f2);
+	bool compareParamInfo(const std::vector<TypeInfo> & t1, const std::vector<TypeInfo>& t2)
+	{
+		if (t1.size() != t2.size()) return false;
+		for (size_t i = 0; i < t1.size(); i++) {
+			if (t1[i].arraySize != t2[i].arraySize || t1[i].enumMembers.size() != t2[i].enumMembers.size() ||
+				!compareFuncInfo(t1[i].funcInfo, t2[i].funcInfo) || t1[i].isChar != t2[i].isChar ||
+				t1[i].isEnum != t2[i].isEnum || t1[i].isReadOnly != t2[i].isReadOnly || t1[i].isUtf != t2[i].isUtf ||
+				t1[i].metaType != t2[i].metaType || t1[i].size != t2[i].size || t1[i].structMembers.size() != t2[i].structMembers.size() ||
+				t1[i].typeName != t2[i].typeName) return false;
+			for (size_t j = 0; j < t1[i].enumMembers.size(); j++) {
+				if (t1[i].enumMembers[j].first != t2[i].enumMembers[j].first || t1[i].enumMembers[j].second != t2[i].enumMembers[j].second) return false;
+			}
+			for (size_t j = 0; j < t1[i].structMembers.size(); j++) {
+				if (t1[i].structMembers[j].name != t2[i].structMembers[j].name || t1[i].structMembers[j].offset != t2[i].structMembers[j].offset ||
+					!compareParamInfo(t1[i].structMembers[j].ti, t2[i].structMembers[j].ti)) return false;
+			}
+		}
+		return true;
+	}
+	bool compareFuncInfo(const FuncProtoInfo & f1, const FuncProtoInfo & f2)
+	{
+		if (f1.customStorage != f2.customStorage || f1.dotdotdot != f2.dotdotdot ||
+			f1.extraPop != f2.extraPop || f1.hasThis != f2.hasThis || f1.isConstruct != f2.isConstruct ||
+			f1.isDestruct != f2.isDestruct || f1.isInline != f2.isInline || f1.isNoReturn != f2.isNoReturn ||
+			f1.model != f2.model || f1.killedByCall.size() != f2.killedByCall.size() || f1.syminfo.size() != f2.syminfo.size()) return false;
+		for (size_t i = 0; i < f1.killedByCall.size(); i++) {
+			if (f1.killedByCall[i].size != f2.killedByCall[i].size || f1.killedByCall[i].addr.space != f2.killedByCall[i].addr.space ||
+				f1.killedByCall[i].addr.offset != f2.killedByCall[i].addr.offset || f1.killedByCall[i].addr.joins.size() != f2.killedByCall[i].addr.joins.size()) return false;
+			for (size_t j = 0; j < f1.killedByCall[i].addr.joins.size(); j++) {
+				if (f1.killedByCall[i].addr.joins[j].size != f2.killedByCall[i].addr.joins[j].size ||
+					f1.killedByCall[i].addr.joins[j].addr.offset != f2.killedByCall[i].addr.joins[j].addr.offset ||
+					f1.killedByCall[i].addr.joins[j].addr.space != f2.killedByCall[i].addr.joins[j].addr.space) return false;
+			}
+		}
+		for (size_t i = 0; i < f1.syminfo.size(); i++) {
+			if (f1.syminfo[i].argIndex != f2.syminfo[i].argIndex ||
+				f1.syminfo[i].addr.size != f2.syminfo[i].addr.size || f1.syminfo[i].addr.addr.offset != f2.syminfo[i].addr.addr.offset ||
+				f1.syminfo[i].addr.addr.space != f2.syminfo[i].addr.addr.space || f1.syminfo[i].addr.addr.joins.size() != f2.syminfo[i].addr.addr.joins.size() ||
+				f1.syminfo[i].range.space != f2.syminfo[i].range.space || f1.syminfo[i].range.beginoffset != f2.syminfo[i].range.beginoffset ||
+				f1.syminfo[i].range.endoffset != f2.syminfo[i].range.endoffset ||
+				f1.syminfo[i].pi.name != f2.syminfo[i].pi.name) return false;
+			for (size_t j = 0; j < f1.syminfo[i].addr.addr.joins.size(); j++) {
+				if (f1.syminfo[i].addr.addr.joins[j].size != f2.syminfo[i].addr.addr.joins[j].size ||
+					f1.syminfo[i].addr.addr.joins[j].addr.offset != f2.syminfo[i].addr.addr.joins[j].addr.offset ||
+					f1.syminfo[i].addr.addr.joins[j].addr.space != f2.syminfo[i].addr.addr.joins[j].addr.space) return false;
+			}
+			if (!compareParamInfo(f1.syminfo[i].pi.ti, f2.syminfo[i].pi.ti)) return false;
+		}
+		if (f1.retType.argIndex != f2.retType.argIndex ||
+			f1.retType.addr.size != f2.retType.addr.size || f1.retType.addr.addr.offset != f2.retType.addr.addr.offset ||
+			f1.retType.addr.addr.space != f2.retType.addr.addr.space || f1.retType.addr.addr.joins.size() != f2.retType.addr.addr.joins.size() ||
+			f1.retType.range.space != f2.retType.range.space || f1.retType.range.beginoffset != f2.retType.range.beginoffset ||
+			f1.retType.range.endoffset != f2.retType.range.endoffset ||
+			f1.retType.pi.name != f2.retType.pi.name) return false;
+		for (size_t j = 0; j < f1.retType.addr.addr.joins.size(); j++) {
+			if (f1.retType.addr.addr.joins[j].size != f2.retType.addr.addr.joins[j].size ||
+				f1.retType.addr.addr.joins[j].addr.offset != f2.retType.addr.addr.joins[j].addr.offset ||
+				f1.retType.addr.addr.joins[j].addr.space != f2.retType.addr.addr.joins[j].addr.space) return false;
+		}
+		if (!compareParamInfo(f1.retType.pi.ti, f2.retType.pi.ti)) return false;
+		return true;
 	}
 	void IdaCallback::identParams(ea_t ea)
 	{
@@ -3273,86 +3337,215 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		dm.printSyntaxTree = false;
 		decInt->doDecompile(dm, AddrInfo{ "ram", ea }, display, funcProto,
 			funcColorProto, paramInfo, blockGraph); //let outer try handle errors
-		funcProtoInfos[ea] = FuncInfo{ funcProtoInfos[ea].name, true, paramInfo };
 		if (bChangeOpt) decInt->setOptions(getOpts());
-		if (!di->bSaveParamIdToIDA) return;
-		executeOnMainThread([this, &paramInfo, ea]() {
-			tinfo_t ti;
-			if (!getFuncByGuess(ea, ti)) {}
-			tinfo_t newti;
-			funcInfoToIDA(paramInfo, newti);
-			apply_tinfo(ea, newti, TINFO_DEFINITE);
-			func_type_data_t ftd;
-			newti.get_func_details(&ftd);
-			func_t* f = get_func(ea);
-			if (f != nullptr) {
-				bool bChanged = false;
-				if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm) && !f->is_far() && (f->flags & FUNC_USERFAR) == 0) {
-					f->flags |= FUNC_FAR; //FUNC_USERFAR
-					bChanged = true;
-				}
-				if ((ftd.flags & FTI_NORET) != 0) {
-					f->flags |= FUNC_NORET; bChanged = true;
-				}
-				if (f->argsize == 0 && (f->flags & FUNC_PURGED_OK) == 0) {
-					f->flags |= FUNC_PURGED_OK;
-					if (is_purging_cc(ftd.cc)) f->argsize = ftd.stkargs;
-					bChanged = true;
-				}
-				if (bChanged) update_func(f);
+		//perhaps better way to detect graceful error than empty model - return XML has comment field - perhaps empty string if success for paramid
+		if (paramInfo.model.size() == 0) return; //error occurred such as most likely overlapping input varnodes
+		funcProtoInfos[ea] = FuncInfo{ funcProtoInfos[ea].name, true, paramInfo, funcProtoInfos[ea].fpi };
+	}
+	class FuncChooser : public chooser_multi_t
+	{
+	public:
+		struct FuncRow
+		{
+			qstring oldval;
+			qstring val;
+		};
+		std::vector<FuncRow> inits;
+		static const int widths[];
+		static const char* strs[];
+		FuncChooser(std::vector<FuncRow>& its, sizevec_t* s) : chooser_multi_t(CH_KEEP | CH_MODAL, 2, widths, strs, "Function Prototype Changes"), inits(its), sv(s)
+		{}
+		sizevec_t* sv;
+		/// User pressed the enter key.
+		/// \param[in,out] sel  selected items
+		/// \return             what is changed
+		virtual cbres_t idaapi enter(sizevec_t* sel)
+		{
+			//sv = *sel;
+			*sv = *sel;
+			return cbres_t(callui(ui_chooser_default_enter, this, sel).i);
+		}
+		/// Selection changed
+		/// \note This callback is not supported in the txt-version.
+		/// \param sel  new selected items
+		virtual void idaapi select(const sizevec_t& sel) const
+		{
+			*sv = sel;
+			//void* thisPtr = (void*)this; //serious hack to get around the const
+			//((FuncChooser*)thisPtr)->sv = sel;
+		}
+		/// get the number of elements in the chooser
+		virtual size_t idaapi get_count() const
+		{
+			return inits.size();
+		}
 
-				struc_t* frame = nullptr;
-				if (f->frame != BADNODE) frame = get_frame(f);
-				sval_t frsize = 0;
-				asize_t argsize = 0;
-				for (size_t i = 0; i < paramInfo.syminfo.size(); i++) {
-					if (paramInfo.syminfo[i].addr.addr.space != "stack") continue;
-					if (paramInfo.syminfo[i].argIndex == -1)
-						frsize += (sval_t)paramInfo.syminfo[i].pi.ti.begin()->size;
-					else
-						argsize += (asize_t)paramInfo.syminfo[i].pi.ti.begin()->size;
-				}
-				if (frame != nullptr) {
-					set_frame_size(f, frsize, f->frregs /*frame_off_savregs(f) - frame_off_lvars(f)*/, argsize);
-				} else {
-					if (frsize != 0 || argsize != 0) {
-						add_frame(f, frsize, f->frregs, argsize);
-						frame = get_frame(f);
+		/// get a description of an element.
+		/// \param[out] cols   vector of strings. \n
+		///                    will receive the contents of each column
+		/// \param[out] icon   element's icon id, -1 - no icon
+		/// \param[out] attrs  element attributes
+		/// \param n           element number (0..get_count()-1)
+		virtual void idaapi get_row(
+			qstrvec_t* cols,
+			int* icon_,
+			chooser_item_attrs_t* attrs,
+			size_t n) const
+		{
+			if (n >= inits.size()) return;
+			if (cols != nullptr) {
+				(*cols)[0] = inits[n].oldval;
+				(*cols)[1] = inits[n].val;
+			}
+			if (icon_ != nullptr) *icon_ = -1;
+			if (attrs != nullptr) {
+				//attrs->color = DEFCOLOR;
+				//attrs->flags = 0; //CHITEM_...
+			}
+		}
+	};
+	const int FuncChooser::widths[] = { 40, 40 };
+	const char* FuncChooser::strs[] = { "Old", "New" };
+
+	void IdaCallback::updateDatabaseFromParams(std::vector<ea_t> eas)
+	{
+		if (!di->bSaveParamIdToIDA) return;
+		for (size_t i = 0; i < eas.size(); ) {
+			if (!funcProtoInfos[eas[i]].bFromParamId) eas.erase(eas.begin() + i); else i++;
+		}
+		executeOnMainThread([this, eas]() {
+			//std::vector<ushort> checks;
+			//checks.resize(eas.size());
+			sizevec_t checks;
+			if (eas.size() == 1) {
+				std::string val, disp;
+				if (!compareFuncInfo(funcProtoInfos[eas[0]].fpi, funcProtoInfos[eas[0]].oldfpi)) {
+					val = "Change signature from '";
+					//disp = "Change signature from '";
+					FuncProtoInfo fpi = funcProtoInfos[eas[0]].fpi;
+					funcProtoInfos[eas[0]].fpi = funcProtoInfos[eas[0]].oldfpi;
+					val += print_func(eas[0], disp, COLOR_DEFAULT);
+					funcProtoInfos[eas[0]].fpi = fpi;
+					val += "' to parameter identified version from Ghidra: '";
+					//disp += "' to parameter identified version from Ghidra: '";
+					val += print_func(eas[0], disp, COLOR_DEFAULT);
+					val += "'?";
+					//disp += "'?";
+				} else return;
+				if (ask_yn(ASKBTN_YES, val.c_str()) != ASKBTN_YES) return;
+				//checks[0] = 1;
+				checks.push_back(0);
+			} else {
+				//qstring ask = "GhidraDec Parameter Identification Acceptance\n"
+				//	"\n"
+				//	"\n"
+				//	"Accepted parameter identifications will cause updates to occur in both IDA function prototype and function stack frame.\n"
+				//	"\n"
+				//	"<~C~hooser:E1:0:80:::>\n\n";
+				std::vector<FuncChooser::FuncRow> vals;
+				for (size_t idx = 0; idx < eas.size(); idx++) {
+					std::string val, valold, disp;
+					if (!compareFuncInfo(funcProtoInfos[eas[idx]].fpi, funcProtoInfos[eas[idx]].oldfpi)) {
+						FuncProtoInfo fpi = funcProtoInfos[eas[idx]].fpi;
+						funcProtoInfos[eas[idx]].fpi = funcProtoInfos[eas[idx]].oldfpi;
+						valold = print_func(eas[idx], disp, COLOR_DEFAULT);
+						funcProtoInfos[eas[idx]].fpi = fpi;
+						val = print_func(eas[idx], disp, COLOR_DEFAULT);
+						//ask += qstring("<:C>") + qstring(std::to_string(idx + 1).c_str()) + ">" + qstring(val.c_str()) + "   " + qstring(valold.c_str()) + "\n";
+						vals.push_back(FuncChooser::FuncRow{ valold.c_str(), val.c_str() });
+						checks.push_back(idx);
 					}
+					//checks[idx] = 1;
 				}
-				for (size_t i = 0; i < paramInfo.syminfo.size(); i++) {
-					if (paramInfo.syminfo[i].addr.addr.space == "register") {
-						if (paramInfo.syminfo[i].argIndex == -1) {
-							std::string reg = decInt->getRegisterFromIndex(paramInfo.syminfo[i].addr.addr.offset, (int)paramInfo.syminfo[i].addr.size);
-							regvar_t* rv = find_regvar(f, (ea_t)paramInfo.syminfo[i].range.beginoffset, (ea_t)paramInfo.syminfo[i].range.endoffset, reg.c_str(), nullptr);
-							if (rv == nullptr)
-								add_regvar(f, (ea_t)paramInfo.syminfo[i].range.beginoffset, (ea_t)paramInfo.syminfo[i].range.endoffset,
-									reg.c_str(), paramInfo.syminfo[i].pi.name.c_str(), nullptr);
-						} else {
-							std::string reg = decInt->getRegisterFromIndex(paramInfo.syminfo[i].addr.addr.offset, (int)paramInfo.syminfo[i].addr.size);
-							reg_info_t ri;
-							parse_reg_name(&ri, reg.c_str());
-							read_regargs(f);
-							/*size_t j;
-							for (j = 0; j < f->regargqty; j++) {
-								if (f->regargs[j].reg == ri.reg) break;
+				if (vals.size() == 0) return;
+				//(va_list)checks.data() //this will not work on x86-64 GCC which uses different ABI format for va_list
+				FuncChooser cm(vals, &checks);
+				//ask_form(ask.c_str(), &cm);
+				ssize_t choice = cm.choose(checks); //initial choice but does not return and select is const method that cannot be used
+				if (choice == chooser_base_t::NO_SELECTION || choice == chooser_base_t::EMPTY_CHOOSER) return;
+				//checks = cm.sv;
+			}
+			for (size_t idx = 0; idx < eas.size(); idx++) {
+				if (checks.find(idx) == checks.end()) continue;
+				ea_t ea = eas[idx];
+				tinfo_t ti;
+				if (!getFuncByGuess(eas[idx], ti)) {}
+				tinfo_t newti;
+				FuncProtoInfo& paramInfo = funcProtoInfos[ea].fpi;
+				funcInfoToIDA(paramInfo, newti);
+				apply_tinfo(ea, newti, TINFO_DEFINITE); //can cause crash error 984 if type not correct
+				func_type_data_t ftd;
+				newti.get_func_details(&ftd);
+				func_t* f = get_func(ea);
+				if (f != nullptr) {
+					bool bChanged = false;
+					if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm) && !f->is_far() && (f->flags & FUNC_USERFAR) == 0) {
+						f->flags |= FUNC_FAR; //FUNC_USERFAR
+						bChanged = true;
+					}
+					if ((ftd.flags & FTI_NORET) != 0) {
+						f->flags |= FUNC_NORET; bChanged = true;
+					}
+					if (f->argsize == 0 && (f->flags & FUNC_PURGED_OK) == 0) {
+						f->flags |= FUNC_PURGED_OK;
+						if (is_purging_cc(ftd.cc)) f->argsize = ftd.stkargs;
+						bChanged = true;
+					}
+					if (bChanged) update_func(f);
+
+					struc_t* frame = nullptr;
+					if (f->frame != BADNODE) frame = get_frame(f);
+					sval_t frsize = 0;
+					asize_t argsize = 0;
+					for (size_t i = 0; i < paramInfo.syminfo.size(); i++) {
+						if (paramInfo.syminfo[i].addr.addr.space != "stack") continue;
+						if (paramInfo.syminfo[i].argIndex == -1)
+							frsize += (sval_t)paramInfo.syminfo[i].pi.ti.begin()->size;
+						else
+							argsize += (asize_t)paramInfo.syminfo[i].pi.ti.begin()->size;
+					}
+					if (frame != nullptr) {
+						set_frame_size(f, frsize, f->frregs /*frame_off_savregs(f) - frame_off_lvars(f)*/, argsize);
+					} else {
+						if (frsize != 0 || argsize != 0) {
+							add_frame(f, frsize, f->frregs, argsize);
+							frame = get_frame(f);
+						}
+					}
+					for (size_t i = 0; i < paramInfo.syminfo.size(); i++) {
+						if (paramInfo.syminfo[i].addr.addr.space == "register") {
+							if (paramInfo.syminfo[i].argIndex == -1) {
+								std::string reg = decInt->getRegisterFromIndex(paramInfo.syminfo[i].addr.addr.offset, (int)paramInfo.syminfo[i].addr.size);
+								regvar_t* rv = find_regvar(f, (ea_t)paramInfo.syminfo[i].range.beginoffset, (ea_t)paramInfo.syminfo[i].range.endoffset, reg.c_str(), nullptr);
+								if (rv == nullptr)
+									add_regvar(f, (ea_t)paramInfo.syminfo[i].range.beginoffset, (ea_t)paramInfo.syminfo[i].range.endoffset,
+										reg.c_str(), paramInfo.syminfo[i].pi.name.c_str(), nullptr);
+							} else {
+								std::string reg = decInt->getRegisterFromIndex(paramInfo.syminfo[i].addr.addr.offset, (int)paramInfo.syminfo[i].addr.size);
+								reg_info_t ri;
+								parse_reg_name(&ri, reg.c_str());
+								read_regargs(f);
+								/*size_t j;
+								for (j = 0; j < f->regargqty; j++) {
+									if (f->regargs[j].reg == ri.reg) break;
+								}
+								if (j == f->regargqty) {}*/
+								tinfo_t ti;
+								typeInfoToIDA(0, paramInfo.syminfo[i].pi.ti, ti);
+								add_regarg(f, ri.reg, ti, paramInfo.syminfo[i].pi.name.c_str());
 							}
-							if (j == f->regargqty) {}*/
+						} else if (paramInfo.syminfo[i].addr.addr.space == "stack") {
 							tinfo_t ti;
 							typeInfoToIDA(0, paramInfo.syminfo[i].pi.ti, ti);
-							add_regarg(f, ri.reg, ti, paramInfo.syminfo[i].pi.name.c_str());
+							opinfo_t oi = {};
+							flags_t flag;
+							size_t sz; //size of ti
+							get_idainfo_by_type(&sz, &flag, &oi, ti, nullptr);
+							define_stkvar(f, paramInfo.syminfo[i].pi.name.c_str(),
+								(sval_t)(paramInfo.syminfo[i].addr.addr.offset - (frame_off_args(f) - frame_off_retaddr(f))),
+								flag, &oi, (asize_t)paramInfo.syminfo[i].addr.size);
+						} else if (paramInfo.syminfo[i].addr.addr.space == "ram") {
 						}
-					} else if (paramInfo.syminfo[i].addr.addr.space == "stack") {
-						tinfo_t ti;
-						typeInfoToIDA(0, paramInfo.syminfo[i].pi.ti, ti);
-						opinfo_t oi = {};
-						flags_t flag;
-						size_t sz; //size of ti
-						get_idainfo_by_type(&sz, &flag, &oi, ti, nullptr);
-						define_stkvar(f, paramInfo.syminfo[i].pi.name.c_str(),
-							(sval_t)(paramInfo.syminfo[i].addr.addr.offset - (frame_off_args(f) - frame_off_retaddr(f))),
-							flag, &oi, (asize_t)paramInfo.syminfo[i].addr.size);
-					} else if (paramInfo.syminfo[i].addr.addr.space == "ram") {
 					}
 				}
 			}
@@ -3376,6 +3569,10 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				for (size_t i = 0; i < notIded.size(); i++) identParams(notIded[i]);
 				for (std::map<ea_t, FuncInfo>::iterator it = funcProtoInfos.begin(); it != funcProtoInfos.end(); )
 					if (!it->second.bFromParamId) funcProtoInfos.erase(it++); else it++;
+				if (!paramOnly) {
+					notIded.push_back(ea);
+					updateDatabaseFromParams(notIded);
+				}
 				//usage tracking obviously should not be affected by sub-functions
 				usedImports.clear();
 				usedTypes.clear();
@@ -3414,7 +3611,7 @@ std::string tryDecomp(RdGlobalInfo* di, DecMode dec, ea_t ea, std::string & disp
 {
 	std::string code, err;
 	std::string fn = di->idacb->allFuncNames[ea];
-	INFO_MSG("Decompiling function: " << fn.c_str() << " @ " << std::hex << ea << std::endl);
+	INFO_MSG((paramOnly ? "Identifying function parameters: " : "Decompiling function: ") << fn.c_str() << " @ " << std::hex << ea << std::endl);
 	code = di->idacb->tryDecomp(dec, ea, fn.c_str(), display, err, blockGraph, paramOnly);
 	if (err.size() != 0) { INFO_MSG(err); }
 	else bSucc = true;
@@ -3480,13 +3677,18 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 		std::map<ea_t, size_t> entries;
 		size_t num = di->idacb->allFuncs.size();
 		if (di->decompPid == 0) di->idacb->decInt->registerProgram();
+		std::vector<ea_t> notIded;
 		for (size_t i = 0; i < num; i++) {
+			if (di->idacb->imports.find(di->idacb->allFuncs[i]) != di->idacb->imports.end()) continue;
 			bool bSucc = false;
 			std::string disp;
 			tryDecomp(di, defaultDecMode, di->idacb->allFuncs[i], disp, bSucc, blockGraph, true);
+			notIded.push_back(di->idacb->allFuncs[i]);
 		}
+		di->idacb->updateDatabaseFromParams(notIded);
 		int successes = 0, total = 0;
 		for (size_t i = 0; i < num; i++) {
+			if (di->idacb->imports.find(di->idacb->allFuncs[i]) != di->idacb->imports.end()) continue;
 			std::string disp;
 			total++;
 			bool bSucc = false;
@@ -3626,6 +3828,8 @@ ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 		return 0;
 	} else if (notification_code == grcode_user_draw) {
 		return 0;
+	//} else if (notification_code == grcode_destroyed) {
+	//} else if (notification_code == grcode_changed_graph) {
 	}
 	return 0;
 }
@@ -3634,9 +3838,11 @@ void displayBlockGraph(RdGlobalInfo* di, ea_t ea)
 {
 	if (!di->bShowGraph) return;
 	di->idacb->executeOnMainThread([di, ea]() {
-		if (di->graphWidget != nullptr) {
+		if (di->graphViewer != nullptr) {
 			close_widget(di->graphViewer, 0);
 			di->graphViewer = nullptr;
+		}
+		if (di->graphWidget != nullptr) {
 			close_widget(di->graphWidget, 0);
 			di->graphWidget = nullptr;
 			delete_mutable_graph(di->mg);

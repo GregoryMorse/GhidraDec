@@ -71,10 +71,13 @@ struct ShowOutput : public exec_request_t
 
 	virtual int idaapi execute() override
 	{
+		if (di->custViewer) {
+			close_widget(di->custViewer, 0);
+			di->custViewer = nullptr;
+		}
 		if (di->codeViewer)
 		{
 			close_widget(di->codeViewer, 0);
-			di->custViewer = nullptr;
 			di->codeViewer = nullptr;
 		}
 

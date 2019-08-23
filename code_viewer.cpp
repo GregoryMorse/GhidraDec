@@ -386,7 +386,7 @@ struct move_backward_ah_t : public action_handler_t
 	}
 };
 
-const char* move_backward_ah_t::actionName   = "retdec:ActionMoveBackward";
+const char* move_backward_ah_t::actionName   = "ghidradec:ActionMoveBackward";
 const char* move_backward_ah_t::actionLabel  = "Move backward";
 const char* move_backward_ah_t::actionHotkey = "ESC";
 
@@ -464,7 +464,7 @@ struct move_forward_ah_t : public action_handler_t
 	}
 };
 
-const char* move_forward_ah_t::actionName   = "retdec:ActionMoveForward";
+const char* move_forward_ah_t::actionName   = "ghidradec:ActionMoveForward";
 const char* move_forward_ah_t::actionLabel  = "Move forward";
 const char* move_forward_ah_t::actionHotkey = "Ctrl+F";
 
@@ -528,7 +528,7 @@ struct change_fnc_comment_ah_t : public action_handler_t
 	}
 };
 
-const char* change_fnc_comment_ah_t::actionName   = "retdec:ActionChangeFncComment";
+const char* change_fnc_comment_ah_t::actionName   = "ghidradec:ActionChangeFncComment";
 const char* change_fnc_comment_ah_t::actionLabel  = "Edit func comment";
 const char* change_fnc_comment_ah_t::actionHotkey = ";";
 
@@ -668,7 +668,7 @@ struct change_fnc_global_name_ah_t : public action_handler_t
 	}
 };
 
-const char* change_fnc_global_name_ah_t::actionName  = "retdec:ActionChangeFncGlobName";
+const char* change_fnc_global_name_ah_t::actionName  = "ghidradec:ActionChangeFncGlobName";
 const char* change_fnc_global_name_ah_t::actionLabel = "Rename";
 const char* change_fnc_global_name_ah_t::actionHotkey = "N";
 
@@ -715,7 +715,7 @@ struct open_xrefs_ah_t : public action_handler_t
 	}
 };
 
-const char* open_xrefs_ah_t::actionName   = "retdec:ActionOpenXrefs";
+const char* open_xrefs_ah_t::actionName   = "ghidradec:ActionOpenXrefs";
 const char* open_xrefs_ah_t::actionLabel  = "Open xrefs window";
 const char* open_xrefs_ah_t::actionHotkey = "X";
 
@@ -762,7 +762,7 @@ struct open_calls_ah_t : public action_handler_t
 	}
 };
 
-const char* open_calls_ah_t::actionName   = "retdec:ActionOpenCalls";
+const char* open_calls_ah_t::actionName   = "ghidradec:ActionOpenCalls";
 const char* open_calls_ah_t::actionLabel  = "Open calls window";
 const char* open_calls_ah_t::actionHotkey = "C";
 
@@ -860,7 +860,7 @@ struct change_fnc_type_ah_t : public action_handler_t
 	}
 };
 
-const char* change_fnc_type_ah_t::actionName   = "retdec:ActionChangeFncType";
+const char* change_fnc_type_ah_t::actionName   = "ghidradec:ActionChangeFncType";
 const char* change_fnc_type_ah_t::actionLabel  = "Change type declaration";
 const char* change_fnc_type_ah_t::actionHotkey = "Y";
 
@@ -911,7 +911,7 @@ struct jump_to_asm_ah_t : public action_handler_t
 	}
 };
 
-const char* jump_to_asm_ah_t::actionName  = "retdec:ActionJumpToAsm";
+const char* jump_to_asm_ah_t::actionName  = "ghidradec:ActionJumpToAsm";
 const char* jump_to_asm_ah_t::actionLabel = "Jump to ASM";
 const char* jump_to_asm_ah_t::actionHotkey = "A";
 
@@ -1170,8 +1170,11 @@ void idaapi ct_close(TWidget* cv, void* ud)
 {
 	RdGlobalInfo* di = static_cast<RdGlobalInfo*>(ud);
 
-	di->custViewer = nullptr;
-	di->codeViewer = nullptr;
+	di->custViewer = nullptr; //==cv
+	if (di->codeViewer) {
+		close_widget(di->codeViewer, 0);
+		di->codeViewer = nullptr;
+	}
 }
 
 } // namespace idaplugin

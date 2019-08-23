@@ -718,6 +718,44 @@ void idaapi run(int arg)
 #endif
 }
 
+ssize_t idaapi view_callback(void* ud, int notification_code, va_list va)
+{
+	RdGlobalInfo* di = static_cast<RdGlobalInfo*>(ud);
+
+	switch (notification_code) {
+	case view_close:
+		TWidget* view = va_arg(va, TWidget*);
+		if (view == nullptr) return 0;
+		if (decompInfo->graphWidget == view) {
+			decompInfo->graphWidget = nullptr;
+			delete_mutable_graph(decompInfo->mg);
+			decompInfo->graphText.clear();
+			netnode nn("GhidraGraph", 0, true);
+			nn.kill();
+		} else if (decompInfo->graphViewer == view) { //only this not for graphWidget
+			decompInfo->graphViewer = nullptr;
+			if (decompInfo->graphWidget) {
+				close_widget(decompInfo->graphWidget, 0);
+				decompInfo->graphWidget = nullptr;
+				delete_mutable_graph(decompInfo->mg);
+				decompInfo->graphText.clear();
+				netnode nn("GhidraGraph", 0, true);
+				nn.kill();
+			}
+		} else if (decompInfo->codeViewer == view) {
+			decompInfo->codeViewer = nullptr;
+		} else if (decompInfo->custViewer == view) { //only this not for codeViewer
+			decompInfo->custViewer = nullptr;
+			if (decompInfo->codeViewer) {
+				close_widget(decompInfo->codeViewer, 0);
+				decompInfo->codeViewer = nullptr;
+			}
+		}
+		break;
+	}
+	return 0;
+}
+
 /**
  * Plugin initialization function.
  * IDA is searching for this function.
@@ -758,6 +796,7 @@ int idaapi init()
 	decompInfo->qm = qmutex_create();
 	decompInfo->termSem = qsem_create(nullptr, 0);
 	hook_to_notification_point(HT_UI, ui_callback, decompInfo);
+	hook_to_notification_point(HT_VIEW, view_callback, decompInfo);
 	registerPermanentActions();
 	inited = true;
 	return PLUGIN_KEEP;
@@ -774,22 +813,40 @@ void idaapi term()
 		delete decompInfo->idacb;
 		decompInfo->idacb = nullptr;
 	}
-	if (decompInfo->graphWidget != nullptr) {
+	if (decompInfo->graphViewer != nullptr) {
 		close_widget(decompInfo->graphViewer, 0);
 		decompInfo->graphViewer = nullptr;
-		close_widget(decompInfo->graphWidget, 0); //can cause crashes
+	}
+	if (decompInfo->graphWidget != nullptr) {
+		close_widget(decompInfo->graphWidget, 0);
 		decompInfo->graphWidget = nullptr;
 		delete_mutable_graph(decompInfo->mg);
 		decompInfo->graphText.clear();
 		netnode nn("GhidraGraph", 0, true);
 		nn.kill();
 	}
+	if (decompInfo->custViewer) {
+		close_widget(decompInfo->custViewer, 0);
+		decompInfo->custViewer = nullptr;
+	}
 	if (decompInfo->codeViewer)
 	{
 		close_widget(decompInfo->codeViewer, 0);
-		decompInfo->custViewer = nullptr;
 		decompInfo->codeViewer = nullptr;
 	}
+	unregister_action("ghidradec:ActionJumpToAsm");
+	unregister_action("ghidradec:ActionChangeFncGlobName");
+	unregister_action("ghidradec:ActionOpenXrefs");
+	unregister_action("ghidradec:ActionOpenCalls");
+	unregister_action("ghidradec:ActionChangeFncType");
+	unregister_action("ghidradec:ActionChangeFncComment");
+	unregister_action("ghidradec:ActionMoveForward");
+	unregister_action("ghidradec:ActionMoveBackward");
+	if (is_idaq) {
+		const char optionsActionName[] = "ghidradec:ShowOptions";
+		unregister_action(optionsActionName);
+	}
+	unhook_from_notification_point(HT_VIEW, view_callback);
 	unhook_from_notification_point(HT_UI, ui_callback);
 	qsem_free(decompInfo->termSem);
 	qmutex_free(decompInfo->qm);

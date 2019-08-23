@@ -38,6 +38,7 @@ namespace idaplugin {
 			std::string name;
 			bool bFromParamId;
 			FuncProtoInfo fpi;
+			FuncProtoInfo oldfpi;
 		};
 		RdGlobalInfo* di;
 		int regNameToIndexIda(std::string regstr);
@@ -122,6 +123,7 @@ namespace idaplugin {
 		void typeInfoToIDA(int idx, std::vector<TypeInfo>& type, tinfo_t& ti);
 		Options getOpts();
 		void identParams(ea_t ea);
+		void updateDatabaseFromParams(std::vector<ea_t> eas);
 		std::string tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err,
 			std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph, bool paramOnly = false);
 	};
