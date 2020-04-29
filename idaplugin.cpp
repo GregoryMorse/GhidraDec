@@ -829,8 +829,7 @@ void idaapi term()
 		close_widget(decompInfo->custViewer, 0);
 		decompInfo->custViewer = nullptr;
 	}
-	if (decompInfo->codeViewer)
-	{
+	if (decompInfo->codeViewer) {
 		close_widget(decompInfo->codeViewer, 0);
 		decompInfo->codeViewer = nullptr;
 	}

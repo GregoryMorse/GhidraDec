@@ -13,7 +13,7 @@ https://www.hex-rays.com/products/ida/processors.shtml
 
 Currently, we officially support only Windows and Linux. It may be possible to build macOS version from the sources, but since I do not have a Mac, I cannot create a pre-built package, or continually make sure the macOS build is not broken.
 
-1. Either download and unpack a pre-built package from the [latest release](https://github.com/chants/GhidraDec/releases/latest), or build and install the GhidraDec IDA plugin by yourself (the process is described below).
+1. Either download and unpack a pre-built package from the [latest release](https://github.com/GregoryMorse/GhidraDec/releases/latest), or build and install the GhidraDec IDA plugin by yourself (the process is described below).
 
 ## Build and Installation
 
@@ -28,7 +28,7 @@ Currently, we officially support only Windows and Linux. It may be possible to b
 ### Process
 
 * Clone the repository:
-  * `git clone https://github.com/chants/GhidraDec.git`
+  * `git clone https://github.com/GregoryMorse/GhidraDec.git`
 * Linux:
   * `cd ghidradec`
   * `mkdir build && cd build`
@@ -117,6 +117,6 @@ Argument value 		Description
 
 ## License
 
-Copyright (c) 2019 chants, licensed under the MIT license. See the `LICENSE` file for more details.
+Copyright (c) 2019 Gregory Morse, licensed under the MIT license. See the `LICENSE` file for more details.
 
 GhidraDec IDA plugin uses third-party libraries or other resources listed, along with their licenses, in the `LICENSE-THIRD-PARTY` file.

@@ -912,7 +912,7 @@ class RdGlobalInfo;
 void stopDecompilation(RdGlobalInfo*, bool, bool, bool);
 
 #define PLUGIN_NAME "Ghidra Decompiler Plugin"
-#define PLUGIN_PRODUCER "chants"
+#define PLUGIN_PRODUCER "Gregory Morse"
 #define PLUGIN_COPYRIGHT "Copyright 2019 " PLUGIN_PRODUCER
 #define PLUGIN_URL "https://forum.exetools.com/"
 #define PLUGIN_HOTKEY "Ctrl-g"
@@ -933,7 +933,7 @@ class RdGlobalInfo
 		std::string pluginID               = "ghidra.decompiler";
 		std::string pluginProducer         = PLUGIN_PRODUCER;
 		std::string pluginCopyright        = PLUGIN_COPYRIGHT;
-		std::string pluginEmail            = "grover.jabloni@gmail.com";
+		std::string pluginEmail            = "gregory.morse@live.com";
 		std::string pluginURL              = PLUGIN_URL;
 		std::string pluginContact          = PLUGIN_URL "\nEMAIL: " + pluginEmail;
 		std::string pluginVersion          = RELEASE_VERSION;
