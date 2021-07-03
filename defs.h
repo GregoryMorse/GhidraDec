@@ -162,7 +162,6 @@ struct stkpnt_t
 #define STRCONV_ESCAPE ACFOPT_ESCAPE
 #define PRTYPE_RESTORE 0
 #define LP_HIDE_WINDOW 0
-#define TXTF_LINENUMBERS 0
 #define WOPN_MENU FORM_MENU
 #define WOPN_NOT_CLOSED_BY_ESC FORM_NOT_CLOSED_BY_ESC
 #define WOPN_TAB FORM_TAB
@@ -764,20 +763,6 @@ inline ssize_t get_strlit_contents(
 	}
 	return sz;
 }
-inline bool is_anonymous_udt(const tinfo_t & ti)
-{
-	//taken from ida64.dll get_property_tinfo GTA_IS_ANON_UDT=282=0x11a
-	if (ti.is_enum()) return false; //also not reserved
-	if (ti.is_bitfield()) return false;
-	qstring qs;
-	ti.get_type_name(&qs);
-	//ti.get_ordinal() / get_numbered_type_name / create_numbered_type_name
-	if (qs.size() == 0) return false;
-	if (qs[0] == '$') return true;
-	const char* ptr = strrchr(qs.c_str(), ':');
-	if (ptr == nullptr) return false;
-	return (ptr[1] == '$');
-}
 inline ssize_t get_entry_name(qstring* buf, uval_t ord)
 {
 	char b[MAXSTR];
@@ -883,6 +868,23 @@ inline bool is_double(flags_t F) { return isDouble(F); }
 inline bool is_float(flags_t F) { return isFloat(F); }
 inline bool is_unknown(flags_t F) { return isUnknown(F); }
 inline bool is_struct(flags_t F) { return isStruct(F); }
+#endif
+#if IDA_SDK_VERSION < 720
+#define TXTF_LINENUMBERS 0
+inline bool is_anonymous_udt(const tinfo_t& ti)
+{
+	//taken from ida64.dll get_property_tinfo GTA_IS_ANON_UDT=282=0x11a
+	if (ti.is_enum()) return false; //also not reserved
+	if (ti.is_bitfield()) return false;
+	qstring qs;
+	ti.get_type_name(&qs);
+	//ti.get_ordinal() / get_numbered_type_name / create_numbered_type_name
+	if (qs.size() == 0) return false;
+	if (qs[0] == '$') return true;
+	const char* ptr = strrchr(qs.c_str(), ':');
+	if (ptr == nullptr) return false;
+	return (ptr[1] == '$');
+}
 #else
 inline bool is_anonymous_udt(const tinfo_t& ti)
 {

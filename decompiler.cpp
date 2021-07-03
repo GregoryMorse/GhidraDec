@@ -170,7 +170,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			return "stack";
 		} else if (al.is_scattered()) {
 			scattered_aloc_t scat;
-			for (size_t i = scat.size() - 1; i >= 0; i--) { //these appear to be high to low, so need to reverse order here
+			for (size_t i = scat.size() - 1; i != -1; i--) { //these appear to be high to low, so need to reverse order here
 				unsigned long long offs;
 				std::vector<SizedAddrInfo> j; //can have a register reg1() as the is_mixed_scattered indicates
 				std::string spc = arglocToAddr(scat[i], &offs, j, false); //all "ram" - certainly join or reg2 would not make sense
@@ -3121,7 +3121,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			} else {
 				if ((type[idx].metaType == "int" || type[idx].metaType == "uint" || type[idx].metaType == "unknown") &&
 					(type[idx].size == 1 || type[idx].size == 2 || type[idx].size == 4 || type[idx].size == 8)) {
-					type_t t;
+					type_t t = 0;
 					if (type[idx].metaType == "int") t = BTMT_SIGNED;
 					else if (type[idx].metaType == "uint") t = BTMT_UNSIGNED;
 					else if (type[idx].metaType == "unknown") t = BTMT_UNKSIGN;
@@ -3364,7 +3364,12 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		{
 			//sv = *sel;
 			*sv = *sel;
+#if IDA_SDK_VERSION < 720
+			if (sel->size() == 0) return NOTHING_CHANGED;
+			return (sel->size() == inits.size()) ? ALL_CHANGED : SELECTION_CHANGED;
+#else
 			return cbres_t(callui(ui_chooser_default_enter, this, sel).i);
+#endif
 		}
 		/// Selection changed
 		/// \note This callback is not supported in the txt-version.

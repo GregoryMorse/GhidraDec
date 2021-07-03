@@ -3,7 +3,7 @@ rmdir /s /q build
 mkdir build
 cd build
 SET SAVEPTH=%PATH%
-SET PATH=%PATH%;%ProgramFiles%\cmake\bin;%UserProfile%\Documents\win_flex_bison
+SET PATH=%PATH%;%ProgramFiles%\cmake\bin;%UserProfile%\Desktop\Apps\win_flex_bison
 
 del CMakeCache.txt
 cmake .. -DIDA_SDK_DIR=D:\libraries\idasdk75
@@ -41,7 +41,6 @@ del deps\jsoncpp\jsoncpp-project-prefix\src\jsoncpp-project-build\CMakeCache.txt
 rmdir /s /q deps\jsoncpp\CMakeFiles
 cmake .. -G "Visual Studio 16 2019" -A Win32 -DIDA_SDK_DIR32=D:\libraries\idasdk68
 cmake --build . --config Release -- -m
-rename 
 move /Y Release\ghidradec64.p64 Release\ghidradec.p64
 copy Release\*.plw "%ProgramFiles (x86)%\Ida 6.8\plugins"
 copy Release\*.p64 "%ProgramFiles (x86)%\Ida 6.8\plugins"
