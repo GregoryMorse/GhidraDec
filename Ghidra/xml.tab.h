@@ -63,7 +63,7 @@ extern int xmldebug;
 typedef union YYSTYPE
 {
 /* Line 2058 of yacc.c  */
-#line 103 "xml.y"
+#line 119 "xml.y"
 
   int4 i;
   string *str;

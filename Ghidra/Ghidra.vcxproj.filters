@@ -321,6 +321,15 @@
     <ClInclude Include="slghparse.tab.hh">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="stringmanage.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="transform.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="string_ghidra.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="action.cc">
@@ -594,6 +603,15 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="xml.tab.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="stringmanage.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="transform.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="string_ghidra.cc">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

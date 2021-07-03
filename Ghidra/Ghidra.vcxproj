@@ -53,25 +53,22 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
-    <Import Project="$(USERPROFILE)\Documents\win_flex_bison\custom_build_rules\win_flex_bison_custom_build.props" />
+    <Import Project="../PropertySheet.props" />
+    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.props" />
   </ImportGroup>
   <ImportGroup Label="Shared">
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="../PropertySheet.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="../PropertySheet.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="../PropertySheet.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="../PropertySheet.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -234,7 +231,10 @@
     <ClInclude Include="slghsymbol.hh" />
     <ClInclude Include="slgh_compile.hh" />
     <ClInclude Include="space.hh" />
+    <ClInclude Include="stringmanage.hh" />
+    <ClInclude Include="string_ghidra.hh" />
     <ClInclude Include="subflow.hh" />
+    <ClInclude Include="transform.hh" />
     <ClInclude Include="translate.hh" />
     <ClInclude Include="type.hh" />
     <ClInclude Include="typegrp_ghidra.hh" />
@@ -329,7 +329,10 @@
     <ClCompile Include="slghpattern.cc" />
     <ClCompile Include="slghsymbol.cc" />
     <ClCompile Include="space.cc" />
+    <ClCompile Include="stringmanage.cc" />
+    <ClCompile Include="string_ghidra.cc" />
     <ClCompile Include="subflow.cc" />
+    <ClCompile Include="transform.cc" />
     <ClCompile Include="translate.cc" />
     <ClCompile Include="type.cc" />
     <ClCompile Include="typegrp_ghidra.cc" />
@@ -374,6 +377,6 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="$(USERPROFILE)\Documents\win_flex_bison\custom_build_rules\win_flex_bison_custom_build.targets" />
+    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.targets" />
   </ImportGroup>
 </Project>

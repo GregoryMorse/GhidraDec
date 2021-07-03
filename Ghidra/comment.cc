@@ -21,10 +21,8 @@
 /// \param ad is the Address of the instruction associated with the comment
 /// \param uq is used internally to sub-sort comments at the same address
 /// \param txt is the body of the comment
-Comment::Comment(uint4 tp,const Address &fad,
-			     const Address &ad,int4 uq,
-			     const string &txt) :
-  type(tp), funcaddr(fad), addr(ad), uniq(uq), text(txt)
+Comment::Comment(uint4 tp,const Address &fad,const Address &ad,int4 uq,const string &txt) :
+  type(tp), uniq(uq), funcaddr(fad), addr(ad), text(txt), emitted(false)
 {
 }
 
@@ -55,6 +53,7 @@ void Comment::saveXml(ostream &s) const
 void Comment::restoreXml(const Element *el,const AddrSpaceManager *manage)
 
 {
+  emitted = false;
   type = 0;
   type = Comment::encodeCommentType(el->getAttributeValue("type"));
   const List &list(el->getChildren());
@@ -283,7 +282,9 @@ bool CommentSorter::findPosition(Subsort &subsort,Comment *comm,const Funcdata *
   if (opiter != fd->endOpAll()) {	// If there is an op at or after the comment
     PcodeOp *op = (*opiter).second;
     BlockBasic *block = op->getParent();
-    if ((block != (BlockBasic*)0) && block->contains(comm->getAddr())) { // If the op's block contains the address
+    if (block == (BlockBasic *)0)
+      throw LowlevelError("Dead op reaching CommentSorter");
+    if (block->contains(comm->getAddr())) { // If the op's block contains the address
       // Associate comment with this op
       subsort.setBlock(block->getIndex(), (uint4)op->getSeqNum().getOrder());
       return true;
@@ -295,13 +296,15 @@ bool CommentSorter::findPosition(Subsort &subsort,Comment *comm,const Funcdata *
     --opiter;
     PcodeOp *op = (*opiter).second;
     BlockBasic *block = op->getParent();
-    if ((block != (BlockBasic*)0) && block->contains(comm->getAddr())) { // If the op's block contains the address
+    if (block == (BlockBasic *)0)
+      throw LowlevelError("Dead op reaching CommentSorter");
+    if (block->contains(comm->getAddr())) { // If the op's block contains the address
       // Treat the comment as being in this block at the very end
       subsort.setBlock(block->getIndex(),0xffffffff);
       return true;
     }
   }
-  if (backupOp != (PcodeOp *)0 && (backupOp->getParent() != (BlockBasic*)0)) {
+  if (backupOp != (PcodeOp *)0) {
     // Its possible the op migrated from its original basic block.
     // Since the address matches exactly, hang the comment on it
     subsort.setBlock(backupOp->getParent()->getIndex(),(uint4)backupOp->getSeqNum().getOrder());
@@ -340,6 +343,7 @@ void CommentSorter::setupFunctionList(uint4 tp,const Funcdata *fd,const CommentD
   while(iter != lastiter) {
     Comment *comm = *iter;
     if (findPosition(subsort, comm, fd)) {
+      comm->setEmitted(false);
       commmap[ subsort ] = comm;
       subsort.pos += 1;		// Advance the uniqueness counter
     }

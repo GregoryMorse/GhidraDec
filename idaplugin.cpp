@@ -30,18 +30,31 @@
 #include "defs.h"
 #include "plugin_config.h"
 #include "sleighinterface.h"
+#include "idaplugin.h"
+
+#if IDA_SDK_VERSION < 750
+class idaplugin::GhidraDec;
+idaplugin::GhidraDec* pm;
+#endif
 
 namespace idaplugin {
 
-/**
- * General info used by plugin.
- */
-RdGlobalInfo* decompInfo;
+GhidraDec::GhidraDec()
+{
+#if IDA_SDK_VERSION >= 750
+	init();
+#endif
+}
+
+GhidraDec::~GhidraDec()
+{
+	term();
+}
 
 /**
  * Kill old thread if still running.
  */
-void killDecompilation(bool bTerminate)
+void GhidraDec::killDecompilation(bool bTerminate)
 {
 	if (decompInfo->decompRunning)
 	{
@@ -102,7 +115,7 @@ void killDecompilation(bool bTerminate)
  * @param inSitu If true, DB is saved with the same name as IDA default database.
  * @param suffix If @p inSitu is false, use this suffix to distinguish DBs.
  */
-void saveIdaDatabase(bool inSitu = false, const std::string &suffix = ".dec-backup")
+void GhidraDec::saveIdaDatabase(bool inSitu, const std::string &suffix)
 {
 	INFO_MSG("Saving IDA database ...\n");
 
@@ -129,7 +142,7 @@ void saveIdaDatabase(bool inSitu = false, const std::string &suffix = ".dec-back
 /**
  * Generate retargetable decompiler database from IDA database.
  */
-void generatePluginDatabase()
+void GhidraDec::generatePluginDatabase()
 {
 	INFO_MSG("Generating retargetable decompilation DB ...\n");
 
@@ -141,17 +154,17 @@ void generatePluginDatabase()
  * Find out if input file is relocatable -- object file.
  * @return @c True if file relocatable, @c false otherwise.
  */
-bool isRelocatable()
+bool GhidraDec::isRelocatable()
 {
 #ifdef __X64__
-	if (inf.filetype == f_COFF && inf.start_ea == BADADDR)
+	if (inf_filetype == f_COFF && inf_start_ea == BADADDR)
 #else
-	if (inf.filetype == f_COFF && inf.beginEA == BADADDR)
+	if (inf_filetype == f_COFF && inf.beginEA == BADADDR)
 #endif
 	{
 		return true;
 	}
-	else if (inf.filetype == f_ELF)
+	else if (inf_filetype == f_ELF)
 	{
 		std::ifstream infile(decompInfo->inputPath, std::ios::binary);
 		if (infile.good())
@@ -186,7 +199,7 @@ bool isRelocatable()
  * @param fnc2decomp Function to decompile.
  * @param force      If @c true, decompilation is always performed.
  */
-void runSelectiveDecompilation(func_t *fnc2decomp = nullptr, bool force = false)
+void GhidraDec::runSelectiveDecompilation(func_t *fnc2decomp, bool force)
 {
 	if (decompInfo->decompThread != nullptr) {
 		if (!decompInfo->decompRunning) killDecompilation(false);
@@ -194,7 +207,7 @@ void runSelectiveDecompilation(func_t *fnc2decomp = nullptr, bool force = false)
 			killDecompilation(true);
 		} else return;
 	}
-	if (isRelocatable() && inf.min_ea != 0)
+	if (isRelocatable() && inf_min_ea != 0)
 	{
 		WARNING_GUI(decompInfo->pluginName << " version " << decompInfo->pluginVersion
 				<< " can selectively decompile only relocatable objects loaded at 0x0.\n"
@@ -305,7 +318,7 @@ void runSelectiveDecompilation(func_t *fnc2decomp = nullptr, bool force = false)
 /**
  * Decompile everything, but do not show it in viewer, instead dump it into file.
  */
-void runAllDecompilation()
+void GhidraDec::runAllDecompilation()
 {
 	std::string defaultOut = decompInfo->inputPath + ".c";
 	char* tmp;
@@ -343,7 +356,7 @@ void runAllDecompilation()
 /**
  *
  */
-bool setInputPath()
+bool GhidraDec::setInputPath()
 {
 	char buff[MAXSTR];
 
@@ -440,7 +453,7 @@ bool setInputPath()
  * @return True if plugin can decompile IDA's input, false otherwise.
  * TODO: do some more checking (architecture, ...).
  */
-bool canDecompileInput()
+bool GhidraDec::canDecompileInput()
 {
 	if (!setInputPath())
 	{
@@ -456,7 +469,7 @@ bool canDecompileInput()
 			decompInfo->toolMap["metapc"].push_back((int)i); break;
 		}
 	}
-	return decompInfo->toolMap.find(inf.procname) != decompInfo->toolMap.end();
+	return decompInfo->toolMap.find(inf_procname) != decompInfo->toolMap.end();
 	/*// 32-bit binary -> is_32bit() == 1 && is_64bit() == 0.
 	// 64-bit binary -> is_32bit() == 1 && is_64bit() == 1.
 	// Allow 64-bit x86.
@@ -605,122 +618,128 @@ bool canDecompileInput()
 	return true;*/
 }
 
-} // namespace idaplugin
-
-using namespace idaplugin;
-
-/**
- * Plugin run function.
- * The plugin can be passed an integer argument from plugins.cfg file.
- * This can be useful when we want the one plugin to do something
- * different depending on the hot-key pressed or menu item selected.
- * IDA is searching for this function.
- * @param arg Argument set to value according plugins.cfg based on invocation hotkey.
- */
+	/**
+	 * Plugin run function.
+	 * The plugin can be passed an integer argument from plugins.cfg file.
+	 * This can be useful when we want the one plugin to do something
+	 * different depending on the hot-key pressed or menu item selected.
+	 * IDA is searching for this function.
+	 * @param arg Argument set to value according plugins.cfg based on invocation hotkey.
+	 */
 #ifdef __X64__
-bool idaapi run(size_t arg)
+	bool idaapi GhidraDec::run(size_t arg)
 #else
-void idaapi run(int arg)
+	void idaapi GhidraDec::run(int arg)
 #endif
-{
-	bool bRet = true;
-	if (!auto_is_ok())
 	{
-		INFO_MSG("GhidraDec plugin cannot run because the initial autoanalysis has not been finished.\n");
-		bRet = false;
-	}
-	if (decompInfo->decompThread != nullptr) {
-		if (!decompInfo->decompRunning) killDecompilation(false);
-		else if (ask_buttons(nullptr, nullptr, nullptr, ASKBTN_YES, "HIDECANCEL\nA prior decompilation is still running, would you like to terminate it to process the new request?") == ASKBTN_YES) {
-			killDecompilation(true);
-		} else bRet = false;
-	}
+#if IDA_SDK_VERSION < 750
+		RdGlobalInfo* decompInfo = pm->decompInfo;
+#endif
 
-
-	if (bRet && decompInfo->configureDecompilation())
-	{
-		bRet = false;
-	}
-
-	if (bRet && !canDecompileInput()) //needs configuration first
-	{
-		bRet = false;
-	}
-
-	// ordinary selective decompilation
-	//
-	if (!bRet) {}
-	else if (arg == 0)
-	{
-		runSelectiveDecompilation();
-	}
-	// ordinary full decompilation
-	//
-	else if (arg == 1)
-	{
-		runAllDecompilation();
-	}
-	// only plugin configuration
-	//
-	else if (arg == 2)
-	{
-		if (!pluginConfigurationMenu(*decompInfo)) {
-			killDecompilation(true); //settings do not take effect without restarting process
-		}
-	}
-	// only run database generation
-	//
-	else if (arg == 3)
-	{
-		generatePluginDatabase();
-	}
-	// selective decompilation used in plugin's regression tests
-	// forced local decompilation + disabled threads
-	// function to decompile is selected by "<ghidradec_select>" string in function's comment
-	//
-	else if (arg == 4)
-	{
-		for (unsigned i = 0; i < get_func_qty(); ++i)
+		bool bRet = true;
+		if (!auto_is_ok())
 		{
-			qstring qCmt;
-			func_t *fnc = getn_func(i);
-			if (get_func_cmt(&qCmt, fnc, false) <= 0)
-			{
-				continue;
+			INFO_MSG("GhidraDec plugin cannot run because the initial autoanalysis has not been finished.\n");
+			bRet = false;
+		}
+		if (decompInfo->decompThread != nullptr) {
+			if (!decompInfo->decompRunning) decompInfo->pm->killDecompilation(false);
+			else if (ask_buttons(nullptr, nullptr, nullptr, ASKBTN_YES, "HIDECANCEL\nA prior decompilation is still running, would you like to terminate it to process the new request?") == ASKBTN_YES) {
+				decompInfo->pm->killDecompilation(true);
 			}
+			else bRet = false;
+		}
 
-			std::string cmt = qCmt.c_str();;
-			if (cmt.find("<ghidradec_select>") != std::string::npos)
-			{
-				decompInfo->outputFile = decompInfo->inputPath + ".c";
-				decompInfo->setIsUseThreads(false);
-				runSelectiveDecompilation(fnc);
-				break;
+
+		if (bRet && decompInfo->configureDecompilation())
+		{
+			bRet = false;
+		}
+
+		if (bRet && !decompInfo->pm->canDecompileInput()) //needs configuration first
+		{
+			bRet = false;
+		}
+
+		// ordinary selective decompilation
+		//
+		if (!bRet) {}
+		else if (arg == 0)
+		{
+			decompInfo->pm->runSelectiveDecompilation();
+		}
+		// ordinary full decompilation
+		//
+		else if (arg == 1)
+		{
+			decompInfo->pm->runAllDecompilation();
+		}
+		// only plugin configuration
+		//
+		else if (arg == 2)
+		{
+			if (!pluginConfigurationMenu(*decompInfo)) {
+				decompInfo->pm->killDecompilation(true); //settings do not take effect without restarting process
 			}
 		}
-	}
-	// full decompilation used in plugin's regression tests
-	// forced local decompilation + disabled threads
-	//
-	else if (arg == 5)
-	{
-		decompInfo->setIsUseThreads(false);
-		runAllDecompilation();
-	}
-	else
-	{
-		WARNING_GUI(decompInfo->pluginName << " version " << decompInfo->pluginVersion
-				<< " cannot handle argument '" << arg << "'.\n");
-		bRet = false;
-	}
-#ifdef __X64__
-	return bRet;
-#endif
-}
+		// only run database generation
+		//
+		else if (arg == 3)
+		{
+			decompInfo->pm->generatePluginDatabase();
+		}
+		// selective decompilation used in plugin's regression tests
+		// forced local decompilation + disabled threads
+		// function to decompile is selected by "<ghidradec_select>" string in function's comment
+		//
+		else if (arg == 4)
+		{
+			for (unsigned i = 0; i < get_func_qty(); ++i)
+			{
+				qstring qCmt;
+				func_t* fnc = getn_func(i);
+				if (get_func_cmt(&qCmt, fnc, false) <= 0)
+				{
+					continue;
+				}
 
-ssize_t idaapi view_callback(void* ud, int notification_code, va_list va)
+				std::string cmt = qCmt.c_str();;
+				if (cmt.find("<ghidradec_select>") != std::string::npos)
+				{
+					decompInfo->outputFile = decompInfo->inputPath + ".c";
+					decompInfo->setIsUseThreads(false);
+					decompInfo->pm->runSelectiveDecompilation(fnc);
+					break;
+				}
+			}
+		}
+		// full decompilation used in plugin's regression tests
+		// forced local decompilation + disabled threads
+		//
+		else if (arg == 5)
+		{
+			decompInfo->setIsUseThreads(false);
+			decompInfo->pm->runAllDecompilation();
+		}
+		else
+		{
+			WARNING_GUI(decompInfo->pluginName << " version " << decompInfo->pluginVersion
+				<< " cannot handle argument '" << arg << "'.\n");
+			bRet = false;
+		}
+#ifdef __X64__
+		return bRet;
+#endif
+	}
+
+#if IDA_SDK_VERSION >= 750
+ssize_t idaapi GhidraDec::on_event(ssize_t notification_code, va_list va)
 {
-	RdGlobalInfo* di = static_cast<RdGlobalInfo*>(ud);
+#else
+ssize_t idaapi GhidraDec::view_callback(void* ud, int notification_code, va_list va)
+{
+	RdGlobalInfo* decompInfo = static_cast<RdGlobalInfo*>(ud);
+#endif
 
 	switch (notification_code) {
 	case view_close:
@@ -760,26 +779,26 @@ ssize_t idaapi view_callback(void* ud, int notification_code, va_list va)
  * Plugin initialization function.
  * IDA is searching for this function.
  */
-int idaapi init()
+int idaapi GhidraDec::init()
 {
 	static bool inited = false;
 	if (inited)
 	{
 		return PLUGIN_KEEP;
 	}
-	decompInfo = new RdGlobalInfo();
+	decompInfo = new RdGlobalInfo(this);
 	decompInfo->pluginRegNumber = register_addon(&decompInfo->pluginInfo);
 	if (decompInfo->pluginRegNumber < 0)
 	{
 		delete decompInfo;
 		WARNING_GUI(decompInfo->pluginName << " version " << decompInfo->pluginVersion
-				<< " failed to register.\n");
+			<< " failed to register.\n");
 		return PLUGIN_SKIP;
 	}
 	else
 	{
 		INFO_MSG(decompInfo->pluginName << " version "
-				<< decompInfo->pluginVersion << " registered OK\n");
+			<< decompInfo->pluginVersion << " registered OK\n");
 	}
 
 	readConfigFile(*decompInfo);
@@ -791,12 +810,14 @@ int idaapi init()
 	}
 
 	INFO_MSG(decompInfo->pluginName << " version " << decompInfo->pluginVersion
-			<< " loaded OK\n");
+		<< " loaded OK\n");
 
 	decompInfo->qm = qmutex_create();
 	decompInfo->termSem = qsem_create(nullptr, 0);
 	hook_to_notification_point(HT_UI, ui_callback, decompInfo);
+#if IDA_SDK_VERSION < 750
 	hook_to_notification_point(HT_VIEW, view_callback, decompInfo);
+#endif
 	registerPermanentActions();
 	inited = true;
 	return PLUGIN_KEEP;
@@ -806,7 +827,7 @@ int idaapi init()
  * Plugin termination function.
  * IDA is searching for this function.
  */
-void idaapi term()
+void idaapi GhidraDec::term()
 {
 	killDecompilation(true);
 	if (decompInfo->idacb != nullptr) {
@@ -841,16 +862,44 @@ void idaapi term()
 	unregister_action("ghidradec:ActionChangeFncComment");
 	unregister_action("ghidradec:ActionMoveForward");
 	unregister_action("ghidradec:ActionMoveBackward");
-	if (is_idaq) {
+	if (is_idaqt) {
 		const char optionsActionName[] = "ghidradec:ShowOptions";
 		unregister_action(optionsActionName);
 	}
+#if IDA_SDK_VERSION < 750
 	unhook_from_notification_point(HT_VIEW, view_callback);
+#endif
 	unhook_from_notification_point(HT_UI, ui_callback);
 	qsem_free(decompInfo->termSem);
 	qmutex_free(decompInfo->qm);
 	delete decompInfo;
 }
+
+} // namespace idaplugin
+
+using namespace idaplugin;
+
+/**
+ * Plugin initialization function.
+ * IDA is searching for this function.
+ */
+#if IDA_SDK_VERSION >= 750
+plugmod_t* idaapi init()
+{
+	GhidraDec* pm = new GhidraDec();
+	return pm->decompInfo->pluginRegNumber < 0 ? nullptr : pm;
+}
+#else
+int idaapi init()
+{
+	pm = new GhidraDec();
+	return pm->init();
+}
+void idaapi term()
+{
+	delete pm;
+}
+#endif
 
 /**
  * Plugin interface definition.
@@ -859,10 +908,15 @@ void idaapi term()
 plugin_t PLUGIN =
 {
 	IDP_INTERFACE_VERSION,             // Constant version.
-	0,                                 // Plugin flags.
+	PLUGIN_MULTI,                                 // Plugin flags.
 	init,                              // Initialize.
+#if IDA_SDK_VERSION >= 750
+	nullptr,
+	nullptr,
+#else
 	term,                              // Terminate. this pointer may be nullptr.
-	run,                               // Invoke plugin.
+	GhidraDec::run,                               // Invoke plugin.
+#endif
 	PLUGIN_COPYRIGHT, // Long comment about the plugin.
 	PLUGIN_URL,       // Multiline help about the plugin.
 	PLUGIN_NAME,      // The preferred short name of the plugin.

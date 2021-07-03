@@ -54,7 +54,7 @@ inf.cc.size_b,          sizeof(float),                      ph.max_ptr_size() - 
 1,                      sizeof(double),                     ph.max_ptr_size() - ph.segreg_size, -1, -1, -1,            -1, -1,
 
 8,  4,  sizeof(__int8), sizeof(__int16), sizeof(__int32), sizeof(__int64), 16, inf.cc.size_i,
-inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),                  -1, -1, inf.cc.size_e, -1, -1,
+inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),                  -1, -1, inf.cc.size_e, -1, -1,
 
 -1, 16, sizeof(char),   -1,              -1,              -1,              -1, ph.segreg_size,
 4,                      ph.use_tbyte() ? ph.tbyte_size : 2, -1,                                 -1, -1, -1,            -1, -1 };*/
@@ -91,7 +91,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	}
 	bool isX86()
 	{
-		std::string procName = inf.procname;
+		std::string procName = inf_procname;
 		return procName == "8086" ||
 			procName == "8086r" ||
 			procName == "8086p" ||
@@ -111,18 +111,18 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	}
 	std::string ccToStr(cm_t c, int callMethod, bool bInit)
 	{
-		//if (!bInit && c == inf.cc.cm) return "default"; //&& ccToStr(inf.cc.cm, is_code_far(inf.cc.cm) ? FTI_FARCALL : FTI_NEARCALL, true) == modelDefault //if this default is not used its meaningless here
-		if (!inf.is_32bit() && !inf.is_64bit() && isX86() && ((c & CM_CC_MASK) == CM_CC_STDCALL || (c & CM_CC_MASK) == CM_CC_PASCAL || (c & CM_CC_MASK) == CM_CC_CDECL)) {//16-bit x86 code needs right model
+		//if (!bInit && c == inf_cc_cm) return "default"; //&& ccToStr(inf_cc_cm, is_code_far(inf_cc_cm) ? FTI_FARCALL : FTI_NEARCALL, true) == modelDefault //if this default is not used its meaningless here
+		if (!inf_is_32bit() && !inf_is_64bit() && isX86() && ((c & CM_CC_MASK) == CM_CC_STDCALL || (c & CM_CC_MASK) == CM_CC_PASCAL || (c & CM_CC_MASK) == CM_CC_CDECL)) {//16-bit x86 code needs right model
 			std::string model;
 			if ((c & CM_CC_MASK) == CM_CC_STDCALL || (c & CM_CC_MASK) == CM_CC_PASCAL) model = "__stdcall";
 			else model = "__cdecl";
-			model += "16"; // && is_code_far(inf.cc.cm)
+			model += "16"; // && is_code_far(inf_cc_cm)
 			model += (callMethod == FTI_FARCALL || callMethod == FTI_DEFCALL && is_code_far(c)) ? "far" : "near"; //|| (c & (CM_MASK | CM_M_MASK)) == (CM_UNKNOWN | CM_M_NN)
 			return model;
 		}
-		//if (!bInit && (c & CM_CC_MASK) == (inf.cc.cm & CM_CC_MASK)) return "default";
+		//if (!bInit && (c & CM_CC_MASK) == (inf_cc_cm & CM_CC_MASK)) return "default";
 		switch (c & CM_CC_MASK) {
-		case CM_CC_FASTCALL: return !inf.is_32bit() && !inf.is_64bit() ? "__regcall" : "__fastcall"; //return "__vectorcall"; - extension to fastcall
+		case CM_CC_FASTCALL: return !inf_is_32bit() && !inf_is_64bit() ? "__regcall" : "__fastcall"; //return "__vectorcall"; - extension to fastcall
 		case CM_CC_STDCALL: return "__stdcall";
 		case CM_CC_VOIDARG: return "__cdecl";
 		case CM_CC_CDECL: return "__cdecl";
@@ -262,7 +262,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	}
 	void IdaCallback::getInits(std::vector<InitStateItem>& inits)
 	{
-		//inf.start_ea == ea; inf.start_ss; inf.start_sp;
+		//inf_start_ea == ea; inf.start_ss; inf.start_sp;
 		if (ph.has_segregs()) { //initialize segment registers for tracking - vital for x86-16
 			//code segment register although a pointless mapping helps track things for Ghidra
 			unsigned long long regtrans = (unsigned long long)regNameToIndexIda(ph.reg_names[ph.reg_code_sreg]);
@@ -359,7 +359,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		std::string str = get_name((ea_t)offset).c_str();
 		if (str.size() == 0) {
 			str = to_string(offset, std::hex);
-			str = ("ram0x" + std::string((inf.is_64bit() ? 16 : 8) - str.size(), '0') + str);
+			str = ("ram0x" + std::string((inf_is_64bit() ? 16 : 8) - str.size(), '0') + str);
 		}
 		return str;
 	}
@@ -406,7 +406,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			if (func.extraPop == -1 && (f->flags & FUNC_PURGED_OK) != 0) func.extraPop = (unsigned long long)f->argsize; //type unknown but have frame so now can calculate
 			if (f->regargs == nullptr) read_regargs(f); //populates regargs, similar to how get_spd or the like with f specified populate stkpts
 			//callregs_t cr;
-			//cr.init_regs(inf.cc.cm);
+			//cr.init_regs(inf_cc_cm);
 			for (int i = 0; i < f->regargqty; i++) { //name can be a nullptr!
 				std::string nm = f->regargs[i].name == nullptr ? "" : f->regargs[i].name;
 				unsigned long long offset;
@@ -536,14 +536,14 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				func_type_data_t ftd;
 				getFuncByGuess((ea_t)addr.offset, ti);
 				ti.get_func_details(&ftd);
-				if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm)) retSize += ph.segreg_size;
+				if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf_cc_cm)) retSize += ph.segreg_size;
 			}
 			//bitrange_t bits;
 			//const char* regnm = get_reg_info(ash.a_curip, &bits); //use default processor name
 			//reg_info_t ri;
 			//parse_reg_name(&ri, regnm == nullptr ? ash.a_curip : regnm);
 			//retSize += ri.size;
-			retSize += f == nullptr ? inf.is_64bit() ? 8 : (inf.is_32bit() ? 4 : 2) : get_func_bytes(f); //per documentation of get_func_bitness
+			retSize += f == nullptr ? inf_is_64bit() ? 8 : (inf_is_32bit() ? 4 : 2) : get_func_bytes(f); //per documentation of get_func_bitness
 			//type arguments need stack adjustment but there is no frame?
 			for (size_t i = 0; i < func.syminfo.size(); i++) {
 				if (func.syminfo[i].addr.addr.space == "stack") {
@@ -593,17 +593,17 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			//}
 			//return address size based on model
 			//x86-64 bit far/interupt calling aligns everything like flags, error codes, stack pointer and stack register to 64 bits each
-			//if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm)) {
+			//if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf_cc_cm)) {
 			//if (f->is_far() || (f->flags & FUNC_USERFAR) != 0 || imports.find(offset) != imports.end()) {
 				//ph.max_ptr_size(); - for some reason is 48 bits on 64-bit systems?
 				//ph.get_stkarg_offset();
 				//ph.segreg_size
-				//syminfo[i].offset += ph.segreg_size + (inf.is_64bit() ? 8 : inf.is_32bit() == 1 ? 4 : 2);
-				//} else if (ftd.get_call_method() == FTI_NEARCALL || ftd.get_call_method() == FTI_DEFCALL && !is_code_far(inf.cc.cm)) {
+				//syminfo[i].offset += ph.segreg_size + (inf_is_64bit() ? 8 : inf_is_32bit() == 1 ? 4 : 2);
+				//} else if (ftd.get_call_method() == FTI_NEARCALL || ftd.get_call_method() == FTI_DEFCALL && !is_code_far(inf_cc_cm)) {
 			//} else {
-				//syminfo[i].offset += (inf.is_64bit() ? 8 : inf.is_32bit() == 1 ? 4 : 2);
+				//syminfo[i].offset += (inf_is_64bit() ? 8 : inf_is_32bit() == 1 ? 4 : 2);
 				//} else if (ftd.get_call_method() == FTI_INTCALL) {
-				//syminfo[i].offset += ph.segreg_size + (inf.is_64bit() ? 8 : inf.is_32bit() == 1 ? 4 : 2); //far pointer to old stack, e/rflags, error code
+				//syminfo[i].offset += ph.segreg_size + (inf_is_64bit() ? 8 : inf_is_32bit() == 1 ? 4 : 2); //far pointer to old stack, e/rflags, error code
 			//}
 		}
 		if (f != nullptr) {
@@ -654,7 +654,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					usedImports[(ea_t)addr.offset] = true;
 					//Ghidra currently has 2 bugs one with restoring CS register if not simulating same segment fixups and the other calling back for external ref function info
 						//16-bit apps have functions defined for imports also...
-					if (isX86() && !inf.is_32bit() && !inf.is_64bit() && get_func((ea_t)addr.offset) != nullptr) msi.kind = KIND_FUNCTION;
+					if (isX86() && !inf_is_32bit() && !inf_is_64bit() && get_func((ea_t)addr.offset) != nullptr) msi.kind = KIND_FUNCTION;
 					else
 						msi.kind = KIND_EXTERNALREFERENCE;
 				} else {
@@ -678,8 +678,8 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				//volatile for stack and registers should be based on the life of a function
 				//const and unique would not be volatile ever, though a join space could be comprised of members who are volatile
 				if (addr.space == "ram") {
-					//prev_addr(offset); prev_head(offset, inf.min_ea); prev_that(offset, inf.max_ea, [](flags_t f, void* ud) { return true; });
-					//next_addr(offset); next_head(offset, inf.max_ea); next_that(offset, inf.max_ea, [](flags_t f, void* ud) { return true; });
+					//prev_addr(offset); prev_head(offset, inf_min_ea); prev_that(offset, inf_max_ea, [](flags_t f, void* ud) { return true; });
+					//next_addr(offset); next_head(offset, inf_max_ea); next_that(offset, inf_max_ea, [](flags_t f, void* ud) { return true; });
 					getMemoryInfo(addr.offset, &msi.readonly, &msi.volatil);
 				} else {//if (base == "register" || base == "stack") {
 					msi.readonly = false;
@@ -764,7 +764,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			func.hasThis = (ftd.get_cc() & CM_CC_MASK) == CM_CC_THISCALL;
 			func.isNoReturn = (ftd.flags & FTI_NORET) != 0;
 			func.customStorage = is_user_cc(ftd.get_cc());
-			//switch (get_cc(inf.cc.cm)) {
+			//switch (get_cc(inf_cc_cm)) {
 			//switch (get_cc(guess_func_cc(fd, ti.calc_purged_bytes(), CC_CDECL_OK | CC_ALLOW_ARGPERM | CC_ALLOW_REGHOLES | CC_HAS_ELLIPSIS))) {
 			func.model = ccToStr(ftd.cc, ftd.get_call_method());
 			for (size_t i = 0; i < ftd.size(); i++) {
@@ -796,11 +796,11 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		} else {
 			func.extraPop = -1; //need size of return address which is also popped
 			argloc_t al;
-			const tinfo_t t(inf.is_64bit() ? BT_INT64 : (inf.is_32bit() ? BT_INT32 : BT_INT16)); //or use BT_INT8 - 1 byte like Ghidra?
+			const tinfo_t t(inf_is_64bit() ? BT_INT64 : (inf_is_32bit() ? BT_INT32 : BT_INT16)); //or use BT_INT8 - 1 byte like Ghidra?
 #ifdef __X64__
-			if (ph.calc_retloc(&al, t, inf.cc.cm) == 1)
+			if (ph.calc_retloc(&al, t, inf_cc_cm) == 1)
 #else
-			if (ph.notify(ph.calc_retloc3, &t, inf.cc.cm, &al) == 2)
+			if (ph.notify(ph.calc_retloc3, &t, inf_cc_cm, &al) == 2)
 #endif
 				func.retType.addr.addr.space = arglocToAddr(al, &func.retType.addr.addr.offset, func.retType.addr.addr.joins, false);
 			else {
@@ -873,7 +873,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			unsigned long long size = get_item_size((ea_t)offset);
 			//if (is_unknown(offset)) size = next_head(offset, BADADDR) - offset;
 			bool foundPtr = false;
-			if ((inf.cc.cm & CM_MASK) == CM_N32_F48 && size == 4) {
+			if ((inf_cc_cm & CM_MASK) == CM_N32_F48 && size == 4) {
 				uval_t u;
 				if (!get_data_value(&u, (ea_t)offset, (asize_t)size)) return false;
 				if (is_mapped(u) && has_any_name(get_flags(u))) deps.push_back(u);
@@ -1107,8 +1107,8 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				ti.get_ptr_details(&pt);
 				pt.obj_type.get_func_details(&ftd);
 			} else ti.get_func_details(&ftd);
-			typeinf.size = (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm)) ? ph.segreg_size : 0;
-			typeinf.size += inf.is_64bit() ? 8 : (inf.is_32bit() ? 4 : 2);
+			typeinf.size = (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf_cc_cm)) ? ph.segreg_size : 0;
+			typeinf.size += inf_is_64bit() ? 8 : (inf_is_32bit() ? 4 : 2);
 			getFuncTypeInfo(ti.is_funcptr() ? pt.obj_type : ti, true, typeinf.funcInfo);
 			typeChain.push_back(typeinf);
 		} else { //size greater than 16 needs to be converted to array, really should be 8 as no core types exist
@@ -1601,17 +1601,17 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	std::string IdaCallback::dumpIdaInfo()
 	{
 		std::string str = "IDA SDK selected decompilation useful reported information dump follows:\n\n";
-		str = "Processor: " + std::string(inf.procname) +
-			" Is 32-bit: " + std::string(inf.is_32bit() ? "yes" : "no") +
-			" Is 64-bit: " + std::string(inf.is_64bit() ? "yes" : "no") +
-			" Is big-endian: " + std::string(inf.is_be() ? "yes" : "no") +
+		str = "Processor: " + inf_procname +
+			" Is 32-bit: " + std::string(inf_is_32bit() ? "yes" : "no") +
+			" Is 64-bit: " + std::string(inf_is_64bit() ? "yes" : "no") +
+			" Is big-endian: " + std::string(inf_is_be() ? "yes" : "no") +
 			" MaxPtrSize: " + std::to_string(ph.max_ptr_size()) +
 			" SegRegSize: " + std::to_string(ph.segreg_size) +
 			" SegmBitness: " + std::to_string(ph.get_segm_bitness()) +
 			" StkArgOffs: " + std::to_string(ph.get_stkarg_offset()) +
 			" Use64: " + std::to_string(ph.use64()) +
 			" Use32: " + std::to_string(ph.use32()) +
-			" DefCCModl: 0x" + to_string((uint)inf.cc.cm, std::hex) +
+			" DefCCModl: 0x" + to_string((uint)inf_cc_cm, std::hex) +
 			"\n\n";
 		const til_t* idati = get_idati();
 		str += "Number of registers: " + std::to_string(ph.regs_num) + "\n";
@@ -2304,7 +2304,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				dfsVisitData(it->first, dependentData, usedData, sortedData, visited);
 		}
 
-		std::string str = "//Default calling convention set to: " + (di->customCallStyle.empty() ? ccToStr(inf.cc.cm, is_code_far(inf.cc.cm) ? FTI_FARCALL : FTI_NEARCALL, true) : di->customCallStyle) + "\n\n";
+		std::string str = "//Default calling convention set to: " + (di->customCallStyle.empty() ? ccToStr(inf_cc_cm, is_code_far(inf_cc_cm) ? FTI_FARCALL : FTI_NEARCALL, true) : di->customCallStyle) + "\n\n";
 		definitions += str; //should really use callback interface to get cspec variant
 		forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + str + std::string({ COLOR_OFF, COLOR_AUTOCMT });
 		for (int i = 0; i < numDefCoreTypes; i++) {
@@ -2722,9 +2722,9 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			ti.print(&qs);
 			//replace_ordinal_typerefs(nullptr, &ti);
 		}*/
-		ea_t ea = inf.min_ea;
+		ea_t ea = inf_min_ea;
 		do {
-			ea = next_head(ea, inf.max_ea);
+			ea = next_head(ea, inf_max_ea);
 			if (ea == BADADDR) break;
 			tinfo_t ti;
 			if (get_tinfo(&ti, ea) && ti.get_type_name(&qs)) {
@@ -2920,7 +2920,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		for (size_t i = 0; i < ftd.size(); i++) {
 			getPtrSizes(ftd[i].type, ptrSizes, funcPtrSizes);
 		}
-		unsigned long long nearsize = inf.is_64bit() ? 8 : (inf.is_32bit() ? 4 : 2),
+		unsigned long long nearsize = inf_is_64bit() ? 8 : (inf_is_32bit() ? 4 : 2),
 			farsize = nearsize + ph.segreg_size;
 		bool isNear = false, isFar = false, isCodeNear = false, isCodeFar = false;
 		for (size_t i = 0; i < ptrSizes.size(); i++) {
@@ -3023,19 +3023,19 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			ftd.cc |= CM_CC_UNKNOWN;
 		} else if (paramInfo.model == "__stdcall16far") {
 			ftd.cc |= (paramInfo.customStorage ? CM_CC_SPECIALP : CM_CC_STDCALL) | CM_N16_F32;
-			if (!is_code_far(inf.cc.cm)) ftd.flags |= FTI_FARCALL;
+			if (!is_code_far(inf_cc_cm)) ftd.flags |= FTI_FARCALL;
 		} else if (paramInfo.model == "__stdcall16near") {
 			ftd.cc |= (paramInfo.customStorage ? CM_CC_SPECIALP : CM_CC_STDCALL) | CM_N16_F32;
-			if (is_code_far(inf.cc.cm)) ftd.flags |= FTI_NEARCALL;
+			if (is_code_far(inf_cc_cm)) ftd.flags |= FTI_NEARCALL;
 		} else if (paramInfo.model == "__cdecl16far") {
 			ftd.cc |= (paramInfo.dotdotdot ? (paramInfo.customStorage ? CM_CC_SPECIALE : CM_CC_ELLIPSIS) : (paramInfo.customStorage ? CM_CC_SPECIAL : CM_CC_CDECL)) | CM_N16_F32;
-			if (!is_code_far(inf.cc.cm)) ftd.flags |= FTI_FARCALL;
+			if (!is_code_far(inf_cc_cm)) ftd.flags |= FTI_FARCALL;
 		} else if (paramInfo.model == "__cdecl16near") {
 			ftd.cc |= (paramInfo.dotdotdot ? (paramInfo.customStorage ? CM_CC_SPECIALE : CM_CC_ELLIPSIS) : (paramInfo.customStorage ? CM_CC_SPECIAL : CM_CC_CDECL)) | CM_N16_F32;
-			if (is_code_far(inf.cc.cm)) ftd.flags |= FTI_NEARCALL;
+			if (is_code_far(inf_cc_cm)) ftd.flags |= FTI_NEARCALL;
 		}
-		ftd.cc |= (inf.cc.cm & CM_M_MASK);
-		ftd.cc |= (inf.cc.cm & CM_MASK);
+		ftd.cc |= (inf_cc_cm & CM_M_MASK);
+		ftd.cc |= (inf_cc_cm & CM_MASK);
 		/*if (paramInfo.customStorage && ((ftd.cc & CM_CC_MASK) == CM_CC_STDCALL ||
 			(ftd.cc & CM_CC_MASK) == CM_CC_PASCAL || (ftd.cc & CM_CC_MASK) == CM_CC_FASTCALL
 			|| (ftd.cc & CM_CC_MASK) == CM_CC_THISCALL)) ftd.cc = (ftd.cc & CM_CC_MASK) | CM_CC_SPECIALP;
@@ -3083,10 +3083,10 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				//t = BTMT_CLOSURE; //this pointer of capture object constructed
 			//} else {
 				ptd.based_ptr_size = (uchar)type[idx].size;
-				unsigned long long nearsize = inf.is_64bit() ? 8 : (inf.is_32bit() ? 4 : 2),
+				unsigned long long nearsize = inf_is_64bit() ? 8 : (inf_is_32bit() ? 4 : 2),
 					farsize = nearsize + ph.segreg_size;
-				if (type[idx].size == nearsize && is_data_far(inf.cc.cm)) t = BTMT_NEAR;
-				else if (type[idx].size == farsize && !is_data_far(inf.cc.cm)) t = BTMT_FAR;				
+				if (type[idx].size == nearsize && is_data_far(inf_cc_cm)) t = BTMT_NEAR;
+				else if (type[idx].size == farsize && !is_data_far(inf_cc_cm)) t = BTMT_FAR;				
 			//}
 			ti.create_ptr(ptd, BT_PTR | t);
 		} else if (type[idx].metaType == "struct") {
@@ -3134,7 +3134,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 #ifndef __X64__
 				} else if (type[idx].metaType == "bool" && (type[idx].size == 1 || type[idx].size == 4 || type[idx].size == 2)) {
 #else
-				} else if (type[idx].metaType == "bool" && (type[idx].size == 1 || type[idx].size == 4 || type[idx].size == (inf.is_64bit() ? 8 : 2))) {
+				} else if (type[idx].metaType == "bool" && (type[idx].size == 1 || type[idx].size == 4 || type[idx].size == (inf_is_64bit() ? 8 : 2))) {
 #endif
 					ti.create_simple_type(BT_BOOL | (type[idx].size == 1 ? BTMT_BOOL1 : (type[idx].size == 4 ? BTMT_BOOL4 : BTMT_BOOL2 | BTMT_BOOL8)));
 				} else {
@@ -3149,7 +3149,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	Options IdaCallback::getOpts()
 	{
 		Options opt = defaultOptions;
-		opt.protoEval = di->customCallStyle.empty() ? ccToStr(inf.cc.cm, is_code_far(inf.cc.cm) ? FTI_FARCALL : FTI_NEARCALL, true) : di->customCallStyle; //default calling convention can be very important such as on x86-16
+		opt.protoEval = di->customCallStyle.empty() ? ccToStr(inf_cc_cm, is_code_far(inf_cc_cm) ? FTI_FARCALL : FTI_NEARCALL, true) : di->customCallStyle; //default calling convention can be very important such as on x86-16
 		opt.decompileUnreachable = (di->alysChecks & 1) != 0;
 		opt.ignoreUnimplemented = (di->alysChecks & 2) != 0;
 		opt.inferConstPtr = (di->alysChecks & 4) != 0;
@@ -3183,8 +3183,8 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			func_type_data_t ftd;
 			bool bChanged = false, bFrameChange = false;
 			if (ti.get_func_details(&ftd)) {
-				if (f->is_far() && (ftd.get_call_method() == FTI_NEARCALL || ftd.get_call_method() == FTI_DEFCALL && !is_code_far(inf.cc.cm)) ||
-					!f->is_far() && (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm))) {
+				if (f->is_far() && (ftd.get_call_method() == FTI_NEARCALL || ftd.get_call_method() == FTI_DEFCALL && !is_code_far(inf_cc_cm)) ||
+					!f->is_far() && (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf_cc_cm))) {
 					ftd.flags &= ~FTI_CALLTYPE;
 					ftd.flags |= (f->is_far() ? FTI_FARCALL : FTI_NEARCALL);
 					bChanged = true;
@@ -3196,10 +3196,10 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				//get_frame_part(&range, f, FPC_ARGS);
 				//int argSize = range.end_ea - range.start_ea;
 				//argloc_t al;
-				//const tinfo_t t(inf.is_64bit() ? BT_INT64 : (inf.is_32bit() ? BT_INT32 : BT_INT16)); //or use BT_INT8 - 1 byte like Ghidra?
-				//ph.calc_retloc(&al, t, inf.cc.cm) == 1;
+				//const tinfo_t t(inf_is_64bit() ? BT_INT64 : (inf_is_32bit() ? BT_INT32 : BT_INT16)); //or use BT_INT8 - 1 byte like Ghidra?
+				//ph.calc_retloc(&al, t, inf_cc_cm) == 1;
 				ea_t argSize = s->memqty == 0 ? 0 : s->members[s->memqty - 1].eoff - frame_off_args(f);
-				//unsigned long long nearsize = inf.is_64bit() ? 8 : (inf.is_32bit() ? 4 : 2),
+				//unsigned long long nearsize = inf_is_64bit() ? 8 : (inf_is_32bit() ? 4 : 2),
 					//farsize = nearsize + ph.segreg_size;
 				//if (ftd.stkargs != argSize) {
 					//ftd.cc = (ftd.cc & ~CM_M_MASK) | (is_code_far(ftd.cc) ? CM_M_FN : CM_M_NN);
@@ -3342,6 +3342,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		if (paramInfo.model.size() == 0) return; //error occurred such as most likely overlapping input varnodes
 		funcProtoInfos[ea] = FuncInfo{ funcProtoInfos[ea].name, true, paramInfo, funcProtoInfos[ea].fpi };
 	}
+#ifdef __X64__
 	class FuncChooser : public chooser_multi_t
 	{
 	public:
@@ -3406,6 +3407,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	};
 	const int FuncChooser::widths[] = { 40, 40 };
 	const char* FuncChooser::strs[] = { "Old", "New" };
+#endif
 
 	void IdaCallback::updateDatabaseFromParams(std::vector<ea_t> eas)
 	{
@@ -3413,6 +3415,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		for (size_t i = 0; i < eas.size(); ) {
 			if (!funcProtoInfos[eas[i]].bFromParamId) eas.erase(eas.begin() + i); else i++;
 		}
+#ifdef __X64__
 		executeOnMainThread([this, eas]() {
 			//std::vector<ushort> checks;
 			//checks.resize(eas.size());
@@ -3479,7 +3482,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				func_t* f = get_func(ea);
 				if (f != nullptr) {
 					bool bChanged = false;
-					if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf.cc.cm) && !f->is_far() && (f->flags & FUNC_USERFAR) == 0) {
+					if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf_cc_cm) && !f->is_far() && (f->flags & FUNC_USERFAR) == 0) {
 						f->flags |= FUNC_FAR; //FUNC_USERFAR
 						bChanged = true;
 					}
@@ -3550,6 +3553,7 @@ inf.is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				}
 			}
 			});
+#endif
 	}
 	std::string IdaCallback::tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err,
 		std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph, bool paramOnly)
@@ -3620,10 +3624,10 @@ std::string tryDecomp(RdGlobalInfo* di, DecMode dec, ea_t ea, std::string & disp
 
 bool detectProcCompiler(RdGlobalInfo* di, std::string& pspec, std::string & cspec, std::string& sleighfilename)
 {
-	std::vector<int>::iterator it = di->toolMap[inf.procname].begin();
-	for (; it != di->toolMap[inf.procname].end(); it++) {
-		if ((di->li[*it].size == 32 && inf.is_32bit() && !inf.is_64bit() || di->li[*it].size == 64 && inf.is_64bit() || di->li[*it].size != 32 && di->li[*it].size != 64 && !inf.is_32bit() && !inf.is_64bit()) &&
-			di->li[*it].bigEndian == inf.is_be() || di->toolMap[inf.procname].size() == 1) { //should only be one match though, and parameters should always match
+	std::vector<int>::iterator it = di->toolMap[inf_procname].begin();
+	for (; it != di->toolMap[inf_procname].end(); it++) {
+		if ((di->li[*it].size == 32 && inf_is_32bit() && !inf_is_64bit() || di->li[*it].size == 64 && inf_is_64bit() || di->li[*it].size != 32 && di->li[*it].size != 64 && !inf_is_32bit() && !inf_is_64bit()) &&
+			di->li[*it].bigEndian == inf_is_be() || di->toolMap[inf_procname].size() == 1) { //should only be one match though, and parameters should always match
 			sleighfilename = di->li[*it].basePath + di->li[*it].slafile;
 			pspec = di->li[*it].basePath + di->li[*it].processorspec;
 			if (di->li[*it].compilers.size() == 1) {
@@ -3640,7 +3644,7 @@ bool detectProcCompiler(RdGlobalInfo* di, std::string& pspec, std::string & cspe
 			break;
 		}
 	}
-	if (it == di->toolMap[inf.procname].end()) {
+	if (it == di->toolMap[inf_procname].end()) {
 		return false;
 	}
 	return true;
@@ -3861,7 +3865,7 @@ void displayBlockGraph(RdGlobalInfo* di, ea_t ea)
 		di->graphViewer = create_graph_viewer((di->viewerName + "_Graph").c_str(),
 			nn, GraphCallback, di, 12, di->graphWidget);
 		display_widget(di->graphWidget,
-			WOPN_TAB
+			WOPN_DP_TAB
 #if !defined(IDA_SDK_VERSION) || IDA_SDK_VERSION < 720
 			| WOPN_MENU
 #endif

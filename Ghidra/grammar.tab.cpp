@@ -2458,7 +2458,7 @@ uint4 GrammarLexer::moveState(char lookahead)
     }
     else if ((lookahead>='a')&&(lookahead<='z')) {
     }
-    else if (lookahead == '_') {
+    else if (lookahead == '_' || lookahead == ':') {
     }
     else {
       state = start;
@@ -2586,9 +2586,9 @@ void GrammarLexer::getNextToken(GrammarToken &token)
 Datatype *PointerModifier::modType(Datatype *base,const TypeDeclarator *decl,Architecture *glb) const
 
 {
-  int4 addrsize = glb->getDefaultSize();
+  int4 addrsize = glb->getDefaultDataSpace()->getAddrSize();
   Datatype *restype;
-  restype = glb->types->getTypePointerAbsolute(addrsize,base,glb->getDefaultSpace()->getWordSize());
+  restype = glb->types->getTypePointer(addrsize,base,glb->getDefaultDataSpace()->getWordSize());
   return restype;
 }
 
@@ -2971,7 +2971,7 @@ Datatype *CParse::newStruct(const string &ident,vector<TypeDeclarator *> *declis
     sublist.back().offset = -1;	// Let typegrp figure out offset
   }
 
-  if (!glb->types->setFields(sublist,res,-1)) {
+  if (!glb->types->setFields(sublist,res,-1,0)) {
     setError("Bad structure definition");
     glb->types->destroyType(res);
     return (Datatype *)0;
@@ -3429,7 +3429,7 @@ Address parse_machaddr(istream &s,int4 &defaultsize,const TypeFactory &typegrp,b
   }
   else {
     if (tok == '0') {
-      b = manage->getDefaultSpace();
+      b = manage->getDefaultCodeSpace();
     }
     else {
       b = manage->getSpaceByShortcut(tok);

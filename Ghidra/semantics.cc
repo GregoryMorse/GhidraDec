@@ -37,6 +37,7 @@ ConstTpl::ConstTpl(const_type tp,int4 ht,v_field vf)
   type = handle;
   value.handle_index = ht;
   select = vf;
+  value_real = 0;
 }
 
 ConstTpl::ConstTpl(const_type tp,int4 ht,v_field vf,uintb plus)
@@ -795,6 +796,19 @@ int4 ConstructTpl::fillinBuild(vector<int4> &check,AddrSpace *const_space)
     }
   }
   return 0;
+}
+
+bool ConstructTpl::buildOnly(void) const
+
+{
+  vector<OpTpl *>::const_iterator iter;
+  OpTpl *op;
+  for(iter=vec.begin();iter!=vec.end();++iter) {
+    op = *iter;
+    if (op->getOpcode() != BUILD)
+      return false;
+  }
+  return true;
 }
 
 void ConstructTpl::changeHandleIndex(const vector<int4> &handmap)

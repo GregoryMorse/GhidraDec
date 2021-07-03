@@ -62,7 +62,7 @@ class PcodeOp {
   friend class VarnodeBank;    // Only uses setInput
 public:
   /// Boolean attributes (flags) that can be placed on a PcodeOp. Even though this enum is public, these are
-  /// all set and read internally, although many are read publically via \e get or \e is methods.
+  /// all set and read internally, although many are read publicly via \e get or \e is methods.
   enum {
     startbasic = 1,	    ///< This instruction starts a basic block
     branch = 2,		    ///< This instruction is a branch
@@ -73,38 +73,39 @@ public:
     marker = 0x40,          ///< special placeholder op (multiequal or indirect)
 			    ///< or CPUI_COPY between different copies
 			    ///< of same variable
-    booloutput = 0x80,	    ///< Boolean operation
-    boolean_flip = 0x100,   ///< Set if condition must be false to take branch
-    fallthru_true = 0x200,  ///< Set if fallthru happens on true condition
-    indirect_source = 0x400, ///< Op is source of (one or more) CPUI_INDIRECTs
-    coderef = 0x800,        ///< The first parameter to this op is a coderef
-    startmark = 0x1000,	    ///< This op is the first in its instruction
-    mark = 0x2000,	    ///< Used by many algorithms that need to detect loops or avoid repeats
-    commutative = 0x4000,   ///< Order of input parameters does not matter
-    unary = 0x8000,	    ///< Evaluate as unary expression
-    binary = 0x10000,	    ///< Evaluate as binary expression
-    special = 0x20000,      ///< Cannot be evaluated (without special processing)
-    floatingpoint = 0x40000, ///< A floating point operation
-    splittingbranch = 0x80000, ///< Dead edge cannot be removed as it splits
-    nonprinting = 0x100000,    ///< Op should not be directly printed as source
-    halt = 0x200000,           ///< instruction causes processor or process to halt
-    badinstruction = 0x400000, ///< placeholder for bad instruction data
-    unimplemented = 0x800000,  ///< placeholder for unimplemented instruction
-    noreturn = 0x1000000,      ///< placeholder for previous call that doesn't exit
-    missing = 0x2000000,       ///< ops at this address were not generated
-    warning = 0x4000000,       ///< Warning has been generated for this op
+    booloutput = 0x80,		///< Boolean operation
+    boolean_flip = 0x100,	///< Set if condition must be false to take branch
+    fallthru_true = 0x200,	///< Set if fallthru happens on true condition
+    indirect_source = 0x400,	///< Op is source of (one or more) CPUI_INDIRECTs
+    coderef = 0x800,		///< The first parameter to this op is a coderef
+    startmark = 0x1000,		///< This op is the first in its instruction
+    mark = 0x2000,		///< Used by many algorithms that need to detect loops or avoid repeats
+    commutative = 0x4000,	///< Order of input parameters does not matter
+    unary = 0x8000,		///< Evaluate as unary expression
+    binary = 0x10000,		///< Evaluate as binary expression
+    special = 0x20000,		///< Cannot be evaluated (without special processing)
+    ternary = 0x40000,		///< Evaluate as ternary operator (or higher)
+    splittingbranch = 0x80000,	///< Dead edge cannot be removed as it splits
+    nonprinting = 0x100000,	///< Op should not be directly printed as source
+    halt = 0x200000,		///< instruction causes processor or process to halt
+    badinstruction = 0x400000,	///< placeholder for bad instruction data
+    unimplemented = 0x800000,	///< placeholder for unimplemented instruction
+    noreturn = 0x1000000,	///< placeholder for previous call that doesn't exit
+    missing = 0x2000000,	///< ops at this address were not generated
+    spacebase_ptr = 0x4000000,	///< Loads or stores from a dynamic pointer into a spacebase
     indirect_creation = 0x8000000,  ///< Output varnode is created by indirect effect
     calculated_bool = 0x10000000, ///< Output has been determined to be a 1-bit boolean value
-    is_cpool_transformed = 0x20000000, ///< Have we checked for cpool transforms
+    has_callspec = 0x20000000,	///< Op has a call specification associated with it
     ptrflow = 0x40000000,	///< Op consumes or produces a ptr
-    special_print = 0x80000000	///< Op is marked for special printing
+    indirect_store = 0x80000000	///< CPUI_INDIRECT is caused by CPUI_STORE
   };
   enum {
-    has_thisptr = 0x1,		///< First parameter ( getIn(1) ) is a this pointer
-    is_constructor = 0x2,	///< Op is call to a constructor
-    is_destructor = 0x4,	///< Op is call to a destructor
-    special_prop = 0x8,		///< Does some special form of datatype propagation
-    modified = 0x10		///< This op has been modified by the current action
+    special_prop = 1,		///< Does some special form of datatype propagation
+    special_print = 2,		///< Op is marked for special printing
+    modified = 4,		///< This op has been modified by the current action
+    warning = 8,		///< Warning has been generated for this op
+    incidental_copy = 0x10,	///< Treat this as \e incidental for parameter recovery algorithms
+    is_cpool_transformed = 0x20 ///< Have we checked for cpool transforms
   };
 private:
   TypeOp *opcode;		///< Pointer to class providing behavioral details of the operation
@@ -119,6 +120,7 @@ private:
   vector<Varnode *> inrefs;	///< The ordered list of input Varnodes for this op
 
   // Only used by Funcdata
+  void setOpcode(TypeOp *t_op);	///< Set the opcode for this PcodeOp
   void setOutput(Varnode *vn) { output = vn; } ///< Set the output Varnode of this op
   void clearInput(int4 slot) { inrefs[slot] = (Varnode *)0; } ///< Clear a specific input Varnode to \e null
   void setInput(Varnode *vn,int4 slot) { inrefs[slot] = vn; } ///< Set a specific input Varnode
@@ -151,16 +153,20 @@ public:
   list<PcodeOp *>::iterator getBasicIter(void) const { return basiciter; } ///< Get position within basic block
   /// \brief Get the slot number of the indicated input varnode
   int4 getSlot(const Varnode *vn) const { int4 i,n; n=inrefs.size(); for(i=0;i<n;++i) if (inrefs[i]==vn) break; return i; }
+  int4 getRepeatSlot(const Varnode *vn,int4 firstSlot,list<PcodeOp *>::const_iterator iter) const;
   /// \brief Get the evaluation type of this op
-  uint4 getEvalType(void) const { return (flags&(PcodeOp::unary|PcodeOp::binary|PcodeOp::special)); }
+  uint4 getEvalType(void) const { return (flags&(PcodeOp::unary|PcodeOp::binary|PcodeOp::special|PcodeOp::ternary)); }
   /// \brief Get type which indicates unusual halt in control-flow
   uint4 getHaltType(void) const { return (flags&(PcodeOp::halt|PcodeOp::badinstruction|PcodeOp::unimplemented|
 					      PcodeOp::noreturn|PcodeOp::missing)); }
   bool isDead(void) const { return ((flags&PcodeOp::dead)!=0); } ///< Return \b true if this op is dead
   bool isAssignment(void) const { return (output!=(Varnode *)0); } ///< Return \b true is this op has an output
   bool isCall(void) const { return ((flags&PcodeOp::call)!=0); } ///< Return \b true if this op indicates call semantics
+  /// \brief Return \b true if this op acts as call but does not have a full specification
+  bool isCallWithoutSpec(void) const { return ((flags&(PcodeOp::call|PcodeOp::has_callspec))==PcodeOp::call); }
   bool isMarker(void) const { return ((flags&PcodeOp::marker)!=0); } ///< Return \b true is a special SSA form op
   bool isIndirectCreation(void) const { return ((flags&PcodeOp::indirect_creation)!=0); } ///< Return \b true if op creates a varnode indirectly
+  bool isIndirectStore(void) const { return ((flags&PcodeOp::indirect_store)!=0); }	///< Return \b true if \b this INDIRECT is caused by STORE
   /// \brief Return \b true if this op is not directly represented in C output
   bool notPrinted(void) const { return ((flags&(PcodeOp::marker|PcodeOp::nonprinting|PcodeOp::noreturn))!=0); }
   /// \brief Return \b true if this op produces a boolean output
@@ -180,7 +186,7 @@ public:
   bool isModified(void) const { return ((addlflags&PcodeOp::modified)!=0); } ///< Return \b true if this is modified by the current action
   bool isMark(void) const { return ((flags&PcodeOp::mark)!=0); } ///< Return \b true if this op has been marked
   void setMark(void) const { flags |= PcodeOp::mark; } ///< Set the mark on this op
-  bool isWarning(void) const { return ((flags&PcodeOp::warning)!=0); } ///< Return \b true if a warning has been generated for this op
+  bool isWarning(void) const { return ((addlflags&PcodeOp::warning)!=0); } ///< Return \b true if a warning has been generated for this op
   void clearMark(void) const { flags &= ~PcodeOp::mark; } ///< Clear any mark on this op
   bool isIndirectSource(void) const { return ((flags&PcodeOp::indirect_source)!=0); } ///< Return \b true if this causes an INDIRECT
   void setIndirectSource(void) { flags |= PcodeOp::indirect_source; } ///< Mark this op as source of INDIRECT
@@ -189,18 +195,18 @@ public:
   void setPtrFlow(void) { flags |= PcodeOp::ptrflow; } ///< Mark this op as consuming/producing ptrs
   bool isSplitting(void) const { return ((flags&PcodeOp::splittingbranch)!=0); } ///< Return \b true if this branch splits
   bool doesSpecialPropagation(void) const { return ((addlflags&PcodeOp::special_prop)!=0); } ///< Return \b true if this does datatype propagation
-  bool doesSpecialPrinting(void) const { return ((flags&PcodeOp::special_print)!=0); } ///< Return \b true if this needs to special printing
-  bool hasThisPointer(void) const { return ((addlflags&PcodeOp::has_thisptr)!=0); } ///< Return \b true if this is a call taking 'this' parameter
-  bool isConstructor(void) const { return ((addlflags&PcodeOp::is_constructor)!=0); } ///< Return \b true if this is call to a constructor
-  bool isDestructor(void) const { return ((addlflags&PcodeOp::is_destructor)!=0); } ///< Return \b true if this is call to a destructor
+  bool doesSpecialPrinting(void) const { return ((addlflags&PcodeOp::special_print)!=0); } ///< Return \b true if this needs to special printing
+  bool isIncidentalCopy(void) const { return ((addlflags&PcodeOp::incidental_copy)!=0); } ///< Return \b true if \b this COPY is \e incidental
   /// \brief Return \b true if output is 1-bit boolean
   bool isCalculatedBool(void) const { return ((flags&(PcodeOp::calculated_bool|PcodeOp::booloutput))!=0); }
   /// \brief Return \b true if we have already examined this cpool
-  bool isCpoolTransformed(void) const { return ((flags&PcodeOp::is_cpool_transformed)!=0); }
+  bool isCpoolTransformed(void) const { return ((addlflags&PcodeOp::is_cpool_transformed)!=0); }
   bool isCollapsible(void) const; ///< Return \b true if this can be collapsed to a COPY of a constant
+  /// \brief Return \b true if this LOADs or STOREs from a dynamic \e spacebase pointer
+  bool usesSpacebasePtr(void) const { return ((flags&PcodeOp::spacebase_ptr)!=0); }
   uintm getCseHash(void) const;	///< Return hash indicating possibility of common subexpression elimination
   bool isCseMatch(const PcodeOp *op) const; ///< Return \b true if this and \e op represent common subexpressions
-  void setOpcode(TypeOp *t_op);	///< Set the opcode for this PcodeOp
+  bool isMoveable(const PcodeOp *point) const;	///< Can \b this be moved to after \e point, without disturbing data-flow
   TypeOp *getOpcode(void) const { return opcode; } ///< Get the opcode for this op
   OpCode code(void) const { return opcode->getOpcode(); } ///< Get the opcode id (enum) for this op
   bool isCommutative(void) const { return ((flags & PcodeOp::commutative)!=0); } ///< Return \b true if inputs commute
@@ -211,7 +217,6 @@ public:
   PcodeOp *target(void) const;	///< Return starting op for instruction associated with this op
   uintb getNZMaskLocal(bool cliploop) const; ///< Calculate known zero bits for output to this op
   int4 compareOrder(const PcodeOp *bop) const; ///< Compare the control-flow order of this and \e bop
-  void push(PrintLanguage *lng) const { opcode->push(lng,this); } ///< Push this op as a display token
   void printRaw(ostream &s) const { opcode->printRaw(s,this); }	///< Print raw info about this op to stream
   const string &getOpName(void) const { return opcode->getName(); } ///< Return the name of this op
   void printDebug(ostream &s) const; ///< Print debug description of this op to stream
@@ -223,6 +228,16 @@ public:
   Datatype *inputTypeLocal(int4 slot) const { return opcode->getInputLocal(this,slot); }	///< Calculate the local input type
   bool markExplicitUnsigned(int4 slot) { return opcode->markExplicitUnsigned(this,slot); } ///< Decide on unsignedness printing
   bool inheritsSign(void) const { return opcode->inheritsSign(); } ///< Does this token inherit its sign from operands
+};
+
+/// \brief An edge in a data-flow path or graph
+///
+/// A minimal node for traversing expressions in the data-flow
+struct PcodeOpNode {
+  PcodeOp *op;		///< The p-code end-point of the edge
+  int4 slot;		///< Slot indicating the input Varnode end-point of the edge
+  PcodeOpNode(void) { op = (PcodeOp *)0; slot = 0; }	///< Unused constructor
+  PcodeOpNode(PcodeOp *o,int4 s) { op = o; slot = s; }	///< Constructor
 };
 
 /// A map from sequence number (SeqNum) to PcodeOp
@@ -240,6 +255,7 @@ class PcodeOpBank {
   list<PcodeOp *> deadlist;		///< List of \e dead PcodeOps
   list<PcodeOp *> alivelist;		///< List of \e alive PcodeOps
   list<PcodeOp *> storelist;		///< List of STORE PcodeOps
+  list<PcodeOp *> loadlist;		///< list of LOAD PcodeOps
   list<PcodeOp *> returnlist;		///< List of RETURN PcodeOps
   list<PcodeOp *> useroplist;		///< List of user-defined PcodeOps
   list<PcodeOp *> deadandgone;		///< List of retired PcodeOps
@@ -262,6 +278,7 @@ public:
   void markDead(PcodeOp *op);				///< Mark the given PcodeOp as \e dead
   void insertAfterDead(PcodeOp *op,PcodeOp *prev);	///< Insert the given PcodeOp after a point in the \e dead list
   void moveSequenceDead(PcodeOp *firstop,PcodeOp *lastop,PcodeOp *prev);
+  void markIncidentalCopy(PcodeOp *firstop,PcodeOp *lastop);	///< Mark any COPY ops in the given range as \e incidental
   bool empty(void) const { return optree.empty(); }	///< Return \b true if there are no PcodeOps in \b this container
   PcodeOp *target(const Address &addr) const;		///< Find the first executing PcodeOp for a target address
   PcodeOp *findOp(const SeqNum &num) const;		///< Find a PcodeOp by sequence number

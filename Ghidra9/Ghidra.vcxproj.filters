@@ -1,0 +1,606 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="action.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="address.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="architecture.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="bfd_arch.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="block.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="blockaction.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="callgraph.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="capability.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cast.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="codedata.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="comment.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="comment_ghidra.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="condexe.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="context.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="coreaction.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cover.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cpool.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cpool_ghidra.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="crc32.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="database.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="database_ghidra.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="doccore.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="docmain.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="double.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="dynamic.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="emulate.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="emulateutil.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="error.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="filemanage.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="float.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="flow.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="fspec.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="funcdata.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ghidra_arch.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ghidra_context.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ghidra_process.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ghidra_translate.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="globalcontext.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="grammar.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="graph.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="heritage.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ifacedecomp.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ifaceterm.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inject_ghidra.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inject_sleigh.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="interface.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="jumptable.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="libdecomp.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="loadimage.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="loadimage_bfd.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="loadimage_ghidra.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="loadimage_xml.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="memstate.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="merge.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="op.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="opbehavior.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="opcodes.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="options.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="override.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="paramid.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="partmap.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="pcodecompile.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="pcodeinject.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="pcodeparse.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="pcoderaw.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="prefersplit.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="prettyprint.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="printc.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="printjava.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="printlanguage.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rangemap.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rangeutil.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="raw_arch.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ruleaction.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rulecompile.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="semantics.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sleigh.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sleigh_arch.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sleighbase.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="slgh_compile.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="slghpatexpress.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="slghpattern.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="slghsymbol.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="space.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="subflow.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="translate.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="type.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="typegrp_ghidra.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="typeop.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="types.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="unify.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="userop.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="variable.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="varmap.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="varnode.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="xml.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="xml_arch.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="grammar.tab.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="pcodeparse.tab.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ruleparse.tab.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="xml.tab.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="slghparse.tab.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="action.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="address.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="architecture.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="block.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="blockaction.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="callgraph.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="capability.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cast.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="comment.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="comment_ghidra.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="condexe.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="context.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="coreaction.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cover.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cpool.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cpool_ghidra.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="crc32.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="database.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="database_ghidra.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="double.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="dynamic.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="emulate.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="emulateutil.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="filemanage.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="float.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="flow.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="fspec.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="funcdata.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="funcdata_block.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="funcdata_op.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="funcdata_varnode.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ghidra_arch.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ghidra_context.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ghidra_process.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ghidra_translate.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="globalcontext.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="graph.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="heritage.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ifacedecomp.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ifaceterm.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="inject_ghidra.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="inject_sleigh.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="interface.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="jumptable.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="libdecomp.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="loadimage.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="loadimage_ghidra.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="loadimage_xml.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="memstate.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="merge.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="op.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="opbehavior.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="opcodes.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="options.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="override.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="paramid.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="pcodecompile.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="pcodeinject.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="pcoderaw.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="prefersplit.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="prettyprint.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="printc.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="printjava.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="printlanguage.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rangeutil.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="raw_arch.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ruleaction.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rulecompile.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="semantics.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="sleigh.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="sleigh_arch.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="sleighbase.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="slghpatexpress.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="slghpattern.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="slghsymbol.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="space.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="subflow.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="translate.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="type.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="typegrp_ghidra.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="typeop.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="unify.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="userop.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="variable.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="varmap.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="varnode.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="xml_arch.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="grammar.tab.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="pcodeparse.tab.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ruleparse.tab.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="xml.tab.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Bison Include="pcodeparse.y" />
+    <Bison Include="ruleparse.y" />
+    <Bison Include="xml.y" />
+    <Bison Include="grammar.y" />
+  </ItemGroup>
+</Project>

@@ -95,6 +95,22 @@ void Address::toPhysical(void)
      base = phys;
 }
 
+/// Return \b true if the range starting at \b this extending the given number of bytes
+/// is contained by the second given range.
+/// \param sz is the given number of bytes in \b this range
+/// \param op2 is the start of the second given range
+/// \param sz2 is the number of bytes in the second given range
+/// \return \b true if the second given range contains \b this range
+bool Address::containedBy(int4 sz,const Address &op2,int4 sz2) const
+
+{
+  if (base != op2.base) return false;
+  if (op2.offset > offset) return false;
+  uintb off1 = offset + (sz-1);
+  uintb off2 = op2.offset + (sz2-1);
+  return (off2 >= off1);
+}
+
 /// Return -1 if (\e op2,\e sz2) is not properly contained in (\e this,\e sz).
 /// If it is contained, return the endian aware offset of (\e op2,\e sz2) 
 /// I.e. if the least significant byte of the \e op2 range falls on the least significant
@@ -161,6 +177,14 @@ bool Address::isContiguous(int4 sz,const Address &loaddr,int4 losz) const
     if (nextoff == offset) return true;
   }
   return false;
+}
+
+/// If \b this is (originally) a \e join address, reevaluate it in terms of its new
+/// \e offset and \e siz, changing the space and offset if necessary.
+/// \param size is the new size in bytes of the underlying object
+void Address::renormalize(int4 size) {
+  if (base->getType() == IPTR_JOIN)
+    base->getManager()->renormalizeJoinAddress(*this,size);
 }
 
 /// This is usually used to build an address from an \b \<addr\>
@@ -273,7 +297,7 @@ void Range::restoreXml(const Element *el,const AddrSpaceManager *manage)
       s >> last;
     }
     else if (el->getAttributeName(i) == "name") {
-      const Translate *trans = manage->getDefaultSpace()->getTrans();
+      const Translate *trans = manage->getDefaultCodeSpace()->getTrans();
       const VarnodeData &point(trans->getRegister(el->getAttributeValue(i)));
       spc = point.space;
       first = point.offset;
@@ -283,10 +307,7 @@ void Range::restoreXml(const Element *el,const AddrSpaceManager *manage)
   }
   if (spc == (AddrSpace *)0)
 	  throw LowlevelError("No address space indicated in range tag");
-  first = spc->wrapOffset(first); //otherwise if first needs wrap, will be greater than last!
   last = spc->wrapOffset(last);
-  if (last < first)
-	  throw LowlevelError("Illegal range value");
 }
 
 /// Insert a new Range merging as appropriate to maintain the disjoint cover
@@ -696,6 +717,22 @@ int4 mostsigbit_set(uintb val)
     }
     sz >>= 1;
   } while(sz != 0);
+  return res;
+}
+
+/// Count the number (population) bits set.
+/// \param val is the given value
+/// \return the number of one bits
+int4 popcount(uintb val)
+
+{
+  val = (val & 0x5555555555555555L) + ((val >> 1) & 0x5555555555555555L);
+  val = (val & 0x3333333333333333L) + ((val >> 2) & 0x3333333333333333L);
+  val = (val & 0x0f0f0f0f0f0f0f0fL) + ((val >> 4) & 0x0f0f0f0f0f0f0f0fL);
+  val = (val & 0x00ff00ff00ff00ffL) + ((val >> 8) & 0x00ff00ff00ff00ffL);
+  val = (val & 0x0000ffff0000ffffL) + ((val >> 16) & 0x0000ffff0000ffffL);
+  int4 res = (int4)(val & 0xff);
+  res += (int4)((val >> 32) & 0xff);
   return res;
 }
 

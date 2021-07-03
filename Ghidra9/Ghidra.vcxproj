@@ -1,0 +1,376 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <ProjectGuid>{FBC85CDD-37C5-44EF-9085-50E616D5A1B3}</ProjectGuid>
+    <RootNamespace>Ghidra</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+    <Import Project="../PropertySheet.props" />
+    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.props" />
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ExecutablePath>$(VC_ExecutablePath_x86);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ExecutablePath>$(VC_ExecutablePath_x86);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ExecutablePath>$(VC_ExecutablePath_x64);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ExecutablePath>$(VC_ExecutablePath_x64);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>false</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <PreprocessorDefinitions>_MBCS;_WINDOWS;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+    <PostBuildEvent>
+      <Command>copy $(TargetPath) $(UserProfile)\Documents\ghidra_9.0.4\Ghidra\Features\Decompiler\os\win64\decompile.exe</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>false</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <PreprocessorDefinitions>_MBCS;_WINDOWS;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>false</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <PreprocessorDefinitions>_MBCS;_WINDOWS;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>false</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <PreprocessorDefinitions>_MBCS;_WINDOWS;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="action.hh" />
+    <ClInclude Include="address.hh" />
+    <ClInclude Include="architecture.hh" />
+    <ClInclude Include="bfd_arch.hh" />
+    <ClInclude Include="block.hh" />
+    <ClInclude Include="blockaction.hh" />
+    <ClInclude Include="callgraph.hh" />
+    <ClInclude Include="capability.hh" />
+    <ClInclude Include="cast.hh" />
+    <ClInclude Include="codedata.hh" />
+    <ClInclude Include="comment.hh" />
+    <ClInclude Include="comment_ghidra.hh" />
+    <ClInclude Include="condexe.hh" />
+    <ClInclude Include="context.hh" />
+    <ClInclude Include="coreaction.hh" />
+    <ClInclude Include="cover.hh" />
+    <ClInclude Include="cpool.hh" />
+    <ClInclude Include="cpool_ghidra.hh" />
+    <ClInclude Include="crc32.hh" />
+    <ClInclude Include="database.hh" />
+    <ClInclude Include="database_ghidra.hh" />
+    <ClInclude Include="doccore.hh" />
+    <ClInclude Include="docmain.hh" />
+    <ClInclude Include="double.hh" />
+    <ClInclude Include="dynamic.hh" />
+    <ClInclude Include="emulate.hh" />
+    <ClInclude Include="emulateutil.hh" />
+    <ClInclude Include="error.hh" />
+    <ClInclude Include="filemanage.hh" />
+    <ClInclude Include="float.hh" />
+    <ClInclude Include="flow.hh" />
+    <ClInclude Include="fspec.hh" />
+    <ClInclude Include="funcdata.hh" />
+    <ClInclude Include="ghidra_arch.hh" />
+    <ClInclude Include="ghidra_context.hh" />
+    <ClInclude Include="ghidra_process.hh" />
+    <ClInclude Include="ghidra_translate.hh" />
+    <ClInclude Include="globalcontext.hh" />
+    <ClInclude Include="grammar.hh" />
+    <ClInclude Include="grammar.tab.h" />
+    <ClInclude Include="graph.hh" />
+    <ClInclude Include="heritage.hh" />
+    <ClInclude Include="ifacedecomp.hh" />
+    <ClInclude Include="ifaceterm.hh" />
+    <ClInclude Include="inject_ghidra.hh" />
+    <ClInclude Include="inject_sleigh.hh" />
+    <ClInclude Include="interface.hh" />
+    <ClInclude Include="jumptable.hh" />
+    <ClInclude Include="libdecomp.hh" />
+    <ClInclude Include="loadimage.hh" />
+    <ClInclude Include="loadimage_bfd.hh" />
+    <ClInclude Include="loadimage_ghidra.hh" />
+    <ClInclude Include="loadimage_xml.hh" />
+    <ClInclude Include="memstate.hh" />
+    <ClInclude Include="merge.hh" />
+    <ClInclude Include="op.hh" />
+    <ClInclude Include="opbehavior.hh" />
+    <ClInclude Include="opcodes.hh" />
+    <ClInclude Include="options.hh" />
+    <ClInclude Include="override.hh" />
+    <ClInclude Include="paramid.hh" />
+    <ClInclude Include="partmap.hh" />
+    <ClInclude Include="pcodecompile.hh" />
+    <ClInclude Include="pcodeinject.hh" />
+    <ClInclude Include="pcodeparse.hh" />
+    <ClInclude Include="pcodeparse.tab.h" />
+    <ClInclude Include="pcoderaw.hh" />
+    <ClInclude Include="prefersplit.hh" />
+    <ClInclude Include="prettyprint.hh" />
+    <ClInclude Include="printc.hh" />
+    <ClInclude Include="printjava.hh" />
+    <ClInclude Include="printlanguage.hh" />
+    <ClInclude Include="rangemap.hh" />
+    <ClInclude Include="rangeutil.hh" />
+    <ClInclude Include="raw_arch.hh" />
+    <ClInclude Include="ruleaction.hh" />
+    <ClInclude Include="rulecompile.hh" />
+    <ClInclude Include="ruleparse.tab.h" />
+    <ClInclude Include="semantics.hh" />
+    <ClInclude Include="sleigh.hh" />
+    <ClInclude Include="sleighbase.hh" />
+    <ClInclude Include="sleigh_arch.hh" />
+    <ClInclude Include="slghparse.tab.hh" />
+    <ClInclude Include="slghpatexpress.hh" />
+    <ClInclude Include="slghpattern.hh" />
+    <ClInclude Include="slghsymbol.hh" />
+    <ClInclude Include="slgh_compile.hh" />
+    <ClInclude Include="space.hh" />
+    <ClInclude Include="subflow.hh" />
+    <ClInclude Include="translate.hh" />
+    <ClInclude Include="type.hh" />
+    <ClInclude Include="typegrp_ghidra.hh" />
+    <ClInclude Include="typeop.hh" />
+    <ClInclude Include="types.h" />
+    <ClInclude Include="unify.hh" />
+    <ClInclude Include="userop.hh" />
+    <ClInclude Include="variable.hh" />
+    <ClInclude Include="varmap.hh" />
+    <ClInclude Include="varnode.hh" />
+    <ClInclude Include="xml.hh" />
+    <ClInclude Include="xml.tab.h" />
+    <ClInclude Include="xml_arch.hh" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="action.cc" />
+    <ClCompile Include="address.cc" />
+    <ClCompile Include="architecture.cc" />
+    <ClCompile Include="block.cc" />
+    <ClCompile Include="blockaction.cc" />
+    <ClCompile Include="callgraph.cc" />
+    <ClCompile Include="capability.cc" />
+    <ClCompile Include="cast.cc" />
+    <ClCompile Include="comment.cc" />
+    <ClCompile Include="comment_ghidra.cc" />
+    <ClCompile Include="condexe.cc" />
+    <ClCompile Include="context.cc" />
+    <ClCompile Include="coreaction.cc" />
+    <ClCompile Include="cover.cc" />
+    <ClCompile Include="cpool.cc" />
+    <ClCompile Include="cpool_ghidra.cc" />
+    <ClCompile Include="crc32.cc" />
+    <ClCompile Include="database.cc" />
+    <ClCompile Include="database_ghidra.cc" />
+    <ClCompile Include="double.cc" />
+    <ClCompile Include="dynamic.cc" />
+    <ClCompile Include="emulate.cc" />
+    <ClCompile Include="emulateutil.cc" />
+    <ClCompile Include="filemanage.cc" />
+    <ClCompile Include="float.cc" />
+    <ClCompile Include="flow.cc" />
+    <ClCompile Include="fspec.cc" />
+    <ClCompile Include="funcdata.cc" />
+    <ClCompile Include="funcdata_block.cc" />
+    <ClCompile Include="funcdata_op.cc" />
+    <ClCompile Include="funcdata_varnode.cc" />
+    <ClCompile Include="ghidra_arch.cc" />
+    <ClCompile Include="ghidra_context.cc" />
+    <ClCompile Include="ghidra_process.cc" />
+    <ClCompile Include="ghidra_translate.cc" />
+    <ClCompile Include="globalcontext.cc" />
+    <ClCompile Include="grammar.tab.cpp" />
+    <ClCompile Include="graph.cc" />
+    <ClCompile Include="heritage.cc" />
+    <ClCompile Include="ifacedecomp.cc" />
+    <ClCompile Include="ifaceterm.cc" />
+    <ClCompile Include="inject_ghidra.cc" />
+    <ClCompile Include="inject_sleigh.cc" />
+    <ClCompile Include="interface.cc" />
+    <ClCompile Include="jumptable.cc" />
+    <ClCompile Include="libdecomp.cc" />
+    <ClCompile Include="loadimage.cc" />
+    <ClCompile Include="loadimage_ghidra.cc" />
+    <ClCompile Include="loadimage_xml.cc" />
+    <ClCompile Include="memstate.cc" />
+    <ClCompile Include="merge.cc" />
+    <ClCompile Include="op.cc" />
+    <ClCompile Include="opbehavior.cc" />
+    <ClCompile Include="opcodes.cc" />
+    <ClCompile Include="options.cc" />
+    <ClCompile Include="override.cc" />
+    <ClCompile Include="paramid.cc" />
+    <ClCompile Include="pcodecompile.cc" />
+    <ClCompile Include="pcodeinject.cc" />
+    <ClCompile Include="pcodeparse.tab.cpp" />
+    <ClCompile Include="pcoderaw.cc" />
+    <ClCompile Include="prefersplit.cc" />
+    <ClCompile Include="prettyprint.cc" />
+    <ClCompile Include="printc.cc" />
+    <ClCompile Include="printjava.cc" />
+    <ClCompile Include="printlanguage.cc" />
+    <ClCompile Include="rangeutil.cc" />
+    <ClCompile Include="raw_arch.cc" />
+    <ClCompile Include="ruleaction.cc" />
+    <ClCompile Include="rulecompile.cc" />
+    <ClCompile Include="ruleparse.tab.cpp" />
+    <ClCompile Include="semantics.cc" />
+    <ClCompile Include="sleigh.cc" />
+    <ClCompile Include="sleighbase.cc" />
+    <ClCompile Include="sleigh_arch.cc" />
+    <ClCompile Include="slghpatexpress.cc" />
+    <ClCompile Include="slghpattern.cc" />
+    <ClCompile Include="slghsymbol.cc" />
+    <ClCompile Include="space.cc" />
+    <ClCompile Include="subflow.cc" />
+    <ClCompile Include="translate.cc" />
+    <ClCompile Include="type.cc" />
+    <ClCompile Include="typegrp_ghidra.cc" />
+    <ClCompile Include="typeop.cc" />
+    <ClCompile Include="unify.cc" />
+    <ClCompile Include="userop.cc" />
+    <ClCompile Include="variable.cc" />
+    <ClCompile Include="varmap.cc" />
+    <ClCompile Include="varnode.cc" />
+    <ClCompile Include="xml.tab.cpp" />
+    <ClCompile Include="xml_arch.cc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Bison Include="grammar.y">
+      <FileType>Document</FileType>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">-p cparse %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-p cparse %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">-p cparse %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-p cparse %(AdditionalOptions)</AdditionalOptions>
+    </Bison>
+    <Bison Include="pcodeparse.y">
+      <FileType>Document</FileType>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">-p pcode %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-p pcode %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">-p pcode %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-p pcode %(AdditionalOptions)</AdditionalOptions>
+    </Bison>
+    <Bison Include="ruleparse.y">
+      <FileType>Document</FileType>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">-p ruleparse %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-p ruleparse %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">-p ruleparse %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-p ruleparse %(AdditionalOptions)</AdditionalOptions>
+    </Bison>
+    <Bison Include="xml.y">
+      <FileType>Document</FileType>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">-p xml %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-p xml %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">-p xml %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-p xml %(AdditionalOptions)</AdditionalOptions>
+    </Bison>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.targets" />
+  </ImportGroup>
+</Project>

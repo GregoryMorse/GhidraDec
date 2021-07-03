@@ -171,9 +171,9 @@ void saveConfigTofile(RdGlobalInfo& rdgi)
 	jsonFile << Json::writeString(writer, root);
 }
 
-extern RdGlobalInfo* decompInfo;
 int idaapi sleighCB(int button_code, form_actions_t& fa)
 {
+	RdGlobalInfo* decompInfo = (RdGlobalInfo*)fa.get_ud();
 	qstring formGhidraDecPluginSettings =
 		"BUTTON YES Compile\n"
 		"GhidraDec Sleigh Pcode Snippet Compiler\n"
@@ -194,7 +194,7 @@ int idaapi sleighCB(int button_code, form_actions_t& fa)
 	int ok;
 	std::string pspec, cspec, sleighfilename;
 	if (decompInfo->customSlafile.empty() &&
-		canDecompileInput() &&
+		decompInfo->pm->canDecompileInput() &&
 		detectProcCompiler(decompInfo, pspec, cspec, sleighfilename)) {
 	}
 	if (!decompInfo->customSlafile.empty()) sleighfilename = decompInfo->customSlafile;
@@ -219,6 +219,7 @@ int idaapi sleighCB(int button_code, form_actions_t& fa)
 
 int idaapi displayCB(int button_code, form_actions_t& fa)
 {
+	RdGlobalInfo* decompInfo = (RdGlobalInfo*)fa.get_ud();
 	sval_t cmtLevel = decompInfo->cmtLevel, maxChars = decompInfo->maxChars, numChars = decompInfo->numChars;
 	int comStyle = decompInfo->comStyle, intFormat = decompInfo->intFormat;
 	ushort alysChecks = decompInfo->alysChecks, dispChecks = decompInfo->dispChecks;
@@ -323,7 +324,7 @@ bool askUserToConfigurePlugin(RdGlobalInfo& rdgi)
 	int curProto = -1;
 	std::string cspec, pspec, sleighfilename, protoeval;
 	if ((rdgi.customCspec.empty() || rdgi.customPspec.empty() || rdgi.customSlafile.empty()) &&
-		canDecompileInput() &&
+		rdgi.pm->canDecompileInput() &&
 		detectProcCompiler(&rdgi, pspec, cspec, sleighfilename)) {
 	}
 	if (!rdgi.customCspec.empty()) cspec = rdgi.customCspec;
@@ -342,7 +343,7 @@ bool askUserToConfigurePlugin(RdGlobalInfo& rdgi)
 		int defIdx = -1;
 		if (!cspec.empty()) DecompInterface::getProtoEvals(cspec, vec, &defIdx);
 		if (!rdgi.customCallStyle.empty()) protoeval = rdgi.customCallStyle;
-		else protoeval = ccToStr(inf.cc.cm, 0, true);
+		else protoeval = ccToStr(inf_cc_cm, 0, true);
 		vec.insert(vec.begin(), "default");
 		vec.insert(vec.begin(), "unknown");
 		for (size_t i = 0; i < vec.size(); i++) {
@@ -412,10 +413,11 @@ bool addConfigurationMenuOption(RdGlobalInfo& rdgi)
 
 	static show_options_ah_t show_options_ah(&rdgi);
 
-	static const action_desc_t desc = ACTION_DESC_LITERAL(
+	static const action_desc_t desc = ACTION_DESC_LITERAL_PLUGMOD(
 			optionsActionName,
 			optionsActionLabel,
 			&show_options_ah,
+			rdgi.pm,
 			nullptr,
 			NULL,
 			-1);

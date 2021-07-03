@@ -38,6 +38,48 @@
 
 #include "sleighinterface.h"
 
+#if IDA_SDK_VERSION < 750
+#define PLUGIN_MULTI 0
+#define is_idaqt is_idaq
+#define WOPN_DP_TAB WOPN_TAB
+#define ACTION_DESC_LITERAL_PLUGMOD(t,u,v,w,x,y,z) ACTION_DESC_LITERAL(t,u,v,x,y,z)
+#define inf_filetype inf.filetype
+#define inf_start_ea inf.start_ea
+#define inf_min_ea inf.min_ea
+#define inf_max_ea inf.max_ea
+#define inf_procname std::string(inf.procname)
+#define inf_is_32bit inf.is_32bit
+#define inf_is_64bit inf.is_64bit
+#define inf_cc_cm inf.cc.cm
+#define inf_is_be inf.is_be
+#else
+#define PLUGIN_SKIP  0
+#define PLUGIN_KEEP 2
+inline const char* get_reg_info(const char* regname, bitrange_t* bitrange)
+{
+	return get_ph()->get_reg_info(regname, bitrange);
+}
+inline bool is_funcarg_off(const func_t* pfn, uval_t frameoff)
+{
+	return get_ph()->is_funcarg_off(pfn, frameoff);
+}
+inline sval_t lvar_off(const func_t* pfn, uval_t frameoff)
+{
+	return get_ph()->lvar_off(pfn, frameoff);
+}
+#define ph (*get_ph())
+#define is_idaqt is_idaq()
+#define inf_filetype inf_get_filetype()
+#define inf_start_ea inf_get_start_ea()
+#define inf_min_ea inf_get_min_ea()
+#define inf_max_ea inf_get_max_ea()
+inline std::string qstring_to_string(qstring qs) {
+	return std::string(qs.c_str());
+}
+#define inf_procname qstring_to_string(inf_get_procname())
+#define inf_cc_cm inf_get_cc_cm()
+#endif
+
 #if !defined(__X64__) || IDA_SDK_VERSION < 720
 struct stkpnt_t
 {
@@ -917,6 +959,7 @@ void stopDecompilation(RdGlobalInfo*, bool, bool, bool);
 #define PLUGIN_URL "https://forum.exetools.com/"
 #define PLUGIN_HOTKEY "Ctrl-g"
 
+class GhidraDec;
 class IdaCallback;
 /**
  * General information used by this plugin.
@@ -924,11 +967,12 @@ class IdaCallback;
 class RdGlobalInfo
 {
 	public:
-		RdGlobalInfo();
+		RdGlobalInfo(GhidraDec* pm);
 
 	// General plugin information.
 	//
 	public:
+		GhidraDec* pm;
 		std::string pluginName             = PLUGIN_NAME;
 		std::string pluginID               = "ghidra.decompiler";
 		std::string pluginProducer         = PLUGIN_PRODUCER;
@@ -1024,7 +1068,7 @@ class RdGlobalInfo
 		sval_t cacheSize = 10, maxPayload = 50, timeout = 30, cmtLevel = 20, maxChars = 100, numChars = 2;
 		int comStyle = 0, intFormat = 2;
 		ushort alysChecks = 1 | 4 | 8 | 16 | 32, dispChecks = 4 | 8 | 128 | 256 | 1024;
-		bool bSaveParamIdToIDA = true;
+		bool bSaveParamIdToIDA = false;// true;
 		bool bShowGraph = true;
 
 		std::vector<LangInfo> li;

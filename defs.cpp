@@ -252,9 +252,10 @@ namespace idaplugin {
 	return 0;
 }
 
-RdGlobalInfo::RdGlobalInfo() :
+RdGlobalInfo::RdGlobalInfo(GhidraDec* pm) :
 		pluginConfigFile(get_user_idadir())
 {
+	this->pm = pm;
 	pluginInfo.id = pluginID.data();
 	pluginInfo.name = pluginName.data();
 	pluginInfo.producer = pluginProducer.data();

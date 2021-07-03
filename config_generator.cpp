@@ -47,7 +47,7 @@ void ConfigGenerator::generateHeader()
 {
 	config.setInputFile(decompInfo.workIdb);
 #ifdef __X64__
-	config.setEntryPoint(inf.start_ea);
+	config.setEntryPoint(inf_start_ea);
 #else
 	config.setEntryPoint(inf.beginEA);
 #endif

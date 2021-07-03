@@ -115,7 +115,7 @@ struct CoreType
 	std::string metaType;
 	bool isChar;
 	bool isUtf;
-	long long id; //Datatype::hashName
+	unsigned long long id; //Datatype::hashName
 };
 
 extern const Options defaultOptions;
@@ -294,6 +294,7 @@ class DecompInterface
 	std::string xmlOptions; // Current decompiler options
 	std::string callStyle;
 	std::map<std::string, unsigned long long> callStyles;
+	std::map<std::string, unsigned long long> symbolIds;
 	std::string stackPointerReg;
 	//std::string stackPointerSpace;
 	//std::map<std::string, std::string> registers;

@@ -2,9 +2,13 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros">
-    <WIN_FLEX_BISON_PATH>C:\Users\Gregory\Documents\win_flex_bison</WIN_FLEX_BISON_PATH>
-    <IDA_SDK_DIR>D:\Libraries\idasdk72</IDA_SDK_DIR>
+    <WIN_FLEX_BISON_PATH>$(UserProfile)\Desktop\Apps\win_flex_bison</WIN_FLEX_BISON_PATH>
+    <IDA_SDK_DIR>D:\Libraries\idasdk75</IDA_SDK_DIR>
+	<!-- <IDA_SDK_DIR>D:\Libraries\idasdk72</IDA_SDK_DIR> -->
     <IDA_SDK_DIR32>D:\Libraries\idasdk68</IDA_SDK_DIR32>
+	<IDA_DEPLOY>$(UserProfile)\Desktop\Apps\IDA Pro 7.5 SP3</IDA_DEPLOY>
+	<!-- <IDA_DEPLOY>$(ProgramW6432)\Ida 7.2</IDA_DEPLOY> -->
+    <IDA_DEPLOY32>$(ProgramFiles)\Ida 6.8</IDA_DEPLOY32>
   </PropertyGroup>
   <PropertyGroup />
   <ItemDefinitionGroup />
@@ -17,6 +21,12 @@
     </BuildMacro>
     <BuildMacro Include="IDA_SDK_DIR32">
       <Value>$(IDA_SDK_DIR32)</Value>
+    </BuildMacro>
+    <BuildMacro Include="IDA_DEPLOY">
+      <Value>$(IDA_DEPLOY)</Value>
+    </BuildMacro>
+    <BuildMacro Include="IDA_DEPLOY32">
+      <Value>$(IDA_DEPLOY32)</Value>
     </BuildMacro>
   </ItemGroup>
 </Project>

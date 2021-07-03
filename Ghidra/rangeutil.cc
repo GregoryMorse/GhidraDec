@@ -1066,8 +1066,9 @@ Varnode *CircleRange::pullBack(PcodeOp *op,Varnode **constMarkup,bool usenzmask)
     CircleRange nzrange;
     if (!nzrange.setNZMask(res->getNZMask(),res->getSize()))
       return res;
-    if (0!=intersect(nzrange))
-      return (Varnode *)0;
+    intersect(nzrange);
+    // If the intersect does not succeed (i.e. produces 2 pieces) the original range is
+    // preserved and we still consider this pullback successful.
   }
   return res;
 }
@@ -1223,7 +1224,8 @@ bool CircleRange::pushForwardBinary(OpCode opc,const CircleRange &in1,const Circ
       }
       int4 wholeSize = 8*sizeof(uintb) - count_leading_zeros(mask);
       if (in1.getMaxInfo() + in2.getMaxInfo() > wholeSize) {
-	right = left;	// Covered everything
+	left = in1.left;	// Covered everything
+	right = in1.left;
 	normalize();
 	return true;
       }
@@ -1630,8 +1632,10 @@ bool ValueSet::iterate(Widener &widener)
     if (0 != res.circleUnion(range)) {	// Union with the previous iteration's set
       res.minimalContainer(range,MAX_STEP);
     }
-    leftIsStable = range.getMin() == res.getMin();
-    rightIsStable = range.getEnd() == res.getEnd();
+    if (!range.isEmpty() && !res.isEmpty()) {
+      leftIsStable = range.getMin() == res.getMin();
+      rightIsStable = range.getEnd() == res.getEnd();
+    }
   }
   else if (numParams == 1) {
     ValueSet *inSet1 = op->getIn(0)->getValueSet();
@@ -1935,7 +1939,7 @@ ValueSet *ValueSetSolver::ValueSetEdge::getNext(void)
 void ValueSetSolver::newValueSet(Varnode *vn,int4 tCode)
 
 {
-  valueNodes.push_back(ValueSet());
+  valueNodes.emplace_back();
   valueNodes.back().setVarnode(vn, tCode);
 }
 
@@ -2432,7 +2436,7 @@ void ValueSetSolver::establishValueSets(const vector<Varnode *> &sinks,const vec
     PcodeOp *op = vn->getDef();
     switch(op->code()) {	// Distinguish ops where we can never predict an integer range
       case CPUI_INDIRECT:
-	if (indirectAsCopy) {
+	if (indirectAsCopy || op->isIndirectStore()) {
 	  Varnode *inVn = op->getIn(0);
 	  if (!inVn->isMark()) {
 	    newValueSet(inVn,0);

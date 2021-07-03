@@ -53,7 +53,7 @@ public:
 		cout << ": " << mnem << ' ' << body << endl;
 	}
 };
-
+#define getDefaultSpace getDefaultCodeSpace //Ghidra 10
 static void dumpAssembly(Translate& trans, uintb startaddr, uintb endaddr)
 
 { // Print disassembly of binary code
@@ -616,17 +616,19 @@ int __cdecl main()
 	//doSleigh(1, ghidraPath + "Ghidra/Processors/x86/data/languages/x86-64.sla", ghidraPath + "Ghidra/Processors/x86/data/languages/x86-64.pspec", 0x140001024, probe4, sizeof(probe4), sizeof(probe4));
 	MyCallback* cb = new MyCallback();
 	cb->ghidraPath = ghidraPath;
-	std::string display, funcProto;
+	std::string display, funcProto, funcColorProto;
+	FuncProtoInfo paramInfo = {};
+	std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>> blockGraph;
 	int timeout = 30, maxpayload = 50;
 	DecompInterface di;
 	std::vector<CoreType> cts(&defaultCoreTypes[0], &defaultCoreTypes[numDefCoreTypes]);
 	di.setup(cb, ghidraPath + "Ghidra/Processors/x86/data/languages/x86-64.sla", ghidraPath + "Ghidra/Processors/x86/data/languages/x86-64.pspec",
 		ghidraPath + "Ghidra/Processors/x86/data/languages/x86-64-win.cspec", cts, defaultOptions, timeout, maxpayload);
-	cout << di.doDecompile(defaultDecMode, AddrInfo{ "ram", 0x80483b4 }, display, funcProto);
+	cout << di.doDecompile(defaultDecMode, AddrInfo{ "ram", 0x80483b4 }, display, funcProto, funcColorProto, paramInfo, blockGraph);
 	//cout << di.doDecompile(cb, ghidraPath + "Ghidra/Processors/x86/data/languages/x86-64.sla", ghidraPath + "Ghidra/Processors/x86/data/languages/x86-64.pspec",
 	//	ghidraPath + "Ghidra/Processors/x86/data/languages/x86-64-gcc.cspec", std::vector<CoreType>(&defaultCoreTypes[0], &defaultCoreTypes[numDefCoreTypes]), defaultOptions, defaultDecMode, 0x80483b4);
 	di.setup(cb, ghidraPath + "Ghidra/Processors/x86/data/languages/x86.sla", ghidraPath + "Ghidra/Processors/x86/data/languages/x86.pspec",
 		ghidraPath + "Ghidra/Processors/x86/data/languages/x86gcc.cspec", cts, defaultOptions, timeout, maxpayload);
-	cout << di.doDecompile(defaultDecMode, AddrInfo{ "ram", 0x80483b4 }, display, funcProto);
+	cout << di.doDecompile(defaultDecMode, AddrInfo{ "ram", 0x80483b4 }, display, funcProto, funcColorProto, paramInfo, blockGraph);
 	delete cb;
 }

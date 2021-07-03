@@ -37,7 +37,7 @@ enum spacetype {
 
 class AddrSpace;
 class AddrSpaceManager;
-class VarnodeData;
+struct VarnodeData;
 class Translate;
 
 /// \brief A region where processor data is stored
@@ -82,7 +82,13 @@ public:
     overlay = 32,		///< This space is an overlay of another space
     overlaybase = 64,		///< This is the base space for overlay space(s)
     truncated = 128,		///< Space is truncated from its original size, expect pointers larger than this size
-    hasphysical = 256		///< Has physical memory associated with it
+    hasphysical = 256,		///< Has physical memory associated with it
+    is_otherspace = 512,	///< Quick check for the OtherSpace derived class
+    has_nearpointers = 0x400	///< Does there exist near pointers into this space
+  };
+  enum {
+    constant_space_index = 0,	///< Reserved index for the constant space
+    other_space_index = 1	///< Reserved index for the other space
   };
 private:
   spacetype type;		///< Type of space (PROCESSOR, CONSTANT, INTERNAL, ...)
@@ -91,16 +97,18 @@ private:
   int4 refcount;		///< Number of managers using this space
   uint4 flags;			///< Attributes of the space
   uintb highest;	        ///< Highest (byte) offset into this space
+  uintb pointerLowerBound;	///< Offset below which we don't search for pointers
+  uintb pointerUpperBound;	///< Offset above which we don't search for pointers
   char shortcut;		///< Shortcut character for printing
 protected:
   string name;			///< Name of this space
   uint4 addressSize;		///< Size of an address into this space in bytes
   uint4 wordsize;		///< Size of unit being addressed (1=byte)
+  int4 minimumPointerSize;	///< Smallest size of a pointer into \b this space (in bytes)
   int4 index;			///< An integer identifier for the space
   int4 delay;			///< Delay in heritaging this space
   int4 deadcodedelay;		///< Delay before deadcode removal is allowed on this space
   void calcScaleMask(void);	///< Calculate scale and mask
-  void assignShortcut(void);	///< Assign a shortcut character to the space
   void setFlags(uint4 fl);	///< Set a cached attribute
   void clearFlags(uint4 fl);	///< Clear a cached attribute
   void saveBasicAttributes(ostream &s) const; ///< Write the XML attributes of this space
@@ -119,9 +127,11 @@ public:
   uint4 getWordSize(void) const; ///< Get the addressable unit size
   uint4 getAddrSize(void) const; ///< Get the size of the space
   uintb getHighest(void) const;  ///< Get the highest byte-scaled address
+  uintb getPointerLowerBound(void) const;	///< Get lower bound for assuming an offset is a pointer
+  uintb getPointerUpperBound(void) const;	///< Get upper bound for assuming an offset is a pointer
+  int4 getMinimumPtrSize(void) const;	///< Get the minimum pointer size for \b this space
   uintb wrapOffset(uintb off) const; ///< Wrap -off- to the offset that fits into this space
   char getShortcut(void) const; ///< Get the shortcut character
-  bool contain(AddrSpace *id2) const; ///< Determine if this space contains another
   bool isHeritaged(void) const;	///< Return \b true if dataflow has been traced
   bool doesDeadcode(void) const; ///< Return \b true if dead code analysis should be done on this space
   bool hasPhysical(void) const;  ///< Return \b true if data is physically stored in this
@@ -129,8 +139,9 @@ public:
   bool isReverseJustified(void) const;  ///< Return \b true if alignment justification does not match endianness
   bool isOverlay(void) const;  ///< Return \b true if this is an overlay space
   bool isOverlayBase(void) const; ///< Return \b true if other spaces overlay this space
+  bool isOtherSpace(void) const;	///< Return \b true if \b this is the \e other address space
   bool isTruncated(void) const; ///< Return \b true if this space is truncated from its original size
-  uintm data2Uintm(const uint1 *ptr,int4 size) const;  ///< Convert a sequence of bytes into an integer value
+  bool hasNearPointers(void) const;	///< Return \b true if \e near (truncated) pointers into \b this space are possible
   void printOffset(ostream &s,uintb offset) const;  ///< Write an address offset to a stream
 
   virtual int4 numSpacebase(void) const;	///< Number of base registers associated with this space
@@ -150,6 +161,7 @@ public:
   static uintb byteToAddress(uintb val,uint4 ws); ///< Scale from byte units to addressable units
   static int4 addressToByteInt(int4 val,uint4 ws); ///< Scale int4 from addressable units to byte units
   static int4 byteToAddressInt(int4 val,uint4 ws); ///< Scale int4 from byte units to addressable units
+  static bool compareByIndex(const AddrSpace *a,const AddrSpace *b);	///< Compare two spaces by their index
 };
 
 /// \brief Special AddrSpace for representing constants during analysis.
@@ -172,6 +184,15 @@ public:
   virtual void restoreXml(const Element *el);
 };
 
+/// \brief Special AddrSpace for special/user-defined address spaces
+class OtherSpace : public AddrSpace {
+public:
+  OtherSpace(AddrSpaceManager *m, const Translate *t, const string &nm, int4 ind);	///< Constructor
+  OtherSpace(AddrSpaceManager *m, const Translate *t);	///< For use with restoreXml
+  virtual void printRaw(ostream &s, uintb offset) const;
+  virtual void saveXml(ostream &s) const;
+};
+
 /// \brief The pool of temporary storage registers
 ///
 /// It is convenient both for modelling processor instructions
@@ -183,7 +204,7 @@ public:
 /// \b unique.  
 class UniqueSpace : public AddrSpace {
 public:
-  UniqueSpace(AddrSpaceManager *m,const Translate *t,const string &nm,int4 ind,uint4 fl);
+  UniqueSpace(AddrSpaceManager *m,const Translate *t,const string &nm,int4 ind,uint4 fl);	///< Constructor
   UniqueSpace(AddrSpaceManager *m,const Translate *t);	///< For use with restoreXml
   virtual void saveXml(ostream &s) const;
 };
@@ -321,6 +342,26 @@ inline uintb AddrSpace::getHighest(void) const {
   return highest;
 }
 
+/// Constant offsets are tested against \b this lower bound as a quick filter before
+/// attempting to lookup symbols.
+/// \return the minimum offset that will be inferred as a pointer
+inline uintb AddrSpace::getPointerLowerBound(void) const {
+  return pointerLowerBound;
+}
+
+/// Constant offsets are tested against \b this upper bound as a quick filter before
+/// attempting to lookup symbols.
+/// \return the maximum offset that will be inferred as a pointer
+inline uintb AddrSpace::getPointerUpperBound(void) const {
+  return pointerUpperBound;
+}
+
+/// A value of 0 means the size must match exactly. If the space is truncated, or
+/// if there exists near pointers, this value may be non-zero.
+inline int4 AddrSpace::getMinimumPtrSize(void) const {
+  return minimumPointerSize;
+}
+
 /// Calculate \e off modulo the size of this address space in
 /// order to construct the offset "equivalent" to \e off that
 /// fits properly into this space
@@ -394,10 +435,18 @@ inline bool AddrSpace::isOverlayBase(void) const {
   return ((flags&overlaybase)!=0);
 }
 
+inline bool AddrSpace::isOtherSpace(void) const {
+  return ((flags&is_otherspace)!=0);
+}
+
 /// If this method returns \b true, the logical form of this space is truncated from its actual size
 /// Pointers may refer to this original size put the most significant bytes are ignored
 inline bool AddrSpace::isTruncated(void) const {
   return ((flags&truncated)!=0);
+}
+
+inline bool AddrSpace::hasNearPointers(void) const {
+  return ((flags&has_nearpointers)!=0);
 }
 
 /// Some spaces are "virtual", like the stack spaces, where addresses are really relative to a
@@ -474,4 +523,13 @@ inline int4 AddrSpace::addressToByteInt(int4 val,uint4 ws) {
 inline int4 AddrSpace::byteToAddressInt(int4 val,uint4 ws) {
   return val/ws;
 }
+
+/// For sorting a sequence of address spaces.
+/// \param a is the first space
+/// \param b is the second space
+/// \return \b true if the first space should come before the second
+inline bool AddrSpace::compareByIndex(const AddrSpace *a,const AddrSpace *b) {
+  return (a->index < b->index);
+}
+
 #endif

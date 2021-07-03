@@ -367,10 +367,11 @@ void ConditionalExecution::buildHeritageArray(void)
 {
   heritageyes.clear();
   Architecture *glb = fd->getArch();
+  heritageyes.resize(glb->numSpaces(),false);
   for(int4 i=0;i<glb->numSpaces();++i) {
     AddrSpace *spc = glb->getSpace(i);
+    if (spc == (AddrSpace *)0) continue;
     int4 index = spc->getIndex();
-    heritageyes.push_back(false);
     if (!spc->isHeritaged()) continue;
     if (fd->numHeritagePasses(spc) > 0)
       heritageyes[index] = true;	// At least one pass has been performed on the space
@@ -758,6 +759,15 @@ bool ConditionalExecution::verify(void)
   return true;
 }
 
+/// Set up for testing ConditionalExecution on multiple iblocks
+/// \param f is the function to do testing on
+ConditionalExecution::ConditionalExecution(Funcdata *f)
+
+{
+  fd = f;
+  buildHeritageArray();	// Cache an array depending on the particular heritage pass
+}
+
 /// The given block is tested as a possible \b iblock. If this configuration
 /// works and is not a \b directsplit, \b true is returned.
 /// If the configuration works as a \b directsplit, then recursively check that
@@ -771,7 +781,6 @@ bool ConditionalExecution::trial(BlockBasic *ib)
 
 {
   iblock = ib;
-  buildHeritageArray();
   if (!verify()) return false;
 
   PcodeOp *cbranch_copy;

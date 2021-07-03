@@ -727,7 +727,7 @@ std::string DecompInterface::buildTypeXml(std::vector<TypeInfo>& ti, size_t indn
 				if (defaultCoreTypes[i].name == typeInfo.typeName) break;
 			} // - (i == numDefCoreTypes ? (1ull << 63) : 0)*/
 			str += std::string(indnt, ' ') + "<type name=\"" + typeInfo.typeName +
-				"\" id=\"" + to_string(hashName(typeInfo.typeName)) +
+				"\" id=\"" + std::to_string(hashName(typeInfo.typeName)) +
 				"\" metatype=\"" + typeInfo.metaType +
 				"\" size=\"" + std::to_string(typeInfo.size) + "\"" +
 				std::string(typeInfo.isEnum ? " enum=\"true\"" : "") +
@@ -1077,17 +1077,21 @@ std::string DecompInterface::writeFunc(SizedAddrInfo addr, std::string funcname,
 				"\"/>\n              </rangelist>\n" : "              <rangelist/>\n") +
 			"            </mapsym>\n";
 	}
+	if (symbolIds.find(funcname) == symbolIds.end()) symbolIds[funcname] = symbolIds.size() + 1;
 	//callback->status("Extern name: " + externname);
 	//prototype has uponentry and uponreturn tags to inject pcode for call mechanism fixup
-	res = "<result>\n  <parent>\n    <val/>\n" +
-		std::string(parentname.size() != 0 ? "    <val>" + parentnameesc.str() + "</val>\n" : "") +
-		"  </parent>\n  <mapsym>\n"
-		"    <function name=\"" + nameesc.str() + "\" size=\"" + std::to_string(addr.size) + "\">\n"
+	res = "<result id=\"0x0\">\n" //"  <parent>\n    <val/>\n" +
+		//std::string(parentname.size() != 0 ? "    <val>" + parentnameesc.str() + "</val>\n" : "") +
+		//"  </parent>\n"
+		"  <mapsym>\n"
+		"    <function id=\"0x" + to_string(symbolIds[funcname], hex) + "\" name=\"" + nameesc.str() + "\" size=\"" + std::to_string(addr.size) + "\">\n"
 		"      <addr space=\"" + addr.addr.space + "\" offset=\"0x" + to_string(addr.addr.offset, hex) + "\"/>\n"
 		"      <localdb lock=\"false\" main=\"" "stack" "\">\n        <scope name=\"" + nameesc.str() + "\">\n"
-		"          <parent>\n            <val/>\n" +
-		std::string(parentname.size() != 0 ? "            <val>" + parentnameesc.str() + "</val>\n" : "") +
-		"          </parent>\n          <rangelist/>\n"
+		"          <parent id=\"0x" + to_string(parentname.size() != 0 ? 0 : symbolIds[parentname], hex) + "\"/>\n"
+		//"          <parent>\n            <val/>\n" +
+		//std::string(parentname.size() != 0 ? "            <val>" + parentnameesc.str() + "</val>\n" : "") +
+		//"          </parent>\n"
+		"          <rangelist/>\n"
 		"          <symbollist>\n" + symbols + "          </symbollist>\n        </scope>\n      </localdb>\n" +
 		writeFuncProto(func, (fixupTargetMap.find(funcname) != fixupTargetMap.end() ?
 			"<inject>" + fixupTargetMap[funcname] + "</inject>" :
@@ -1320,7 +1324,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 						xml_escape(datanameesc, msi.name.c_str());
 						//typelock, namelock, readonly, volatile also cat (szCoreTypes), index
 						//callback->status("Data name: " + dataname);
-						res = "<result>\n  <parent>\n    <val/>\n  </parent>\n  <mapsym>\n" //type=\"dynamic\"/\"equate"
+						res = "<result id=\"0x0\">\n  <parent id=\"0x0\"/>\n  <mapsym>\n" //type=\"dynamic\"/\"equate"
 							"    <symbol name=\"" + datanameesc.str() + "\" typelock=\"" +
 							(msi.typeChain.begin()->metaType == "unknown" ? "true" : "true") +
 							"\" namelock=\"" + std::string(msi.name.size() != 0 ? "true" : "false") +
@@ -1336,7 +1340,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 						ostringstream nameesc;
 						xml_escape(nameesc, msi.name.c_str());
 						//callback->status("Extern name: " + externname);
-						res = "<result>\n  <parent>\n    <val/>\n  </parent>\n  <mapsym>\n"
+						res = "<result id=\"0x0\">\n  <mapsym>\n"
 							"    <externrefsymbol name=\"" + nameesc.str() + "\">\n"
 							"      <addr space=\"" + addr.space +
 							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>\n"
@@ -1347,7 +1351,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 					} else if (msi.kind == KIND_LABEL) {
 						ostringstream nameesc;
 						xml_escape(nameesc, msi.name.c_str());
-						res = "<result>\n  <parent>\n    <val/>\n  </parent>\n  <mapsym>\n"
+						res = "<result id=\"0x0\">\n  <parent id=\"0x0\"/>\n  <mapsym>\n"
 							"    <labelsym name=\"" + nameesc.str() +
 							"\" namelock=\"true\" typelock=\"true\" readonly=\"" +
 							std::string(msi.readonly ? "true" : "false") + "\" volatile=\"" +
@@ -1387,6 +1391,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 					//getMappedSymbolsXML();			// getMappedSymbolsXML
 					break;
 				}
+				//case 'N': //getNamespacePath
 				case 'P':
 				{
 					addrstring = readQueryString();
@@ -1847,6 +1852,8 @@ void DecompInterface::setupTranslator(DecompileCallback* cb, std::string sleighf
 	uniqueBase = trans->getUniqueBase(); //for pcode injections
 }
 
+#define getDefaultSpace getDefaultCodeSpace //Ghidra 10
+
 void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 	std::string pspecfilename, std::string cspecfilename, std::vector<CoreType>& coreTypes,
 	Options opt, int timeout, int maxpload)
@@ -2198,6 +2205,7 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 
 	delete doc;
 	xmlOptions = getOptions(opt);
+	symbolIds.clear();
 }
 
 /**

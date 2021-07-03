@@ -3435,7 +3435,7 @@ void PcodeSnippet::addSymbol(SleighSymbol *sym)
 
   res = tree.insert( sym );
   if (!res.second) {
-    reportError("Duplicate symbol name: "+sym->getName());
+    reportError((const Location *)0,"Duplicate symbol name: "+sym->getName());
     delete sym;		// Symbol is unattached to anything else
   }
 }
@@ -3471,7 +3471,7 @@ PcodeSnippet::PcodeSnippet(const SleighBase *slgh)
   tempbase = 0;
   errorcount = 0;
   result = (ConstructTpl *)0;
-  setDefaultSpace(slgh->getDefaultSpace());
+  setDefaultSpace(slgh->getDefaultCodeSpace());
   setConstantSpace(slgh->getConstantSpace());
   setUniqueSpace(slgh->getUniqueSpace());
   int4 num = slgh->numSpaces();
@@ -3497,7 +3497,7 @@ PcodeSnippet::~PcodeSnippet(void)
   }
 }
 
-void PcodeSnippet::reportError(const string &msg)
+void PcodeSnippet::reportError(const Location *loc, const string &msg)
 
 {
   if (errorcount == 0)
@@ -3564,11 +3564,11 @@ int4 PcodeSnippet::lex(void)
   pcode = this;			// Setup global object for yyparse
   int4 res = yyparse();
   if (res != 0) {
-    reportError("Syntax error");
+    reportError((const Location *)0,"Syntax error");
     return false;
   }
   if (!PcodeCompile::propagateSize(result)) {
-    reportError("Could not resolve at least 1 variable size");
+    reportError((const Location *)0,"Could not resolve at least 1 variable size");
     return false;
   }
   return true;
@@ -3588,6 +3588,6 @@ int yylex(void) {
 int yyerror(const char *s)
 
 {
-  pcode->reportError(s);
+  pcode->reportError((const Location *)0,s);
   return 0;
 }

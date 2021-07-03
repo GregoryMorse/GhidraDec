@@ -15,6 +15,50 @@
  */
 #include "sleighbase.hh"
 
+const int4 SleighBase::SLA_FORMAT_VERSION = 3;
+
+const uintb SleighBase::MAX_UNIQUE_SIZE = 128;
+
+int4 SourceFileIndexer::index(const string filename){
+	auto it = fileToIndex.find(filename);
+	if (fileToIndex.end() != it){
+		return it->second;
+	}
+	fileToIndex[filename] = leastUnusedIndex;
+	indexToFile[leastUnusedIndex] = filename;
+	return leastUnusedIndex++;
+}
+
+int4 SourceFileIndexer::getIndex(string filename){
+	return fileToIndex[filename];
+}
+
+string SourceFileIndexer::getFilename(int4 index){
+	return indexToFile[index];
+}
+
+void SourceFileIndexer::restoreXml(const Element *el){
+	const List &sourceFiles(el->getChildren());
+	List::const_iterator iter = sourceFiles.begin();
+	for (; iter != sourceFiles.end(); ++iter){
+		string filename = (*iter)->getAttributeValue("name");
+		int4 index = stoi((*iter)->getAttributeValue("index"),NULL,10);
+		fileToIndex[filename] = index;
+		indexToFile[index] = filename;
+	}
+}
+
+void SourceFileIndexer::saveXml(ostream& s) const {
+	s << "<sourcefiles>\n";
+	for (int4 i = 0; i < leastUnusedIndex; ++i){
+		s << ("<sourcefile name=\"");
+		const char *str = indexToFile.at(i).c_str();
+		xml_escape(s,str);
+		s << "\" index=\"" << dec << i << "\"/>\n";
+	}
+	s << "</sourcefiles>\n";
+}
+
 SleighBase::SleighBase(void)
 
 {
@@ -26,13 +70,12 @@ SleighBase::SleighBase(void)
 
 /// Assuming the symbol table is populated, iterate through the table collecting
 /// registers (for the map), user-op names, and context fields.
-void SleighBase::buildXrefs(void)
+void SleighBase::buildXrefs(vector<string> &errorPairs)
 
 {
   SymbolScope *glb = symtab.getGlobalScope();
   SymbolTree::const_iterator iter;
   SleighSymbol *sym;
-  int4 errors = 0;
   ostringstream s;
 
   for(iter=glb->begin();iter!=glb->end();++iter) {
@@ -41,9 +84,8 @@ void SleighBase::buildXrefs(void)
       pair<VarnodeData,string> ins(((VarnodeSymbol *)sym)->getFixedVarnode(),sym->getName());
       pair<map<VarnodeData,string>::iterator,bool> res = varnode_xref.insert(ins);
       if (!res.second) {
-	s << "Duplicate (offset,size) pair for registers: ";
-	s << sym->getName() << " and " << (*(res.first)).second << '\n';
-	errors += 1;
+	errorPairs.push_back(sym->getName());
+	errorPairs.push_back((*(res.first)).second);
       }
     }
     else if (sym->getType() == SleighSymbol::userop_symbol) {
@@ -60,8 +102,6 @@ void SleighBase::buildXrefs(void)
       registerContext(csym->getName(),startbit,endbit);
     }
   }
-  if (errors > 0)
-    throw SleighError(s.str());
 }
 
 /// If \b this SleighBase is being reused with a new program, the context
@@ -82,13 +122,6 @@ void SleighBase::reregisterContext(void)
       registerContext(csym->getName(),startbit,endbit);
     }
   }
-}
-
-void SleighBase::addRegister(const string &nm,AddrSpace *base,uintb offset,int4 size)
-
-{
-  VarnodeSymbol *sym = new VarnodeSymbol(nm,base,offset,size);
-  symtab.addSymbol(sym);
 }
 
 const VarnodeData &SleighBase::getRegister(const string &nm) const
@@ -146,6 +179,7 @@ void SleighBase::saveXml(ostream &s) const
 
 {
   s << "<sleigh";
+  a_v_i(s,"version",SLA_FORMAT_VERSION);
   a_v_b(s,"bigendian",isBigEndian());
   a_v_i(s,"align",alignment);
   a_v_u(s,"uniqbase",getUniqueBase());
@@ -156,12 +190,13 @@ void SleighBase::saveXml(ostream &s) const
   if (numSections != 0)
     a_v_u(s,"numsections",numSections);
   s << ">\n";
-
+  indexer.saveXml(s);
   s << "<spaces";
-  a_v(s,"defaultspace",getDefaultSpace()->getName());
+  a_v(s,"defaultspace",getDefaultCodeSpace()->getName());
   s << ">\n";
   for(int4 i=0;i<numSpaces();++i) {
     AddrSpace *spc = getSpace(i);
+    if (spc == (AddrSpace *)0) continue;
     if ((spc->getType()==IPTR_CONSTANT) || 
 	(spc->getType()==IPTR_FSPEC)||
 	(spc->getType()==IPTR_IOP)||
@@ -183,6 +218,7 @@ void SleighBase::restoreXml(const Element *el)
   maxdelayslotbytes = 0;
   unique_allocatemask = 0;
   numSections = 0;
+  int4 version = 0;
   setBigEndian(xml_readbool(el->getAttributeValue("bigendian")));
   {
     istringstream s(el->getAttributeValue("align"));
@@ -214,18 +250,30 @@ void SleighBase::restoreXml(const Element *el)
       s3.unsetf(ios::dec | ios::hex | ios::oct);
       s3 >> numSections;
     }
+    else if (attrname == "version") {
+      istringstream s(el->getAttributeValue(i));
+      s.unsetf(ios::dec | ios::hex | ios::oct);
+      s >> version;
+    }
   }
+  if (version != SLA_FORMAT_VERSION)
+    throw LowlevelError(".sla file has wrong format");
   const List &list(el->getChildren());
   List::const_iterator iter;
   iter = list.begin();
   while((*iter)->getName() == "floatformat") {
-    floatformats.push_back(FloatFormat());
+    floatformats.emplace_back();
     floatformats.back().restoreXml(*iter);
     ++iter;
   }
+  indexer.restoreXml(*iter);
+  iter++;
   restoreXmlSpaces(*iter,this);
   iter++;
   symtab.restoreXml(*iter,this);
   root = (SubtableSymbol *)symtab.getGlobalScope()->findSymbol("instruction");
-  buildXrefs();
+  vector<string> errorPairs;
+  buildXrefs(errorPairs);
+  if (!errorPairs.empty())
+    throw SleighError("Duplicate register pairs");
 }

@@ -117,7 +117,8 @@ void Override::insertProtoOverride(const Address &callpoint,FuncProto *p)
   if (iter != protoover.end())	// Check for pre-existing override
     delete (*iter).second;	// and delete it
 
-  protoover[callpoint] = p;
+  p->setOverride(true);		// Mark this as an override
+  protoover[callpoint] = p;	// Take ownership of the object
 }
 
 /// \brief Flag an indirect jump for multistage analysis
@@ -248,7 +249,7 @@ void Override::printRaw(ostream &s,Architecture *glb) const
     s << "dead code delay on " << spc->getName() << " set to " << dec << deadcodedelay[i] << endl;
   }
 
-  for(iter=forcegoto.begin();iter!=forcegoto.end();++iter)
+  for(iter=indirectover.begin();iter!=indirectover.end();++iter)
     s << "override indirect at " << (*iter).first << " to call directly to " << (*iter).second << endl;
 
   map<Address,FuncProto *>::const_iterator fiter;

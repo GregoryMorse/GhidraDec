@@ -20,6 +20,7 @@
 #define __CPUI_FSPEC__
 
 #include "op.hh"
+#include "rangemap.hh"
 
 class JoinRecord;
 
@@ -85,6 +86,7 @@ public:
   bool isExclusion(void) const { return (alignment==0); }	///< Return \b true if this holds a single parameter exclusively
   bool isReverseStack(void) const { return ((flags & reverse_stack)!=0); }	///< Return \b true if parameters are allocated in reverse order
   bool contains(const ParamEntry &op2) const;		///< Does \b this contain the indicated entry.
+  bool containedBy(const Address &addr,int4 sz) const;	///< Is this entry contained by the given range
   int4 justifiedContain(const Address &addr,int4 sz) const;	///< Calculate endian aware containment
   bool getContainer(const Address &addr,int4 sz,VarnodeData &res) const;
   OpCode assumedExtension(const Address &addr,int4 sz,VarnodeData &res) const;
@@ -93,10 +95,49 @@ public:
   uintb getBase(void) const { return addressbase; }	///< Get the starting offset of \b this entry
   Address getAddrBySlot(int4 &slot,int4 sz) const;
   void restoreXml(const Element *el,const AddrSpaceManager *manage,bool normalstack);
-  void extraChecks(vector<ParamEntry> &entry);
+  void extraChecks(list<ParamEntry> &entry);
   bool isParamCheckHigh(void) const { return ((flags & extracheck_high)!=0); }	///< Return \b true if there is a high overlap
   bool isParamCheckLow(void) const { return ((flags & extracheck_low)!=0); }	///< Return \b true if there is a low overlap
 };
+
+/// \brief Class for storing ParamEntry objects in an interval range (rangemap)
+class ParamEntryRange {
+  uintb first;		///< Starting offset of the ParamEntry's range
+  uintb last;		///< Ending offset of the ParamEntry's range
+  int4 position;	///< Position of the ParamEntry within the entire prototype list
+  ParamEntry *entry;	///< Pointer to the actual ParamEntry
+
+  /// \brief Helper class for initializing ParamEntryRange in a range map
+  class InitData {
+    friend class ParamEntryRange;
+    int4 position;	///< Position (within the full list) being assigned to the ParamEntryRange
+    ParamEntry *entry;	///< Underlying ParamEntry being assigned to the ParamEntryRange
+  public:
+    InitData(int4 pos,ParamEntry *e) { position = pos; entry = e; }	///< Constructor
+  };
+
+  /// \brief Helper class for subsorting on position
+  class SubsortPosition {
+    int4 position;	///< The position value
+  public:
+    SubsortPosition(void) {}					///< Constructor for use with rangemap
+    SubsortPosition(int4 pos) { position = pos; }		///< Construct given position
+    SubsortPosition(bool val) { position = val ? 1000000 : 0; }	///< Constructor minimal/maximal subsort
+    bool operator<(const SubsortPosition &op2) { return position < op2.position; }	///< Compare operation
+  };
+public:
+  typedef uintb linetype;		///< The linear element for a rangemap
+  typedef SubsortPosition subsorttype;	///< The sub-sort object for a rangemap
+  typedef InitData inittype;		///< Initialization data for a ScopeMapper
+
+  ParamEntryRange(const inittype &data,uintb f,uintb l) {
+    first = f; last = l; position = data.position; entry = data.entry; }	///< Initialize the range
+  uintb getFirst(void) const { return first; }	///< Get the first address in the range
+  uintb getLast(void) const { return last; }		///< Get the last address in the range
+  subsorttype getSubsort(void) const { return SubsortPosition(position); }	///< Get the sub-subsort object
+  ParamEntry *getParamEntry(void) const { return entry; }	///< Get pointer to actual ParamEntry
+};
+typedef rangemap<ParamEntryRange> ParamEntryResolver;	///< A map from offset to ParamEntry
 
 /// \brief A register or memory register that may be used to pass a parameter or return value
 ///
@@ -250,6 +291,14 @@ public:
 
 /// \brief Basic elements of a parameter: address, data-type, properties
 struct ParameterPieces {
+  enum {
+    isthis = 1,		///< Parameter is "this" pointer
+    hiddenretparm = 2,	///< Parameter is hidden pointer to return value, mirrors Varnode::hiddenretparm
+    indirectstorage = 4,	///< Parameter is indirect pointer to true parameter, mirrors Varnode::indirectstorage
+    namelock = 8,	///< Parameter's name is locked, mirrors Varnode::namelock
+    typelock = 16,	///< Parameter's data-type is locked, mirrors Varnode::typelock
+    sizelock = 32	///< Size of the parameter is locked (but not the data-type)
+  };
   Address addr;			///< Storage address of the parameter
   Datatype *type;		///< The datatype of the parameter
   uint4 flags;			///< additional attributes of the parameter
@@ -265,7 +314,7 @@ public:
   enum {
     unaffected = 1,	///< The sub-function does not change the value at all
     killedbycall = 2,	///< The memory is changed and is completely unrelated to its original value
-    return_address = 3,	///< The memory is being used to pass back a return value from the sub-function
+    return_address = 3,	///< The memory is being used to store the return address
     unknown_effect = 4	///< An unknown effect (indicates the absence of an EffectRecord)
   };
 private:
@@ -344,6 +393,18 @@ public:
   /// \return \b true if the storage location can be split
   virtual bool checkSplit(const Address &loc,int4 size,int4 splitpoint) const=0;
 
+  /// \brief Characterize whether the given range overlaps parameter storage
+  ///
+  /// Does the range naturally fit inside a potential parameter entry from this list or does
+  /// it contain a parameter entry. Return one of three values indicating this characterization:
+  ///   - 0 means there is no intersection between the range and any parameter in this list
+  ///   - 1 means that at least one parameter contains the range in a properly justified manner
+  ///   - 2 means no parameter contains the range, but the range contains at least one ParamEntry
+  /// \param loc is the starting address of the given range
+  /// \param size is the number of bytes in the given range
+  /// \return the characterization code
+  virtual int4 characterizeAsParam(const Address &loc,int4 size) const=0;
+
   /// \brief Does the given storage location make sense as a parameter
   ///
   /// Within \b this model, decide if the storage location can be considered a parameter.
@@ -362,6 +423,14 @@ public:
   /// \param slotsize is the number of consumed slots to pass back
   /// \return \b true if the location can be a parameter
   virtual bool possibleParamWithSlot(const Address &loc,int4 size,int4 &slot,int4 &slotsize) const=0;
+
+  /// \brief Pass-back the biggest parameter contained within the given range
+  ///
+  /// \param loc is the starting address of the given range
+  /// \param size is the number of bytes in the range
+  /// \param res will hold the parameter storage description being passed back
+  /// \return \b true if there is at least one parameter contained in the range
+  virtual bool getBiggestContainedParam(const Address &loc,int4 size,VarnodeData &res) const=0;
 
   /// \brief Check if the given storage location looks like an \e unjustified parameter
   ///
@@ -433,9 +502,10 @@ protected:
   int4 pointermax; 			///< If non-zero, maximum size of a data-type before converting to a pointer
   bool thisbeforeret;			///< Does a \b this parameter come before a hidden return parameter
   int4 nonfloatgroup;			///< Group of first entry which is not marked float
-  vector<ParamEntry> entry;		///< The ordered list of parameter entries
+  list<ParamEntry> entry;		///< The ordered list of parameter entries
+  vector<ParamEntryResolver *> resolverMap;	///< Map from space id to resolver
   AddrSpace *spacebase;			///< Address space containing relative offset parameters
-  int4 findEntry(const Address &loc,int4 size) const;	///< Given storage location find matching ParamEntry
+  const ParamEntry *findEntry(const Address &loc,int4 size) const;	///< Given storage location find matching ParamEntry
   Address assignAddress(const Datatype *tp,vector<int4> &status) const;	///< Assign storage for given parameter data-type
   void buildTrialMap(ParamActive *active) const;	///< Build map from parameter trials to model ParamEntrys
   void separateFloat(ParamActive *active,int4 &floatstart,int4 &floatstop,int4 &start,int4 &stop) const;
@@ -443,18 +513,22 @@ protected:
   void forceNoUse(ParamActive *active,int4 start,int4 stop) const;
   void forceInactiveChain(ParamActive *active,int4 maxchain,int4 start,int4 stop) const;
   void calcDelay(void);		///< Calculate the maximum heritage delay for any potential parameter in this list
+  void populateResolver(void);	///< Build the ParamEntry resolver maps
 public:
   ParamListStandard(void) {}						///< Construct for use with restoreXml()
   ParamListStandard(const ParamListStandard &op2);			///< Copy constructor
-  const vector<ParamEntry> &getEntry(void) const { return entry; }	///< Get the list of parameter entries
+  virtual ~ParamListStandard(void);
+  const list<ParamEntry> &getEntry(void) const { return entry; }	///< Get the list of parameter entries
   virtual uint4 getType(void) const { return p_standard; }
   virtual void assignMap(const vector<Datatype *> &proto,bool isinput,
 			 TypeFactory &typefactory,vector<ParameterPieces> &res) const;
   virtual void fillinMap(ParamActive *active) const;
   virtual bool checkJoin(const Address &hiaddr,int4 hisize,const Address &loaddr,int4 losize) const;
   virtual bool checkSplit(const Address &loc,int4 size,int4 splitpoint) const;
+  virtual int4 characterizeAsParam(const Address &loc,int4 size) const;
   virtual bool possibleParam(const Address &loc,int4 size) const;
   virtual bool possibleParamWithSlot(const Address &loc,int4 size,int4 &slot,int4 &slotsize) const;
+  virtual bool getBiggestContainedParam(const Address &loc,int4 size,VarnodeData &res) const;
   virtual bool unjustifiedContainer(const Address &loc,int4 size,VarnodeData &res) const;
   virtual OpCode assumedExtension(const Address &addr,int4 size,VarnodeData &res) const;
   virtual AddrSpace *getSpacebase(void) const { return spacebase; }
@@ -513,6 +587,7 @@ public:
   ParamListMerged(void) : ParamListStandard() {}			///< Constructor for use with restoreXml
   ParamListMerged(const ParamListMerged &op2) : ParamListStandard(op2) {}	///< Copy constructor
   void foldIn(const ParamListStandard &op2);				///< Add another model to the union
+  void finalize(void) { populateResolver(); }				///< Fold-ins are finished, finalize \b this
   virtual uint4 getType(void) const { return p_merged; }
   virtual void assignMap(const vector<Datatype *> &proto,bool isinput,
 			 TypeFactory &typefactory,vector<ParameterPieces> &res) const {
@@ -551,6 +626,7 @@ class ProtoModel {
   int4 extrapop;		///< Extra bytes popped from stack
   ParamList *input;		///< Resource model for input parameters
   ParamList *output;		///< Resource model for output parameters
+  const ProtoModel *compatModel;	///< The model \b this is a copy of
   vector<EffectRecord> effectlist; ///< List of side-effects
   vector<VarnodeData> likelytrash;	///< Storage locations potentially carrying \e trash values
   int4 injectUponEntry;		///< Id of injection to perform at beginning of function (-1 means not used)
@@ -577,6 +653,7 @@ public:
   void setExtraPop(int4 ep) { extrapop = ep; }		///< Set the stack-pointer \e extrapop
   int4 getInjectUponEntry(void) const { return injectUponEntry; }	///< Get the inject \e uponentry id
   int4 getInjectUponReturn(void) const { return injectUponReturn; }	///< Get the inject \e uponreturn id
+  bool isCompatible(const ProtoModel *op2) const;	///< Return \b true if other given model can be substituted for \b this
 
   /// \brief Given a list of input \e trials, derive the most likely input prototype
   ///
@@ -635,6 +712,20 @@ public:
   vector<EffectRecord>::const_iterator effectEnd(void) const { return effectlist.end(); }	///< Get an iterator to the last EffectRecord
   int4 numLikelyTrash(void) const { return likelytrash.size(); }	///< Get the number of \e likelytrash locations
   const VarnodeData &getLikelyTrash(int4 i) const { return likelytrash[i]; }	///< Get the i-th \e likelytrashh location
+
+  /// \brief Characterize whether the given range overlaps parameter storage
+  ///
+  /// Does the range naturally fit inside a potential parameter entry from this model or does
+  /// it contain a parameter entry. Return one of three values indicating this characterization:
+  ///   - 0 means there is no intersection between the range and any ParamEntry
+  ///   - 1 means that at least one ParamEntry contains the range in a properly justified manner
+  ///   - 2 means no ParamEntry contains the range, but the range contains at least one ParamEntry
+  /// \param loc is the starting address of the given range
+  /// \param size is the number of bytes in the given range
+  /// \return the characterization code
+  int4 characterizeAsInputParam(const Address &loc,int4 size) const {
+    return input->characterizeAsParam(loc, size);
+  }
 
   /// \brief Does the given storage location make sense as an input parameter
   ///
@@ -715,6 +806,16 @@ public:
   /// INT_PIECE indicates the extension is determined by the specific prototype.
   OpCode assumedOutputExtension(const Address &addr,int4 size,VarnodeData &res) const {
     return output->assumedExtension(addr,size,res); }
+
+  /// \brief Pass-back the biggest input parameter contained within the given range
+  ///
+  /// \param loc is the starting address of the given range
+  /// \param size is the number of bytes in the range
+  /// \param res will hold the parameter storage description being passed back
+  /// \return \b true if there is at least one parameter contained in the range
+  bool getBiggestContainedInputParam(const Address &loc,int4 size,VarnodeData &res) const {
+    return input->getBiggestContainedParam(loc, size, res);
+  }
 
   AddrSpace *getSpacebase(void) const { return input->getSpacebase(); }	///< Get the stack space associated with \b this model
   bool isStackGrowsNegative(void) const { return stackgrowsnegative; }	///< Return \b true if the stack \e grows toward smaller addresses
@@ -819,11 +920,13 @@ public:
   virtual bool isTypeLocked(void) const=0;		///< Is the parameter data-type locked
   virtual bool isNameLocked(void) const=0;		///< Is the parameter name locked
   virtual bool isSizeTypeLocked(void) const=0;		///< Is the size of the parameter locked
+  virtual bool isThisPointer(void) const=0;		///< Is \b this the "this" pointer for a class method
   virtual bool isIndirectStorage(void) const=0;		///< Is \b this really a pointer to the true parameter
   virtual bool isHiddenReturn(void) const=0;		///< Is \b this a pointer to storage for a return value
   virtual bool isNameUndefined(void) const=0;		///< Is the name of \b this parameter undefined
   virtual void setTypeLock(bool val)=0;			///< Toggle the lock on the data-type
   virtual void setNameLock(bool val)=0;			///< Toggle the lock on the name
+  virtual void setThisPointer(bool val)=0;		///< Toggle whether \b this is the "this" pointer for a class method
 
   /// \brief Change (override) the data-type of a \e size-locked parameter.
   ///
@@ -873,22 +976,26 @@ class ParameterBasic : public ProtoParameter {
   string name;			///< The name of the parameter, "" for undefined or return value parameters
   Address addr;			///< Storage address of the parameter
   Datatype *type;		///< Data-type of the parameter
-  uint4 flags;			///< Lock properties. Varnode::mark is co-opted to hold the \e size-lock flag
+  uint4 flags;			///< Lock and other properties from ParameterPieces flags
 public:
   ParameterBasic(const string &nm,const Address &ad,Datatype *tp,uint4 fl) {
     name = nm; addr = ad; type = tp; flags=fl; }		///< Construct from components
+  ParameterBasic(Datatype *tp) {
+    type = tp; flags = 0; }			///< Construct a \e void parameter
   virtual const string &getName(void) const { return name; }
   virtual Datatype *getType(void) const { return type; }
   virtual Address getAddress(void) const { return addr; }
   virtual int4 getSize(void) const { return type->getSize(); }
-  virtual bool isTypeLocked(void) const { return ((flags&Varnode::typelock)!=0); }
-  virtual bool isNameLocked(void) const { return ((flags&Varnode::namelock)!=0); }
-  virtual bool isSizeTypeLocked(void) const { return ((flags&Varnode::mark)!=0); }
-  virtual bool isIndirectStorage(void) const { return ((flags&Varnode::indirectstorage)!=0); }
-  virtual bool isHiddenReturn(void) const { return ((flags&Varnode::hiddenretparm)!=0); }
+  virtual bool isTypeLocked(void) const { return ((flags&ParameterPieces::typelock)!=0); }
+  virtual bool isNameLocked(void) const { return ((flags&ParameterPieces::namelock)!=0); }
+  virtual bool isSizeTypeLocked(void) const { return ((flags&ParameterPieces::sizelock)!=0); }
+  virtual bool isThisPointer(void) const { return ((flags&ParameterPieces::isthis)!=0); }
+  virtual bool isIndirectStorage(void) const { return ((flags&ParameterPieces::indirectstorage)!=0); }
+  virtual bool isHiddenReturn(void) const { return ((flags&ParameterPieces::hiddenretparm)!=0); }
   virtual bool isNameUndefined(void) const { return (name.size()==0); }
   virtual void setTypeLock(bool val);
   virtual void setNameLock(bool val);
+  virtual void setThisPointer(bool val);
   virtual void overrideSizeLockType(Datatype *ct);
   virtual void resetSizeLockType(TypeFactory *factory);
   virtual ProtoParameter *clone(void) const;
@@ -969,11 +1076,13 @@ public:
   virtual bool isTypeLocked(void) const;
   virtual bool isNameLocked(void) const;
   virtual bool isSizeTypeLocked(void) const;
+  virtual bool isThisPointer(void) const;
   virtual bool isIndirectStorage(void) const;
   virtual bool isHiddenReturn(void) const;
   virtual bool isNameUndefined(void) const;
   virtual void setTypeLock(bool val);
   virtual void setNameLock(bool val);
+  virtual void setThisPointer(bool val);
   virtual void overrideSizeLockType(Datatype *ct);
   virtual void resetSizeLockType(TypeFactory *factory);
   virtual ProtoParameter *clone(void) const;
@@ -1066,7 +1175,8 @@ class FuncProto {
     unknown_model = 512,	///< Set if the PrototypeModel isn't known
     is_constructor = 0x400,	///< Function is an (object-oriented) constructor
     is_destructor = 0x800,	///< Function is an (object-oriented) destructor
-    has_thisptr= 0x1000		///< Function is a method with a 'this' pointer as an argument
+    has_thisptr= 0x1000,	///< Function is a method with a 'this' pointer as an argument
+    is_override = 0x2000	///< Set if \b this prototype is created to override a single call site
   };
   ProtoModel *model;		///< Model of for \b this prototype
   ProtoStore *store;		///< Storage interface for parameters
@@ -1075,6 +1185,8 @@ class FuncProto {
   vector<EffectRecord> effectlist;	///< Side-effects associated with non-parameter storage locations
   vector<VarnodeData> likelytrash;	///< Locations that may contain \e trash values
   int4 injectid;		///< (If non-negative) id of p-code snippet that should replace this function
+  int4 returnBytesConsumed;	///< Number of bytes of return value that are consumed by callers (0 = all bytes)
+  void updateThisPointer(void);	///< Make sure any "this" parameter is properly marked
 protected:
   void paramShift(int4 paramshift);	///< Add parameters to the front of the input parameter list
   bool isParamshiftApplied(void) const { return ((flags&paramshift_applied)!=0); }	///< Has a parameter shift been applied
@@ -1127,6 +1239,14 @@ public:
   /// \return the id value corresponding to the specific call-fixup or -1 if there is no call-fixup
   int4 getInjectId(void) const { return injectid; }
 
+  /// \brief Get an estimate of the number of bytes consumed by callers of \b this prototype.
+  ///
+  /// A value of 0 means \e all possible bytes of the storage location are consumed.
+  /// \return the number of bytes or 0
+  int4 getReturnBytesConsumed(void) const { return returnBytesConsumed; }
+
+  bool setReturnBytesConsumed(int4 val);	///< Set the number of bytes consumed by callers of \b this
+
   /// \brief Does a function with \b this prototype never return
   bool isNoReturn(void) const { return ((flags & no_return)!=0); }
 
@@ -1137,11 +1257,6 @@ public:
 
   /// \brief Is \b this a prototype for a class method, taking a \e this pointer.
   bool hasThisPointer(void) const { return ((flags & has_thisptr)!=0); }
-
-  /// \brief Toggle the \e this-call setting for \b this prototype
-  ///
-  /// \param val is \b true if \b this prototype uses a \e this pointer
-  void setThisPointer(bool val) { flags = val ? (flags|has_thisptr) : (flags & ~((uint4)has_thisptr)); }
 
   /// \brief Is \b this prototype for a class constructor method
   bool isConstructor(void) const { return ((flags & is_constructor)!=0); }
@@ -1225,8 +1340,8 @@ public:
   bool checkInputSplit(const Address &loc,int4 size,int4 splitpoint) const {
     return model->checkInputSplit(loc,size,splitpoint); }
 
-  void updateInputTypes(const vector<Varnode *> &triallist,ParamActive *activeinput);
-  void updateInputNoTypes(const vector<Varnode *> &triallist,ParamActive *activeinput,TypeFactory *factory);
+  void updateInputTypes(Funcdata &data,const vector<Varnode *> &triallist,ParamActive *activeinput);
+  void updateInputNoTypes(Funcdata &data,const vector<Varnode *> &triallist,ParamActive *activeinput);
   void updateOutputTypes(const vector<Varnode *> &triallist);
   void updateOutputNoTypes(const vector<Varnode *> &triallist,TypeFactory *factory);
   void updateAllTypes(const vector<string> &namelist,const vector<Datatype *> &typelist,bool dtdtdt);
@@ -1240,11 +1355,14 @@ public:
   bool isStackGrowsNegative(void) const { return model->isStackGrowsNegative(); }	///< Return \b true if the stack grows toward smaller addresses
   bool isDotdotdot(void) const { return ((flags&dotdotdot)!=0); }	///< Return \b true if \b this takes a variable number of arguments
   void setDotdotdot(bool val) { flags = val ? (flags|dotdotdot) : (flags & ~((uint4)dotdotdot)); }	///< Toggle whether \b this takes variable arguments
+  bool isOverride(void) const { return ((flags&is_override)!=0); }	///< Return \b true if \b this is a call site override
+  void setOverride(bool val) { flags = val ? (flags|is_override) : (flags & ~((uint4)is_override)); }	///< Toggle whether \b this is a call site override
   uint4 hasEffect(const Address &addr,int4 size) const;
   vector<EffectRecord>::const_iterator effectBegin(void) const;	///< Get iterator to front of EffectRecord list
   vector<EffectRecord>::const_iterator effectEnd(void) const;	///< Get iterator to end of EffectRecord list
   int4 numLikelyTrash(void) const;				///< Get the number of \e likely-trash locations
   const VarnodeData &getLikelyTrash(int4 i) const;		///< Get the i-th \e likely-trash location
+  int4 characterizeAsInputParam(const Address &addr,int4 size) const;
   bool possibleInputParam(const Address &addr,int4 size) const;
   bool possibleOutputParam(const Address &addr,int4 size) const;
 
@@ -1292,6 +1410,9 @@ public:
   OpCode assumedOutputExtension(const Address &addr,int4 size,VarnodeData &res) const {
     return model->assumedOutputExtension(addr,size,res); }
 
+  /// \brief Pass-back the biggest potential input parameter contained within the given range
+  bool getBiggestContainedInputParam(const Address &loc,int4 size,VarnodeData &res) const;
+
   bool isCompatible(const FuncProto &op2) const;
   AddrSpace *getSpacebase(void) const { return model->getSpacebase(); }		///< Get the \e stack address space
   void printRaw(const string &funcname,ostream &s) const;
@@ -1337,6 +1458,7 @@ class FuncCallSpecs : public FuncProto {
   int4 matchCallCount;		///< Number of calls to this sub-function within the calling function
   ParamActive activeinput;	///< Info for recovering input parameters
   ParamActive activeoutput;	///< Info for recovering output parameters
+  mutable vector<int4> inputConsume;	///< Number of bytes consumed by sub-function, for each input parameter
   bool isinputactive; 		///< Are we actively trying to recover input parameters
   bool isoutputactive;		///< Are we actively trying to recover output parameters
   bool isbadjumptable;		///< Was the call originally a jump-table we couldn't recover
@@ -1397,6 +1519,8 @@ public:
   void checkOutputTrialUse(Funcdata &data,vector<Varnode *> &trialvn);
   void buildInputFromTrials(Funcdata &data);
   void buildOutputFromTrials(Funcdata &data,vector<Varnode *> &trialvn);
+  int4 getInputBytesConsumed(int4 slot) const;
+  bool setInputBytesConsumed(int4 slot,int4 val) const;
   void paramshiftModifyStart(void);
   bool paramshiftModifyStop(Funcdata &data);
   uint4 hasEffectTranslate(const Address &addr,int4 size) const;

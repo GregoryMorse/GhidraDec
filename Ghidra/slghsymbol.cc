@@ -86,7 +86,7 @@ void SymbolTable::addGlobalSymbol(SleighSymbol *a)
   a->scopeid = scope->getId();
   SleighSymbol *res = scope->addSymbol(a);
   if (res != a)
-    throw SleighError("Duplicate symbol name: "+a->getName());
+    throw SleighError("Duplicate symbol name '" + a->getName() + "'");
 }
 
 void SymbolTable::addSymbol(SleighSymbol *a)
@@ -728,6 +728,13 @@ void VarnodeSymbol::getFixedHandle(FixedHandle &hand,ParserWalker &walker) const
   hand.size = fix.size;
 }
 
+void VarnodeSymbol::collectLocalValues(vector<uintb> &results) const
+
+{
+  if (fix.space->getType() == IPTR_INTERNAL)
+    results.push_back(fix.offset);
+}
+
 void VarnodeSymbol::saveXml(ostream &s) const
 
 {
@@ -1032,6 +1039,13 @@ void OperandSymbol::print(ostream &s,ParserWalker &walker) const
       s << "-0x" << hex << -val;
   }
   walker.popOperand();
+}
+
+void OperandSymbol::collectLocalValues(vector<uintb> &results) const
+
+{
+  if (triple != (TripleSymbol *)0)
+    triple->collectLocalValues(results);
 }
 
 void OperandSymbol::saveXml(ostream &s) const
@@ -1542,6 +1556,29 @@ void Constructor::markSubtableOperands(vector<int4> &check) const
   }
 }
 
+void Constructor::collectLocalExports(vector<uintb> &results) const
+
+{
+  if (templ == (ConstructTpl *)0) return;
+  HandleTpl *handle = templ->getResult();
+  if (handle == (HandleTpl *)0) return;
+  if (handle->getSpace().isConstSpace()) return;	// Even if the value is dynamic, the pointed to value won't get used
+  if (handle->getPtrSpace().getType() != ConstTpl::real) {
+    if (handle->getTempSpace().isUniqueSpace())
+      results.push_back(handle->getTempOffset().getReal());
+    return;
+  }
+  if (handle->getSpace().isUniqueSpace()) {
+    results.push_back(handle->getPtrOffset().getReal());
+    return;
+  }
+  if (handle->getSpace().getType() == ConstTpl::handle) {
+    int4 handleIndex = handle->getSpace().getHandleIndex();
+    OperandSymbol *opSym = getOperand(handleIndex);
+    opSym->collectLocalValues(results);
+  }
+}
+
 bool Constructor::isRecursive(void) const
 
 { // Does this constructor cause recursion with its table
@@ -1559,7 +1596,7 @@ void Constructor::saveXml(ostream &s) const
   s << " parent=\"0x" << hex << parent->getId() << "\"";
   s << " first=\"" << dec << firstwhitespace << "\"";
   s << " length=\"" << minimumlength << "\"";
-  s << " line=\"" << lineno << "\">\n";
+  s << " line=\"" << src_index << ":" << lineno << "\">\n";
   for(int4 i=0;i<operands.size();++i)
     s << "<oper id=\"0x" << hex << operands[i]->getId() << "\"/>\n";
   for(int4 i=0;i<printpiece.size();++i) {
@@ -1606,9 +1643,10 @@ void Constructor::restoreXml(const Element *el,SleighBase *trans)
     s >> minimumlength;
   }
   {
-    istringstream s(el->getAttributeValue("line"));
-    s.unsetf(ios::dec | ios::hex | ios::oct);
-    s >> lineno;
+   	string src_and_line = el->getAttributeValue("line");
+    size_t pos = src_and_line.find(":");
+    src_index = stoi(src_and_line.substr(0, pos),NULL,10);
+    lineno = stoi(src_and_line.substr(pos+1,src_and_line.length()),NULL,10);
   }
   const List &list(el->getChildren());
   List::const_iterator iter;
@@ -1766,7 +1804,7 @@ TokenPattern *Constructor::buildPattern(ostream &s)
 	  }
 				// We should also check that recursion is rightmost extreme
 	  recursion = true;
-	  oppattern.push_back(TokenPattern());
+	  oppattern.emplace_back();
 	}
 	else
 	  oppattern.push_back(*subsym->buildPattern(s));
@@ -1860,6 +1898,13 @@ SubtableSymbol::~SubtableSymbol(void)
   vector<Constructor *>::iterator iter;
   for(iter=construct.begin();iter!=construct.end();++iter)
     delete *iter;
+}
+
+void SubtableSymbol::collectLocalValues(vector<uintb> &results) const
+
+{
+  for(int4 i=0;i<construct.size();++i)
+    construct[i]->collectLocalExports(results);
 }
 
 void SubtableSymbol::saveXml(ostream &s) const
@@ -1973,13 +2018,8 @@ void DecisionProperties::identicalPattern(Constructor *a,Constructor *b)
   if ((!a->isError())&&(!b->isError())) {
     a->setError(true);
     b->setError(true);
-    ostringstream s;
-    s << "Constructors with identical patterns: \n   ";
-    a->printInfo(s);
-    s << "\n   ";
-    b->printInfo(s);
-    s << endl;
-    identerrors.push_back(s.str());
+
+    identerrors.push_back(make_pair(a, b));
   }
 }
 
@@ -1989,13 +2029,8 @@ void DecisionProperties::conflictingPattern(Constructor *a,Constructor *b)
   if ((!a->isError())&&(!b->isError())) {
     a->setError(true);
     b->setError(true);
-    ostringstream s;
-    s << "Constructor patterns cannot be distinguished: \n   ";
-    a->printInfo(s);
-    s << "\n   ";
-    b->printInfo(s);
-    s << endl;
-    conflicterrors.push_back(s.str());
+
+    conflicterrors.push_back(make_pair(a, b));
   }
 }
 

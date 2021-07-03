@@ -13,10 +13,6 @@
 
 namespace idaplugin {
 
-extern RdGlobalInfo* decompInfo;
-
-ea_t globalAddress = 0;
-
 //
 //==============================================================================
 //
@@ -157,21 +153,21 @@ static bool get_current_word(
 	return false;
 }
 
-bool isWordGlobal(const std::string& word, int color)
+bool GhidraDec::isWordGlobal(const std::string& word, int color)
 {
 	return color == COLOR_DEFAULT
 			&& decompInfo->configDB.globals.getObjectByNameOrRealName(word)
 					!= nullptr;
 }
 
-const retdec::config::Object* getWordGlobal(const std::string& word, int color)
+const retdec::config::Object* GhidraDec::getWordGlobal(const std::string& word, int color)
 {
 	return !word.empty() && color == COLOR_DEFAULT
 			? decompInfo->configDB.globals.getObjectByNameOrRealName(word)
 			: nullptr;
 }
 
-bool isWordFunction(const std::string& word, int color)
+bool GhidraDec::isWordFunction(const std::string& word, int color)
 {
 	return color == COLOR_DEFAULT
 			&& decompInfo->configDB.functions.hasFunction(word);
@@ -182,7 +178,7 @@ bool isWordIdentifier(const std::string& word, int color)
 	return color == COLOR_DREF;
 }
 
-const retdec::config::Function* getWordFunction(
+const retdec::config::Function* GhidraDec::getWordFunction(
 		const std::string& word,
 		int color)
 {
@@ -191,7 +187,7 @@ const retdec::config::Function* getWordFunction(
 			: nullptr;
 }
 
-func_t* getIdaFunction(const std::string& word, int color)
+func_t* GhidraDec::getIdaFunction(const std::string& word, int color)
 {
 	if (word.empty())
 	{
@@ -211,20 +207,20 @@ func_t* getIdaFunction(const std::string& word, int color)
 	return get_func((ea_t)cfgFnc->getStart());
 }
 
-bool isCurrentFunction(func_t* fnc)
+bool GhidraDec::isCurrentFunction(func_t* fnc)
 {
 	return decompInfo->navigationActual != decompInfo->navigationList.end()
 			&& fnc == *decompInfo->navigationActual;
 }
 
-func_t* getCurrentFunction()
+func_t* GhidraDec::getCurrentFunction()
 {
 	return decompInfo->navigationActual != decompInfo->navigationList.end() ?
 			*decompInfo->navigationActual :
 			nullptr;
 }
 
-bool isWordCurrentParameter(const std::string& word, int color)
+bool GhidraDec::isWordCurrentParameter(const std::string& word, int color)
 {
 	if (!isWordIdentifier(word, color))
 	{
@@ -269,11 +265,11 @@ bool isWordCurrentParameter(const std::string& word, int color)
  *                  decompile/show it again only if this is set to @c true.
  * @param forceDec  Force new decompilation.
  */
-void decompileFunction(
+void GhidraDec::decompileFunction(
 		TWidget* cv,
 		const std::string& calledFnc,
-		bool force = false,
-		bool forceDec = false)
+		bool force,
+		bool forceDec)
 {
 	auto* globVar = decompInfo->configDB.globals.getObjectByNameOrRealName(
 			calledFnc);
@@ -323,11 +319,44 @@ void decompileFunction(
 	jumpto((ea_t)cfgFnc->getStart() );
 }
 
+const char* GhidraDec::move_backward_ah_t::actionName = "ghidradec:ActionMoveBackward";
+const char* GhidraDec::move_backward_ah_t::actionLabel = "Move backward";
+const char* GhidraDec::move_backward_ah_t::actionHotkey = "ESC";
+
+const char* GhidraDec::move_forward_ah_t::actionName = "ghidradec:ActionMoveForward";
+const char* GhidraDec::move_forward_ah_t::actionLabel = "Move forward";
+const char* GhidraDec::move_forward_ah_t::actionHotkey = "Ctrl+F";
+
+const char* GhidraDec::change_fnc_comment_ah_t::actionName = "ghidradec:ActionChangeFncComment";
+const char* GhidraDec::change_fnc_comment_ah_t::actionLabel = "Edit func comment";
+const char* GhidraDec::change_fnc_comment_ah_t::actionHotkey = ";";
+
+const char* GhidraDec::change_fnc_global_name_ah_t::actionName = "ghidradec:ActionChangeFncGlobName";
+const char* GhidraDec::change_fnc_global_name_ah_t::actionLabel = "Rename";
+const char* GhidraDec::change_fnc_global_name_ah_t::actionHotkey = "N";
+
+const char* GhidraDec::open_xrefs_ah_t::actionName = "ghidradec:ActionOpenXrefs";
+const char* GhidraDec::open_xrefs_ah_t::actionLabel = "Open xrefs window";
+const char* GhidraDec::open_xrefs_ah_t::actionHotkey = "X";
+
+const char* GhidraDec::open_calls_ah_t::actionName = "ghidradec:ActionOpenCalls";
+const char* GhidraDec::open_calls_ah_t::actionLabel = "Open calls window";
+const char* GhidraDec::open_calls_ah_t::actionHotkey = "C";
+
+const char* GhidraDec::change_fnc_type_ah_t::actionName = "ghidradec:ActionChangeFncType";
+const char* GhidraDec::change_fnc_type_ah_t::actionLabel = "Change type declaration";
+const char* GhidraDec::change_fnc_type_ah_t::actionHotkey = "Y";
+
+const char* GhidraDec::jump_to_asm_ah_t::actionName = "ghidradec:ActionJumpToAsm";
+const char* GhidraDec::jump_to_asm_ah_t::actionLabel = "Jump to ASM";
+const char* GhidraDec::jump_to_asm_ah_t::actionHotkey = "A";
+
+
 //
 //==============================================================================
 //
 
-bool idaapi moveToPrevious()
+bool idaapi GhidraDec::moveToPrevious()
 {
 	DBG_MSG("\t ESC : [");
 	for (auto& fnc : decompInfo->navigationList)
@@ -368,42 +397,11 @@ bool idaapi moveToPrevious()
 	return false;
 }
 
-struct move_backward_ah_t : public action_handler_t
-{
-	static const char* actionName;
-	static const char* actionLabel;
-	static const char* actionHotkey;
-
-	virtual int idaapi activate(action_activation_ctx_t*)
-	{
-		moveToPrevious();
-		return false;
-	}
-
-	virtual action_state_t idaapi update(action_update_ctx_t*)
-	{
-		return AST_ENABLE_ALWAYS;
-	}
-};
-
-const char* move_backward_ah_t::actionName   = "ghidradec:ActionMoveBackward";
-const char* move_backward_ah_t::actionLabel  = "Move backward";
-const char* move_backward_ah_t::actionHotkey = "ESC";
-
-static move_backward_ah_t move_backward_ah;
-static const action_desc_t move_backward_ah_desc = ACTION_DESC_LITERAL(
-		move_backward_ah_t::actionName,
-		move_backward_ah_t::actionLabel,
-		&move_backward_ah,
-		nullptr,
-		move_backward_ah_t::actionHotkey,
-		-1);
-
 //
 //==============================================================================
 //
 
-bool idaapi moveToNext()
+bool idaapi GhidraDec::moveToNext()
 {
 	DBG_MSG("\t CTRL + F : [");
 	for (auto& fnc : decompInfo->navigationList)
@@ -446,42 +444,11 @@ bool idaapi moveToNext()
 	return false;
 }
 
-struct move_forward_ah_t : public action_handler_t
-{
-	static const char* actionName;
-	static const char* actionLabel;
-	static const char* actionHotkey;
-
-	virtual int idaapi activate(action_activation_ctx_t*)
-	{
-		moveToNext();
-		return false;
-	}
-
-	virtual action_state_t idaapi update(action_update_ctx_t*)
-	{
-		return AST_ENABLE_ALWAYS;
-	}
-};
-
-const char* move_forward_ah_t::actionName   = "ghidradec:ActionMoveForward";
-const char* move_forward_ah_t::actionLabel  = "Move forward";
-const char* move_forward_ah_t::actionHotkey = "Ctrl+F";
-
-static move_forward_ah_t move_forward_ah;
-static const action_desc_t move_forward_ah_desc = ACTION_DESC_LITERAL(
-		move_forward_ah_t::actionName,
-		move_forward_ah_t::actionLabel,
-		&move_forward_ah,
-		nullptr,
-		move_forward_ah_t::actionHotkey,
-		-1);
-
 //
 //==============================================================================
 //
 
-bool idaapi insertCurrentFunctionComment()
+bool idaapi GhidraDec::insertCurrentFunctionComment()
 {
 	auto* fnc = getCurrentFunction();
 	if (fnc == nullptr)
@@ -510,42 +477,11 @@ bool idaapi insertCurrentFunctionComment()
 	return false;
 }
 
-struct change_fnc_comment_ah_t : public action_handler_t
-{
-	static const char* actionName;
-	static const char* actionLabel;
-	static const char* actionHotkey;
-
-	virtual int idaapi activate(action_activation_ctx_t*)
-	{
-		insertCurrentFunctionComment();
-		return false;
-	}
-
-	virtual action_state_t idaapi update(action_update_ctx_t*)
-	{
-		return AST_ENABLE_ALWAYS;
-	}
-};
-
-const char* change_fnc_comment_ah_t::actionName   = "ghidradec:ActionChangeFncComment";
-const char* change_fnc_comment_ah_t::actionLabel  = "Edit func comment";
-const char* change_fnc_comment_ah_t::actionHotkey = ";";
-
-static change_fnc_comment_ah_t change_fnc_comment_ah;
-static const action_desc_t change_fnc_comment_ah_desc = ACTION_DESC_LITERAL(
-		change_fnc_comment_ah_t::actionName,
-		change_fnc_comment_ah_t::actionLabel,
-		&change_fnc_comment_ah,
-		nullptr,
-		change_fnc_comment_ah_t::actionHotkey,
-		-1);
-
 //
 //==============================================================================
 //
 
-bool idaapi changeFunctionGlobalName(TWidget* cv)
+bool idaapi GhidraDec::changeFunctionGlobalName(TWidget* cv)
 {
 	std::string word;
 	int color = -1;
@@ -644,142 +580,31 @@ bool idaapi changeFunctionGlobalName(TWidget* cv)
 	return false;
 }
 
-struct change_fnc_global_name_ah_t : public action_handler_t
-{
-	TWidget* view = nullptr;
-	static const char* actionName;
-	static const char* actionLabel;
-	static const char* actionHotkey;
-
-	virtual int idaapi activate(action_activation_ctx_t*)
-	{
-		changeFunctionGlobalName(view);
-		return false;
-	}
-
-	virtual action_state_t idaapi update(action_update_ctx_t*)
-	{
-		return AST_ENABLE_ALWAYS;
-	}
-
-	void setView(TWidget* v)
-	{
-		view = v;
-	}
-};
-
-const char* change_fnc_global_name_ah_t::actionName  = "ghidradec:ActionChangeFncGlobName";
-const char* change_fnc_global_name_ah_t::actionLabel = "Rename";
-const char* change_fnc_global_name_ah_t::actionHotkey = "N";
-
-static change_fnc_global_name_ah_t change_fnc_global_name_ah;
-static const action_desc_t change_fnc_global_name_ah_desc = ACTION_DESC_LITERAL(
-		change_fnc_global_name_ah_t::actionName,
-		change_fnc_global_name_ah_t::actionLabel,
-		&change_fnc_global_name_ah,
-		nullptr,
-		change_fnc_global_name_ah_t::actionHotkey,
-		-1);
-
 //
 //==============================================================================
 //
 
-bool idaapi openXrefsWindow(func_t* fnc)
+bool idaapi GhidraDec::openXrefsWindow(func_t* fnc)
 {
 	open_xrefs_window(fnc->start_ea);
 	return false;
 }
 
-struct open_xrefs_ah_t : public action_handler_t
-{
-	func_t* fnc = nullptr;
-	static const char* actionName;
-	static const char* actionLabel;
-	static const char* actionHotkey;
-
-	virtual int idaapi activate(action_activation_ctx_t*)
-	{
-		openXrefsWindow(fnc);
-		return false;
-	}
-
-	virtual action_state_t idaapi update(action_update_ctx_t*)
-	{
-		return AST_ENABLE_ALWAYS;
-	}
-
-	void setFunction(func_t* f)
-	{
-		fnc = f;
-	}
-};
-
-const char* open_xrefs_ah_t::actionName   = "ghidradec:ActionOpenXrefs";
-const char* open_xrefs_ah_t::actionLabel  = "Open xrefs window";
-const char* open_xrefs_ah_t::actionHotkey = "X";
-
-static open_xrefs_ah_t open_xrefs_ah;
-static const action_desc_t open_xrefs_ah_desc = ACTION_DESC_LITERAL(
-		open_xrefs_ah_t::actionName,
-		open_xrefs_ah_t::actionLabel,
-		&open_xrefs_ah,
-		nullptr,
-		open_xrefs_ah_t::actionHotkey,
-		-1);
-
 //
 //==============================================================================
 //
 
-bool idaapi openCallsWindow(func_t* fnc)
+bool idaapi GhidraDec::openCallsWindow(func_t* fnc)
 {
 	open_calls_window(fnc->start_ea);
 	return false;
 }
 
-struct open_calls_ah_t : public action_handler_t
-{
-	func_t* fnc = nullptr;
-	static const char* actionName;
-	static const char* actionLabel;
-	static const char* actionHotkey;
-
-	virtual int idaapi activate(action_activation_ctx_t*)
-	{
-		openCallsWindow(fnc);
-		return false;
-	}
-
-	virtual action_state_t idaapi update(action_update_ctx_t*)
-	{
-		return AST_ENABLE_ALWAYS;
-	}
-
-	void setFunction(func_t* f)
-	{
-		fnc = f;
-	}
-};
-
-const char* open_calls_ah_t::actionName   = "ghidradec:ActionOpenCalls";
-const char* open_calls_ah_t::actionLabel  = "Open calls window";
-const char* open_calls_ah_t::actionHotkey = "C";
-
-static open_calls_ah_t open_calls_ah;
-static const action_desc_t open_calls_ah_desc = ACTION_DESC_LITERAL(
-		open_calls_ah_t::actionName,
-		open_calls_ah_t::actionLabel,
-		&open_calls_ah,
-		nullptr,
-		open_calls_ah_t::actionHotkey,
-		-1);
-
 //
 //==============================================================================
 //
 
-bool idaapi changeTypeDeclaration(TWidget* cv)
+bool idaapi GhidraDec::changeTypeDeclaration(TWidget* cv)
 {
 	std::string word;
 	int color = -1;
@@ -836,43 +661,6 @@ bool idaapi changeTypeDeclaration(TWidget* cv)
 	return false;
 }
 
-struct change_fnc_type_ah_t : public action_handler_t
-{
-	TWidget* view = nullptr;
-	static const char* actionName;
-	static const char* actionLabel;
-	static const char* actionHotkey;
-
-	virtual int idaapi activate(action_activation_ctx_t*)
-	{
-		changeTypeDeclaration(view);
-		return false;
-	}
-
-	virtual action_state_t idaapi update(action_update_ctx_t*)
-	{
-		return AST_ENABLE_ALWAYS;
-	}
-
-	void setView(TWidget* v)
-	{
-		view = v;
-	}
-};
-
-const char* change_fnc_type_ah_t::actionName   = "ghidradec:ActionChangeFncType";
-const char* change_fnc_type_ah_t::actionLabel  = "Change type declaration";
-const char* change_fnc_type_ah_t::actionHotkey = "Y";
-
-static change_fnc_type_ah_t change_fnc_type_ah;
-static const action_desc_t change_fnc_type_ah_desc = ACTION_DESC_LITERAL(
-		change_fnc_type_ah_t::actionName,
-		change_fnc_type_ah_t::actionLabel,
-		&change_fnc_type_ah,
-		nullptr,
-		change_fnc_type_ah_t::actionHotkey,
-		-1);
-
 //
 //==============================================================================
 //
@@ -881,48 +669,11 @@ static const action_desc_t change_fnc_type_ah_desc = ACTION_DESC_LITERAL(
  * Jump to specified address in IDA's disassembly.
  * @param ud Address to jump to.
  */
-bool idaapi jumpToASM(ea_t ea)
+bool idaapi GhidraDec::jumpToASM(ea_t ea)
 {
 	jumpto(ea);
 	return false;
 }
-
-struct jump_to_asm_ah_t : public action_handler_t
-{
-	ea_t addr;
-	static const char* actionName;
-	static const char* actionLabel;
-	static const char* actionHotkey;
-
-	virtual int idaapi activate(action_activation_ctx_t*)
-	{
-		jumpToASM(addr);
-		return false;
-	}
-
-	virtual action_state_t idaapi update(action_update_ctx_t*)
-	{
-		return AST_ENABLE_ALWAYS;
-	}
-
-	void setAddress(ea_t a)
-	{
-		addr = a;
-	}
-};
-
-const char* jump_to_asm_ah_t::actionName  = "ghidradec:ActionJumpToAsm";
-const char* jump_to_asm_ah_t::actionLabel = "Jump to ASM";
-const char* jump_to_asm_ah_t::actionHotkey = "A";
-
-static jump_to_asm_ah_t jump_to_asm_ah;
-static const action_desc_t jump_to_asm_ah_desc = ACTION_DESC_LITERAL(
-		jump_to_asm_ah_t::actionName,
-		jump_to_asm_ah_t::actionLabel,
-		&jump_to_asm_ah,
-		nullptr,
-		jump_to_asm_ah_t::actionHotkey,
-		-1);
 
 //
 //==============================================================================
@@ -933,18 +684,19 @@ static const action_desc_t jump_to_asm_ah_desc = ACTION_DESC_LITERAL(
  */
 bool idaapi ct_keyboard(TWidget* cv, int key, int shift, void* ud)
 {
+	RdGlobalInfo* di = static_cast<RdGlobalInfo*>(ud);
 	// ESC : move to the previous saved position.
 	//
 	if (key == 27 && shift == 0)
 	{
-		return moveToPrevious();
+		return di->pm->moveToPrevious();
 	}
 	// CTRL + F : move to the next saved position.
 	// 70 = 'F'
 	//
 	else if (key == 70 && shift == 4)
 	{
-		return moveToNext();
+		return di->pm->moveToNext();
 	}
 
 	// Get word, function, global, ...
@@ -955,33 +707,33 @@ bool idaapi ct_keyboard(TWidget* cv, int key, int shift, void* ud)
 	{
 		return false;
 	}
-	auto* idaFnc = getIdaFunction(word, color);
-	const retdec::config::Function* cFnc = getWordFunction(word, color);
-	const retdec::config::Object* cGv = getWordGlobal(word, color);
+	auto* idaFnc = di->pm->getIdaFunction(word, color);
+	const retdec::config::Function* cFnc = di->pm->getWordFunction(word, color);
+	const retdec::config::Object* cGv = di->pm->getWordGlobal(word, color);
 
 	// 45 = INSERT
 	// 186 = ';'
 	//
 	if ((key == 45 && shift == 0) || (key == 186 && shift == 0))
 	{
-		return insertCurrentFunctionComment();
+		return di->pm->insertCurrentFunctionComment();
 	}
 	// 78 = N
 	//
 	else if (key == 78 && shift == 0)
 	{
-		if (decompInfo->navigationActual == decompInfo->navigationList.end())
+		if (di->navigationActual == di->navigationList.end())
 		{
 			return false;
 		}
 
 		if (cFnc || cGv)
 		{
-			return changeFunctionGlobalName(cv);
+			return di->pm->changeFunctionGlobalName(cv);
 		}
 		else
 		{
-			if (isWordCurrentParameter(word, color))
+			if (di->pm->isWordCurrentParameter(word, color))
 			{
 				// TODO
 			}
@@ -997,7 +749,7 @@ bool idaapi ct_keyboard(TWidget* cv, int key, int shift, void* ud)
 		{
 			return false;
 		}
-		openXrefsWindow(idaFnc);
+		di->pm->openXrefsWindow(idaFnc);
 	}
 	// 67 = C
 	//
@@ -1007,13 +759,13 @@ bool idaapi ct_keyboard(TWidget* cv, int key, int shift, void* ud)
 		{
 			return false;
 		}
-		openCallsWindow(idaFnc);
+		di->pm->openCallsWindow(idaFnc);
 	}
 	// 89 = Y
 	//
 	else if (key == 89 && shift == 0)
 	{
-		return changeTypeDeclaration(cv);
+		return di->pm->changeTypeDeclaration(cv);
 	}
 	// 65 = A
 	//
@@ -1032,7 +784,7 @@ bool idaapi ct_keyboard(TWidget* cv, int key, int shift, void* ud)
 		{
 			return false;
 		}
-		jumpToASM(addr);
+		di->pm->jumpToASM(addr);
 	}
 
 	return false;
@@ -1042,7 +794,7 @@ bool idaapi ct_keyboard(TWidget* cv, int key, int shift, void* ud)
 //==============================================================================
 //
 
-ssize_t idaapi ui_callback(void* ud, int notification_code, va_list va)
+ssize_t idaapi GhidraDec::ui_callback(void* ud, int notification_code, va_list va)
 {
 	RdGlobalInfo* di = static_cast<RdGlobalInfo*>(ud);
 
@@ -1065,9 +817,9 @@ ssize_t idaapi ui_callback(void* ud, int notification_code, va_list va)
 				// fail -> nothing
 			}
 
-			auto* idaFnc = getIdaFunction(word, color);
-			const retdec::config::Function* cFnc = getWordFunction(word, color);
-			const retdec::config::Object* cGv = getWordGlobal(word, color);
+			auto* idaFnc = di->pm->getIdaFunction(word, color);
+			const retdec::config::Function* cFnc = di->pm->getWordFunction(word, color);
+			const retdec::config::Object* cGv = di->pm->getWordGlobal(word, color);
 
 			TPopupMenu* p = va_arg(va, TPopupMenu*);
 
@@ -1077,36 +829,36 @@ ssize_t idaapi ui_callback(void* ud, int notification_code, va_list va)
 			{
 				attach_action_to_popup(view, p, "-");
 
-				jump_to_asm_ah.setAddress(idaFnc->start_ea);
+				di->pm->jump_to_asm_ah.setAddress(idaFnc->start_ea);
 				attach_action_to_popup(view, p, jump_to_asm_ah_t::actionName);
 
-				change_fnc_global_name_ah.setView(view);
+				di->pm->change_fnc_global_name_ah.setView(view);
 				attach_action_to_popup(view, p, change_fnc_global_name_ah_t::actionName);
 
-				if (isCurrentFunction(idaFnc))
+				if (di->pm->isCurrentFunction(idaFnc))
 				{
-					change_fnc_type_ah.setView(view);
+					di->pm->change_fnc_type_ah.setView(view);
 					attach_action_to_popup(view, p, change_fnc_type_ah_t::actionName);
 				}
 
-				open_xrefs_ah.setFunction(idaFnc);
+				di->pm->open_xrefs_ah.setFunction(idaFnc);
 				attach_action_to_popup(view, p, open_xrefs_ah_t::actionName);
 
-				open_calls_ah.setFunction(idaFnc);
+				di->pm->open_calls_ah.setFunction(idaFnc);
 				attach_action_to_popup(view, p, open_calls_ah_t::actionName);
 			}
 			// Global var context.
 			//
 			else if (cGv)
 			{
-				globalAddress = (ea_t)cGv->getStorage().getAddress();
+				di->pm->globalAddress = (ea_t)cGv->getStorage().getAddress();
 
 				attach_action_to_popup(view, p, "-");
 
-				jump_to_asm_ah.setAddress(globalAddress);
+				di->pm->jump_to_asm_ah.setAddress(di->pm->globalAddress);
 				attach_action_to_popup(view, p, jump_to_asm_ah_t::actionName);
 
-				change_fnc_global_name_ah.setView(view);
+				di->pm->change_fnc_global_name_ah.setView(view);
 				attach_action_to_popup(view, p, change_fnc_global_name_ah_t::actionName);
 			}
 
@@ -1124,7 +876,7 @@ ssize_t idaapi ui_callback(void* ud, int notification_code, va_list va)
 	return false;
 }
 
-void registerPermanentActions()
+void GhidraDec::registerPermanentActions()
 {
 	register_action(jump_to_asm_ah_desc);
 	register_action(change_fnc_global_name_ah_desc);
@@ -1145,6 +897,7 @@ void registerPermanentActions()
  */
 bool idaapi ct_double(TWidget* cv, int shift, void* ud)
 {
+	RdGlobalInfo* di = static_cast<RdGlobalInfo*>(ud);
 	std::string word;
 	int color = -1;
 
@@ -1155,7 +908,7 @@ bool idaapi ct_double(TWidget* cv, int shift, void* ud)
 
 	if (color == COLOR_DEFAULT || color == COLOR_IMPNAME)
 	{
-		decompileFunction(cv, word);
+		di->pm->decompileFunction(cv, word);
 		return false;
 	}
 
