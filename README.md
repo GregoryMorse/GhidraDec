@@ -2,8 +2,10 @@
 
 GhidraDec: Ghidra decompiler plugin for Hex-Rays IDA (Interactive DisAssembler) Pro
 
+Only for Ghidra 10.x, as Ghidra 9.x has been due to some protocol changes.
+
 The plugin is compatible with the IDA 5/6/7.x versions.
-The plugin does NOT work with the freeware version of IDA 7.0.
+The plugin does NOT work with the freeware version of IDA 6/7.x.
 The plugin comes at both 32-bit and 64-bit address space variants (both are 64-bit binaries). I.e. it works in both `ida` and `ida64`.
 It can decompile any processor architecture which Ghidra and IDA both support.  See the source or product information of these tools:
 https://github.com/NationalSecurityAgency/ghidra/tree/master/Ghidra/Processors
@@ -23,7 +25,16 @@ Currently, we officially support only Windows and Linux. It may be possible to b
 
 * A compiler supporting C++14
   * On Windows, only Microsoft Visual C++ is supported (version >= Visual Studio 2015).
-* IDA SDK (version >= 7.0)
+* IDA SDK (version >= 6.8, 7.x)
+
+* Bison, the GNU parser generator
+  * On Windows, [win_flex_bison] (https://sourceforge.net/projects/winflexbison/).
+
+* IDA SDKs intended for build where compatibility testing has been done on 6.8, 7.0, 7.2 and 7.5.
+
+* Note that for Visual Studio builds, PropertySheet.props should be edited with relevant win_flex_bison and IDA SDK paths, as well as IDA deployment paths to automatically copy the plugin to a working IDA Pro plugin folder.
+
+* Note that for CMake building, both CMake and win_flex_bison must be in the path as is shown in the packaging script MakeGhidraDec.bat.
 
 ### Process
 
@@ -101,11 +112,14 @@ For Windows can use and make sure it is in the path: https://sourceforge.net/pro
 ### IDA’s plugin.cfg
 
 The plugin’s default mode is set to selective decompilation. It tries to register hotkey CTRL+G for its invocation. If you already use this hotkey for another action or you just want to use a different hotkey, you need to modify IDA’s plugin configuration file. Moreover, the plugin supports one more decompilation mode and a hotkey invocation for the plugin’s configuration. If you want to use any of them, you also have to modify the config file. The IDA’s plugin configuration file is in <IDA_ROOT>/plugins/plugins.cfg. Its format is documented inside the file itself. To configure GhidraDec plugin, add the following lines at the beginning of the file:
+
+```
 ; Plugin_name 						File_name 		Hotkey 		Arg
 ; -----------------------------------------------------------------
 Ghidra_Decompiler 					ghidradec 		Ctrl-g 		 0
 Ghidra_Decompiler_All 				ghidradec 		Ctrl-Shift-g 1
 Ghidra_Decompiler_Configuration 	ghidradec 		Ctrl-Shift-c 2
+```
 
 These lines tell IDA which hotkeys invoke the plugin and what argument is passed to it. The plugin’s behavior after invocation is determined by the passed argument. Possible argument values are summarized in Table 3. In the provided example, we mapped selective decompilation to hotkey CTRL+D (plugin’s default), full decompilation to CTRL+SHIFT+D, and plugin configuration to CTRL+SHIFT+C. However, you may choose whichever hotkeys you like, provided they do not clash with other plugins or IDA.
 
@@ -117,6 +131,6 @@ Argument value 		Description
 
 ## License
 
-Copyright (c) 2019 Gregory Morse, licensed under the MIT license. See the `LICENSE` file for more details.
+Copyright (c) 2021 Gregory Morse, licensed under the MIT license. See the `LICENSE` file for more details.
 
 GhidraDec IDA plugin uses third-party libraries or other resources listed, along with their licenses, in the `LICENSE-THIRD-PARTY` file.
