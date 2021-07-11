@@ -98,6 +98,7 @@ struct stkpnt_t
 
 //#define TWidget TWinControl
 #define TWidget TCustomControl
+#define find_widget(x) find_tform(x)
 #define close_widget(x, y) close_tform((Forms::TForm*)x, y)
 #define hook_to_notification_point(x, y, z) hook_to_notification_point(x, (hook_cb_t*)y, z)
 #define unhook_from_notification_point(x, y) unhook_from_notification_point(x, (hook_cb_t*)y)

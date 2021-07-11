@@ -3763,6 +3763,7 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 {
 	RdGlobalInfo* di = (RdGlobalInfo*)user_data;
+	INFO_MSG(to_string(notification_code, std::hex));
 	if (notification_code == grcode_user_refresh) {
 		mutable_graph_t* mg = va_arg(va, mutable_graph_t*);
 		rect_t r;
@@ -3848,11 +3849,13 @@ void displayBlockGraph(RdGlobalInfo* di, ea_t ea)
 	if (!di->bShowGraph) return;
 	di->idacb->executeOnMainThread([di, ea]() {
 		if (di->graphViewer != nullptr) {
-			close_widget(di->graphViewer, 0);
+			if (find_widget((di->viewerName + "_Graph").c_str()) != nullptr)
+				close_widget(di->graphViewer, 0);
 			di->graphViewer = nullptr;
 		}
 		if (di->graphWidget != nullptr) {
-			close_widget(di->graphWidget, 0);
+			if (find_widget((di->viewerName + " Graph").c_str()) != nullptr)
+				close_widget(di->graphWidget, 0);
 			di->graphWidget = nullptr;
 			delete_mutable_graph(di->mg);
 			di->graphText.clear();

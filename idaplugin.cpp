@@ -835,11 +835,13 @@ void idaapi GhidraDec::term()
 		decompInfo->idacb = nullptr;
 	}
 	if (decompInfo->graphViewer != nullptr) {
-		close_widget(decompInfo->graphViewer, 0);
+		if (find_widget((decompInfo->viewerName + "_Graph").c_str()) != nullptr)
+			close_widget(decompInfo->graphViewer, 0);
 		decompInfo->graphViewer = nullptr;
 	}
 	if (decompInfo->graphWidget != nullptr) {
-		close_widget(decompInfo->graphWidget, 0);
+		if (find_widget((decompInfo->viewerName + " Graph").c_str()) != nullptr)
+			close_widget(decompInfo->graphWidget, 0);
 		decompInfo->graphWidget = nullptr;
 		delete_mutable_graph(decompInfo->mg);
 		decompInfo->graphText.clear();

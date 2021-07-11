@@ -1324,7 +1324,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 						xml_escape(datanameesc, msi.name.c_str());
 						//typelock, namelock, readonly, volatile also cat (szCoreTypes), index
 						//callback->status("Data name: " + dataname);
-						res = "<result id=\"0x0\">\n  <parent id=\"0x0\"/>\n  <mapsym>\n" //type=\"dynamic\"/\"equate"
+						res = "<result id=\"0x0\">\n  <mapsym>\n" //type=\"dynamic\"/\"equate"
 							"    <symbol name=\"" + datanameesc.str() + "\" typelock=\"" +
 							(msi.typeChain.begin()->metaType == "unknown" ? "true" : "true") +
 							"\" namelock=\"" + std::string(msi.name.size() != 0 ? "true" : "false") +
@@ -1351,7 +1351,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 					} else if (msi.kind == KIND_LABEL) {
 						ostringstream nameesc;
 						xml_escape(nameesc, msi.name.c_str());
-						res = "<result id=\"0x0\">\n  <parent id=\"0x0\"/>\n  <mapsym>\n"
+						res = "<result id=\"0x0\">\n  <mapsym>\n"
 							"    <labelsym name=\"" + nameesc.str() +
 							"\" namelock=\"true\" typelock=\"true\" readonly=\"" +
 							std::string(msi.readonly ? "true" : "false") + "\" volatile=\"" +
