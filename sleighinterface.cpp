@@ -1534,10 +1534,11 @@ std::vector<uchar> DecompInterface::readResponse() {
 							Address(trans->getSpaceByName(addr.space), addr.offset));
 						std::string track;
 						for (TrackedSet::iterator it = ts.begin(); it != ts.end(); it++) {
-							track += "  <set space=\"" + it->loc.space->getName() + "\" offset=\"0x" +
-								to_string(it->loc.offset, hex) +
-								"\" size=\"" + std::to_string(it->loc.size) +
-								"\" val=\"0x" + to_string(it->val, hex) + "\"/>\n";
+							if (it->loc.offset != -1)
+								track += "  <set space=\"" + it->loc.space->getName() + "\" offset=\"0x" +
+									to_string(it->loc.offset, hex) +
+									"\" size=\"" + std::to_string(it->loc.size) +
+									"\" val=\"0x" + to_string(it->val, hex) + "\"/>\n";
 						}
 						//register values upon entry
 						std::string s = std::string("<tracked_pointset space=\"" + addr.space +
@@ -3303,6 +3304,7 @@ void DecompInterface::getLangFiles(std::string processorpath, std::string extern
 						} else if (e->getName() == "external_name") {
 							if (e->getAttributeValue("tool") == externaltool) {
 								std::string str = e->getAttributeValue("name");
+								std::transform(str.begin(), str.end(), str.begin(), [](unsigned char c) { return std::tolower(c); });
 								//if (toolMap.find(str) == toolMap.end()) toolMap[str].clear();// = std::vector<int>();
 								toolMap[str].push_back(li.size());
 							}

@@ -20,6 +20,7 @@
 namespace {
 
 const std::string JSON_ghidraPath = "ghidraPath";
+const std::string JSON_viewFeatures = "viewFeatures";
 const std::string JSON_cacheSize = "cacheSize";
 const std::string JSON_maxPayload = "maxPayload";
 const std::string JSON_timeout = "timeout";
@@ -108,6 +109,7 @@ bool readConfigFile(RdGlobalInfo& rdgi)
 	}
 
 	rdgi.ghidraPath = root.get(JSON_ghidraPath, "").asString();
+	rdgi.viewFeatures = root.get(JSON_viewFeatures, 1 | 2).asUInt();
 	rdgi.cacheSize = (sval_t)root.get(JSON_cacheSize, 10).asUInt64();
 	rdgi.maxPayload = (sval_t)root.get(JSON_maxPayload, 50).asUInt64();
 	rdgi.timeout = (sval_t)root.get(JSON_timeout, 30).asUInt64();
@@ -151,6 +153,7 @@ void saveConfigTofile(RdGlobalInfo& rdgi)
 	}
 
 	root[JSON_ghidraPath] = rdgi.ghidraPath;
+	root[JSON_viewFeatures] = rdgi.viewFeatures;
 	root[JSON_cacheSize] = rdgi.cacheSize;
 	root[JSON_maxPayload] = rdgi.maxPayload;
 	root[JSON_timeout] = rdgi.timeout;
@@ -222,7 +225,7 @@ int idaapi displayCB(int button_code, form_actions_t& fa)
 	RdGlobalInfo* decompInfo = (RdGlobalInfo*)fa.get_ud();
 	sval_t cmtLevel = decompInfo->cmtLevel, maxChars = decompInfo->maxChars, numChars = decompInfo->numChars;
 	int comStyle = decompInfo->comStyle, intFormat = decompInfo->intFormat;
-	ushort alysChecks = decompInfo->alysChecks, dispChecks = decompInfo->dispChecks;
+	ushort dispChecks = decompInfo->dispChecks;
 	qstring formGhidraDecPluginSettings =
 		"GhidraDec Plugin Settings\n"
 		"\n"
@@ -296,12 +299,14 @@ bool askUserToConfigurePlugin(RdGlobalInfo& rdgi)
 	qstring formGhidraDecPluginSettings =
 		//"BUTTON NO Refresh Prototype (must if Compiler Spec changed)\n"
 		"GhidraDec Plugin Settings\n"
-		"\n"
+		"%*\n"
 		"\n"
 		"Settings will be permanently stored and you will not have to fill them each time you run decompilation.\n"
 		"\n"
 		"Path to %A (unnecessary if it is in the system PATH):\n"
 		"<Ghidra Folder:F1::60::>\n"
+		"<Show Control-Flow Graph View:C>\n"
+		"<Use Extra Parameter Identification Phase:C>>\n"
 		"<Cache Size (Functions):D::::>\n"
 		"<Decompiler Max-Payload (MBytes):D::::>\n"
 		"<Decompiler Timeout (seconds):D::::>\n"
@@ -315,7 +320,7 @@ bool askUserToConfigurePlugin(RdGlobalInfo& rdgi)
 		"<Display Options:B::::>\n"
 		"<Sleigh Pcode Snippet Compiler:B::::>\n"
 		"\n"
-		"Following Settings are per database and stored in the .idb/.i64 file.\n"
+		"Following Settings are per database and stored in the .idb/.i64 file (IDA reports %A-bit processor %A).\n"
 		"<Processor Spec:f2::60::>\n"
 		"<Compiler Spec:f3::60::>\n"
 		"<Sleigh file:f4::60::>\n"
@@ -335,6 +340,7 @@ bool askUserToConfigurePlugin(RdGlobalInfo& rdgi)
 	qstrncpy(cSlaPath, sleighfilename.c_str(), QMAXPATH);
 	int ok;
 	sval_t cacheSize = rdgi.cacheSize, maxPayload = rdgi.maxPayload, timeout = rdgi.timeout;
+	ushort viewFeatures = rdgi.viewFeatures;
 	ushort alysChecks = rdgi.alysChecks;
 	std::vector<std::string> vec;
 	do {
@@ -353,10 +359,13 @@ bool askUserToConfigurePlugin(RdGlobalInfo& rdgi)
 		if (curProto == -1) curProto = 0;
 
 		ok = ask_form(formGhidraDecPluginSettings.c_str(),
+			&rdgi,
 			rdgi.ghidraPath.c_str(),
-			cGhidraPath, 
+			cGhidraPath, &viewFeatures,
 			&cacheSize, &maxPayload, &timeout,
 			&alysChecks, &displayCB, &sleighCB,
+			inf_is_32bit() ? (inf_is_64bit() ? "32/64" : "32") : (inf_is_64bit() ? "64" : "?"),
+			inf_procname.c_str(),
 			cPspecPath, cCspecPath, cSlaPath,
 			&protoTypes, &curProto
 		);
@@ -376,12 +385,13 @@ bool askUserToConfigurePlugin(RdGlobalInfo& rdgi)
 	else
 	{
 		rdgi.ghidraPath = cGhidraPath;
+		rdgi.viewFeatures = viewFeatures;
 		rdgi.cacheSize = cacheSize;
 		rdgi.maxPayload = maxPayload;
 		rdgi.timeout = timeout;
 		rdgi.alysChecks = alysChecks;
 		
-		//these need to be saved and loaded through the IDB somehow
+		//these are saved and loaded through the IDB
 		rdgi.customPspec = cPspecPath;
 		rdgi.customCspec = cCspecPath;
 		rdgi.customSlafile = cSlaPath;

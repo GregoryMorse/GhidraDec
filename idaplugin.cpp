@@ -469,7 +469,9 @@ bool GhidraDec::canDecompileInput()
 			decompInfo->toolMap["metapc"].push_back((int)i); break;
 		}
 	}
-	return decompInfo->toolMap.find(inf_procname) != decompInfo->toolMap.end();
+	std::string pname = inf_procname;
+	std::transform(pname.begin(), pname.end(), pname.begin(), [](unsigned char c) { return std::tolower(c); });
+	return decompInfo->toolMap.find(pname) != decompInfo->toolMap.end();
 	/*// 32-bit binary -> is_32bit() == 1 && is_64bit() == 0.
 	// 64-bit binary -> is_32bit() == 1 && is_64bit() == 1.
 	// Allow 64-bit x86.

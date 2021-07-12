@@ -3416,7 +3416,8 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 
 	void IdaCallback::updateDatabaseFromParams(std::vector<ea_t> eas)
 	{
-		if (!di->bSaveParamIdToIDA) return;
+		if ((di->viewFeatures & 2) == 0) return;
+		return; //not fully working
 		for (size_t i = 0; i < eas.size(); ) {
 			if (!funcProtoInfos[eas[i]].bFromParamId) eas.erase(eas.begin() + i); else i++;
 		}
@@ -3629,10 +3630,12 @@ std::string tryDecomp(RdGlobalInfo* di, DecMode dec, ea_t ea, std::string & disp
 
 bool detectProcCompiler(RdGlobalInfo* di, std::string& pspec, std::string & cspec, std::string& sleighfilename)
 {
-	std::vector<int>::iterator it = di->toolMap[inf_procname].begin();
-	for (; it != di->toolMap[inf_procname].end(); it++) {
+	std::string pname = inf_procname;
+	std::transform(pname.begin(), pname.end(), pname.begin(), [](unsigned char c) { return std::tolower(c); });
+	std::vector<int>::iterator it = di->toolMap[pname].begin();
+	for (; it != di->toolMap[pname].end(); it++) {
 		if ((di->li[*it].size == 32 && inf_is_32bit() && !inf_is_64bit() || di->li[*it].size == 64 && inf_is_64bit() || di->li[*it].size != 32 && di->li[*it].size != 64 && !inf_is_32bit() && !inf_is_64bit()) &&
-			di->li[*it].bigEndian == inf_is_be() || di->toolMap[inf_procname].size() == 1) { //should only be one match though, and parameters should always match
+			di->li[*it].bigEndian == inf_is_be() || di->toolMap[pname].size() == 1) { //should only be one match though, and parameters should always match
 			sleighfilename = di->li[*it].basePath + di->li[*it].slafile;
 			pspec = di->li[*it].basePath + di->li[*it].processorspec;
 			if (di->li[*it].compilers.size() == 1) {
@@ -3649,7 +3652,7 @@ bool detectProcCompiler(RdGlobalInfo* di, std::string& pspec, std::string & cspe
 			break;
 		}
 	}
-	if (it == di->toolMap[inf_procname].end()) {
+	if (it == di->toolMap[pname].end()) {
 		return false;
 	}
 	return true;
@@ -3763,7 +3766,6 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 {
 	RdGlobalInfo* di = (RdGlobalInfo*)user_data;
-	INFO_MSG(to_string(notification_code, std::hex));
 	if (notification_code == grcode_user_refresh) {
 		mutable_graph_t* mg = va_arg(va, mutable_graph_t*);
 		rect_t r;
@@ -3846,7 +3848,7 @@ ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 
 void displayBlockGraph(RdGlobalInfo* di, ea_t ea)
 {
-	if (!di->bShowGraph) return;
+	if ((di->viewFeatures & 1) == 0) return;
 	di->idacb->executeOnMainThread([di, ea]() {
 		if (di->graphViewer != nullptr) {
 			if (find_widget((di->viewerName + "_Graph").c_str()) != nullptr)

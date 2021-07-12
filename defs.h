@@ -1070,9 +1070,8 @@ class RdGlobalInfo
 		std::string ghidraPath = "";
 		sval_t cacheSize = 10, maxPayload = 50, timeout = 30, cmtLevel = 20, maxChars = 100, numChars = 2;
 		int comStyle = 0, intFormat = 2;
+		ushort viewFeatures = 1 | 2;
 		ushort alysChecks = 1 | 4 | 8 | 16 | 32, dispChecks = 4 | 8 | 128 | 256 | 1024;
-		bool bSaveParamIdToIDA = false;// true;
-		bool bShowGraph = true;
 
 		std::vector<LangInfo> li;
 		std::map<std::string, std::vector<int>> toolMap; //not safe to make a std::map which allocates memory inside global data structure of DLL since C runtime may not be initialized
