@@ -257,6 +257,7 @@ public:
 	//valid types are "user1", "user2", "user3", "header", "warning", "warningheader"
 	virtual void getComments(AddrInfo addr, std::vector<CommentInfo> & comments) = 0;
 	virtual std::string getSymbol(AddrInfo addr) = 0;
+	virtual std::vector<uchar> getStringData(AddrInfo addr) = 0;
 
 	virtual std::string getPcodeInject(int type, std::string name, AddrInfo addr, std::string fixupbase, unsigned long long fixupoffset) = 0;
 	virtual void getCPoolRef(const std::vector<unsigned long long>& refs, CPoolRecord& rec) = 0;

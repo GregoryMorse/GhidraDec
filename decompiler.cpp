@@ -1225,6 +1225,20 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		}
 		return name;
 	}
+	std::vector<uchar> IdaCallback::getStringData(AddrInfo addr)
+	{
+		std::vector<uchar> res;
+		if (addr.space == "ram") {
+			executeOnMainThread([&res, addr]() {
+				qstring qs;
+				if (is_strlit(get_flags((ea_t)addr.offset))) {
+					get_strlit_contents(&qs, (ea_t)addr.offset, -1, get_str_type((ea_t)addr.offset), nullptr, STRCONV_ESCAPE);
+					res.insert(res.begin(), qs.begin(), qs.end());
+				}
+				});
+		}
+		return res;
+	}
 
 
 	void checkForwardDecl(const tinfo_t & ti, const std::map<std::string, bool>& alreadyDefined, std::map<std::string, bool>& needDecl)
@@ -3795,12 +3809,14 @@ ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 		mg->create_digraph_layout();
 		mg->redo_layout();
 		//refresh_viewer(di->graphViewer);
+#if IDA_SDK_VERSION < 760
 		return 1;
 	} else if (notification_code == grcode_user_gentext) {
 		mutable_graph_t* mg = va_arg(va, mutable_graph_t*);
 		ea_t ea = di->decompiledFunction->start_ea;
 		const std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph =
 			di->fnc2code[get_func(ea)].blockGraph;
+#endif
 		di->graphText.resize(blockGraph.size());
 		for (size_t i = 0; i < blockGraph.size(); i++) {
 			if (std::get<1>(blockGraph[i]).size() != 0)

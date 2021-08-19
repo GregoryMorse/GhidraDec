@@ -2464,6 +2464,7 @@ int4 RuleZextEliminate::applyOp(PcodeOp *op,Funcdata &data)
   val = vn2->getOffset();
   if ((val>>(8*smallsize))==0) { // Is zero extension unnecessary
     newvn = data.newConstant(smallsize,val);
+    newvn->copySymbolIfValid(vn2);
     data.opSetInput(op,zext->getIn(0),zextslot);
     data.opSetInput(op,newvn,otherslot);
     return 1;
@@ -3696,7 +3697,9 @@ int4 RuleXorCollapse::applyOp(PcodeOp *op,Funcdata &data)
   }
   coeff2 = xorvn->getOffset();
   if (coeff2 == 0) return 0;
-  data.opSetInput(op,data.newConstant(op->getIn(1)->getSize(),coeff1^coeff2),1);
+  Varnode *constvn = data.newConstant(op->getIn(1)->getSize(),coeff1^coeff2);
+  constvn->copySymbolIfValid(xorvn);
+  data.opSetInput(op,constvn,1);
   data.opSetInput(op,xorop->getIn(0),0);
   return 1;
 }
@@ -3757,6 +3760,10 @@ int4 RuleAddMultCollapse::applyOp(PcodeOp *op,Funcdata &data)
 
       uintb val = op->getOpcode()->evaluateBinary(c[0]->getSize(),c[0]->getSize(),c[0]->getOffset(),c[1]->getOffset());
       newvn = data.newConstant(c[0]->getSize(),val);
+      if (c[0]->getSymbolEntry() != (SymbolEntry *)0)
+	newvn->copySymbolIfValid(c[0]);
+      else if (c[1]->getSymbolEntry() != (SymbolEntry *)0)
+	newvn->copySymbolIfValid(c[1]);
       PcodeOp *newop = data.newOp(2,op->getAddr());
       data.opSetOpcode(newop,CPUI_INT_ADD);
       Varnode *newout = data.newUniqueOut(c[0]->getSize(),newop);
@@ -3774,6 +3781,10 @@ int4 RuleAddMultCollapse::applyOp(PcodeOp *op,Funcdata &data)
 
   uintb val = op->getOpcode()->evaluateBinary(c[0]->getSize(),c[0]->getSize(),c[0]->getOffset(),c[1]->getOffset());
   newvn = data.newConstant(c[0]->getSize(),val);
+  if (c[0]->getSymbolEntry() != (SymbolEntry *)0)
+    newvn->copySymbolIfValid(c[0]);
+  else if (c[1]->getSymbolEntry() != (SymbolEntry *)0)
+    newvn->copySymbolIfValid(c[1]);
   data.opSetInput(op,newvn,1); // Replace c[0] with c[0]+c[1] or c[0]*c[1]
   data.opSetInput(op,sub2,0); // Replace sub with sub2
   return 1;
@@ -6130,6 +6141,33 @@ bool RulePtrArith::verifyAddTreeBottom(PcodeOp *op,int4 slot)
   return true;
 }
 
+/// \brief Test for other pointers in the ADD tree above the given op that might be a preferred base
+///
+/// This tests the condition of RulePushPtr, making sure that the given op isn't the lone descendant
+/// of a pointer constructed by INT_ADD on another pointer (which would then be preferred).
+/// \param op is the given op
+/// \param slot is the input slot of the pointer
+/// \return \b true if the indicated slot holds the preferred pointer
+bool RulePtrArith::verifyPreferredPointer(PcodeOp *op,int4 slot)
+
+{
+  Varnode *vn = op->getIn(slot);
+  // Check if RulePushPtr would apply here
+  if (op->getIn(1-slot)->getType()->getMetatype() != TYPE_PTR && vn->isWritten()) {
+    PcodeOp *preOp = vn->getDef();
+    if (preOp->code() == CPUI_INT_ADD) {
+	if (vn->loneDescend() == op) {
+	  int ptrCount = 0;
+	  if (preOp->getIn(0)->getType()->getMetatype() == TYPE_PTR) ptrCount += 1;
+	  if (preOp->getIn(1)->getType()->getMetatype() == TYPE_PTR) ptrCount += 1;
+	  if (ptrCount == 1)
+	    return false;	// RulePushPtr would apply, so we are not preferred
+	}
+    }
+  }
+  return true;
+}
+
 /// \class RulePtrArith
 /// \brief Transform pointer arithmetic
 ///
@@ -6169,11 +6207,14 @@ int4 RulePtrArith::applyOp(PcodeOp *op,Funcdata &data)
   }
   if (slot == op->numInput()) return 0;
   if (!verifyAddTreeBottom(op, slot)) return 0;
+  if (!verifyPreferredPointer(op, slot)) return 0;
 
   const TypePointer *tp = (const TypePointer *) ct;
   ct = tp->getPtrTo();		// Type being pointed to
   int4 unitsize = AddrSpace::addressToByteInt(1,tp->getWordSize());
   if (ct->getSize() == unitsize) { // Degenerate case
+    if (op->getOut()->getType()->getMetatype() != TYPE_PTR)	// Make sure pointer propagates thru INT_ADD
+      return 0;
     vector<Varnode *> newparams;
     newparams.push_back( op->getIn(slot) );
     newparams.push_back( op->getIn(1-slot) );
@@ -7448,8 +7489,8 @@ int4 RuleSegment::applyOp(PcodeOp *op,Funcdata &data)
 
   if (vn1->isConstant() && vn2->isConstant()) {
     vector<uintb> bindlist;
-    bindlist.push_back(vn2->getOffset());
     bindlist.push_back(vn1->getOffset());
+    bindlist.push_back(vn2->getOffset());
     uintb val = segdef->execute(bindlist);
     data.opRemoveInput(op,2);
     data.opRemoveInput(op,1);

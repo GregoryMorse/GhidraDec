@@ -155,15 +155,26 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="Branding.h" />
+    <ClInclude Include="config.h" />
+    <ClInclude Include="CppSyntaxHighlighter.h" />
+    <ClInclude Include="CxxView.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="GhidraDecView.h" />
+    <ClInclude Include="MainWindow.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="PluginMain.h" />
     <ClInclude Include="QtPlugin.h" />
+    <ClInclude Include="TextView.h" />
+    <ClInclude Include="Version.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Branding.cpp" />
+    <ClCompile Include="CppSyntaxHighlighter.cpp" />
+    <ClCompile Include="CxxView.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="GhidraDecView.cpp" />
+    <ClCompile Include="MainWindow.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
@@ -172,6 +183,7 @@
     </ClCompile>
     <ClCompile Include="PluginMain.cpp" />
     <ClCompile Include="QtPlugin.cpp" />
+    <ClCompile Include="TextView.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="x64dbg-module.qrc" />

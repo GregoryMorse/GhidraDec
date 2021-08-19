@@ -6,6 +6,16 @@ SET SAVEPTH=%PATH%
 SET PATH=%PATH%;%ProgramFiles%\cmake\bin;%UserProfile%\Desktop\Apps\win_flex_bison
 
 del CMakeCache.txt
+cmake .. -DIDA_SDK_DIR=D:\libraries\idasdk76
+cmake --build . --config Release -- -m
+copy Release\*.dll "%UserProfile%\Desktop\Apps\IDA Pro 7.6\plugins"
+cd release
+mkdir ida76
+copy /Y *.dll ida76
+REM "%ProgramFiles%\7-zip\7z.exe" a -pexetools ghidradec.zip *.dll
+cd ..
+
+del CMakeCache.txt
 cmake .. -DIDA_SDK_DIR=D:\libraries\idasdk75
 cmake --build . --config Release -- -m
 copy Release\*.dll "%UserProfile%\Desktop\Apps\IDA Pro 7.5 SP3\plugins"

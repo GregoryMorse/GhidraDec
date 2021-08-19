@@ -17,6 +17,7 @@
 
 // IDA SDK includes.
 //
+#define BYTES_SOURCE
 #include <ida.hpp> // this must be included before other idasdk headers
 #include <auto.hpp>
 #include <bytes.hpp>
@@ -38,6 +39,10 @@
 
 #include "sleighinterface.h"
 
+#if IDA_SDK_VERSION >= 760
+#define inf_is_32bit inf_is_32bit_or_higher
+inline uint32 get_aflags0(ea_t ea) { return flags_t(getnode(ea).altval(NALT_AFLAGS)); }
+#endif
 #if IDA_SDK_VERSION < 750
 #define PLUGIN_MULTI 0
 #define is_idaqt is_idaq

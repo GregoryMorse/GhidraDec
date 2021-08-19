@@ -1462,17 +1462,54 @@ std::vector<uchar> DecompInterface::readResponse() {
 					break;
 				case 'S':
 				{
-					addrstring = readQueryString();
-					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
-					AddrInfo addr;
-					getAddrFromString(addrstring, addr);
-					//callback->status("getSymbol " + addrstring);
-					std::string s = callback->getSymbol(addr);
-					write(query_response_start, sizeof(query_response_start));
-					writeString(s);
-					write(query_response_end, sizeof(query_response_end));
-					callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
-					//getSymbol();					// getSymbol
+					if (name == "getString") {
+						addrstring = readQueryString();
+						std::string dtName = readQueryString();
+						std::string dtId = readQueryString();
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\", \"" + escapeCStr(dtName) + "\", \"" + escapeCStr(dtId) + "\")", false);
+						SizedAddrInfo addr;
+						getAddrFromString(addrstring, addr);
+						std::vector<uchar> res = callback->getStringData(addr.addr);
+						uchar isTruncated = 0;
+						if (res.size() > addr.size) {
+							res.resize(addr.size);
+							isTruncated = 1;
+						}
+						std::vector<uchar> dblres;
+						dblres.resize(res.size() * 2 + 2);
+						for (int i = 0; i < res.size(); i++) {
+							dblres[i * 2] = (uchar)(((res[i] >> 4) & 0xf) + 65);
+							dblres[i * 2 + 1] = (uchar)((res[i] & 0xf) + 65);
+						}
+						dblres[res.size() * 2] = 65;		// Adding null terminator
+						dblres[res.size() * 2 + 1] = 65;
+						write(query_response_start, sizeof(query_response_start));
+						write(byte_start, sizeof(byte_start));
+						int sz = res.size() + 1;		// We add a null terminator character
+						uchar sz1 = (sz & 0x3f) + 0x20;
+						sz >>= 6;
+						uchar sz2 = (sz & 0x3f) + 0x20;
+						write(&sz1, sizeof(sz1));
+						write(&sz2, sizeof(sz2));
+						write(&isTruncated, sizeof(isTruncated));
+
+						write(dblres.data(), dblres.size());
+						write(byte_end, sizeof(byte_end));
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(" + to_string(sz1) + ", " + to_string(sz2) + ", " + to_string(isTruncated) + ", packedBytes({" + std::string(res.begin(), res.end()) + "}))", true);
+					} else {
+						addrstring = readQueryString();
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
+						AddrInfo addr;
+						getAddrFromString(addrstring, addr);
+						//callback->status("getSymbol " + addrstring);
+						std::string s = callback->getSymbol(addr);
+						write(query_response_start, sizeof(query_response_start));
+						writeString(s);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
+						//getSymbol();					// getSymbol
+					}
 					break;
 				}
 				case 'T':

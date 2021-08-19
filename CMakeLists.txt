@@ -3,6 +3,58 @@ cmake_minimum_required(VERSION 3.6)
 project(ghidradec-idaplugin CXX C)
 set(RELEASE_VERSION "1.3")
 
+set(GHIDRA_VER "10.0.2")
+set(GHIDRA_SRC_ZIP "Ghidra_${GHIDRA_VER}_build.zip")
+set(GHIDRA_SRC_ZIP_HASH "f28e3535178e6b3c1da0d066c2cd44ff7cc10bc2121add990ec98cb7427f6ae8")
+
+if(NOT EXISTS ${GHIDRA_SRC_ZIP})
+	file(DOWNLOAD "https://github.com/NationalSecurityAgency/ghidra/archive/refs/tags/${GHIDRA_SRC_ZIP}" ${GHIDRA_SRC_ZIP} TIMEOUT 60 EXPECTED_HASH SHA256=${GHIDRA_SRC_ZIP_HASH})
+endif()
+set(GHIDRA_DEC_DEPS
+	"address.*"
+	"context.*"
+	"emulate.*"
+	"error.hh"
+	"filemanage.*"
+	"float.*"
+	"globalcontext.*"
+	"loadimage.*"
+	"memstate.*"
+	"opbehavior.*"
+	"opcodes.*"
+	"partmap.hh"
+	"pcodecompile.*"
+	"pcodeparse.*"
+	"pcoderaw.*"
+	"semantics.*"
+	"sleigh.*"
+	"sleighbase.*"
+	"slghpatexpress.*"
+	"slghpattern.*"
+	"slghsymbol.*"
+	"space.*"
+	"translate.*"
+	"types.h"
+	"xml.*")
+
+set(GHIDRA_DEC_PATH "ghidra-Ghidra_${GHIDRA_VER}_build/Ghidra/Features/Decompiler/src/decompile/cpp/")
+list(TRANSFORM GHIDRA_DEC_DEPS PREPEND "${GHIDRA_DEC_PATH}")
+file(ARCHIVE_EXTRACT INPUT ${GHIDRA_SRC_ZIP} DESTINATION ${CMAKE_SOURCE_DIR}/Ghidra PATTERNS "${GHIDRA_DEC_PATH}*")
+file(ARCHIVE_EXTRACT INPUT ${GHIDRA_SRC_ZIP} DESTINATION ${CMAKE_SOURCE_DIR}/decompile PATTERNS ${GHIDRA_DEC_DEPS})
+file(GLOB FILES_EXTRACTED RELATIVE "${CMAKE_SOURCE_DIR}/Ghidra/${GHIDRA_DEC_PATH}" "${CMAKE_SOURCE_DIR}/Ghidra/${GHIDRA_DEC_PATH}*")
+foreach(FNAME IN LISTS FILES_EXTRACTED)
+	file(RENAME "${CMAKE_SOURCE_DIR}/Ghidra/${GHIDRA_DEC_PATH}${FNAME}" "${CMAKE_SOURCE_DIR}/Ghidra/${FNAME}")
+endforeach()
+file(REMOVE_RECURSE "${CMAKE_SOURCE_DIR}/Ghidra/ghidra-Ghidra_${GHIDRA_VER}_build")
+file(GLOB FILES_EXTRACTED RELATIVE "${CMAKE_SOURCE_DIR}/decompile/${GHIDRA_DEC_PATH}" "${CMAKE_SOURCE_DIR}/decompile/${GHIDRA_DEC_PATH}*")
+foreach(FNAME IN LISTS FILES_EXTRACTED)
+	file(RENAME "${CMAKE_SOURCE_DIR}/decompile/${GHIDRA_DEC_PATH}${FNAME}" "${CMAKE_SOURCE_DIR}/decompile/${FNAME}")
+endforeach()
+file(REMOVE_RECURSE "${CMAKE_SOURCE_DIR}/decompile/ghidra-Ghidra_${GHIDRA_VER}_build")
+file(READ "${CMAKE_SOURCE_DIR}/decompile/filemanage.cc" filedata)
+string(REGEX REPLACE "GetFileAttributes\\(" "GetFileAttributesA(" filedata "${filedata}")
+file(WRITE "${CMAKE_SOURCE_DIR}/decompile/filemanage.cc" "${filedata}")
+
 # Set the default build type to 'Release'
 if(NOT CMAKE_BUILD_TYPE)
 	set(default_build_type "Release")

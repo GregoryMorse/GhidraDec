@@ -144,6 +144,8 @@ void Funcdata::startProcessing(void)
 
   if (funcp.isInline())
     warningHeader("This is an inlined function");
+  localmap->clearUnlocked();
+  funcp.clearUnlockedOutput();
   Address baddr(baseaddr.getSpace(),0);
   Address eaddr(baseaddr.getSpace(),~((uintb)0));
   followFlow(baddr,eaddr);
@@ -359,7 +361,7 @@ void Funcdata::spacebaseConstant(PcodeOp *op,int4 slot,SymbolEntry *entry,const 
   bool typelock = sym->isTypeLocked();
   if (typelock && (entrytype->getMetatype() == TYPE_UNKNOWN))
     typelock = false;
-  outvn->updateType(ptrentrytype,typelock,true);
+  outvn->updateType(ptrentrytype,typelock,false);
   if (extra != 0) {
     if (extraOp == (PcodeOp *)0) {
       extraOp = newOp(2,op->getAddr());

@@ -100,6 +100,7 @@ namespace idaplugin {
 		std::string emit(std::string type, std::string color, std::string str);
 		void getComments(AddrInfo addr, std::vector<CommentInfo>& comments);
 		std::string getSymbol(AddrInfo addr);
+		std::vector<uchar> getStringData(AddrInfo addr);
 
 		void getFuncInfo(AddrInfo addr, func_t* f, std::string & name, FuncProtoInfo & func);
 		void getFuncTypeInfo(const tinfo_t& ti, bool paramOnly, FuncProtoInfo& func);

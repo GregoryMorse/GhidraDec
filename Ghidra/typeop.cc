@@ -815,7 +815,8 @@ Datatype *TypeOpReturn::getInputLocal(const PcodeOp *op,int4 slot) const
 
   //  if (!fp->isOutputLocked()) return TypeOp::getInputLocal(op,slot);
   ct = fp->getOutputType();
-  if (ct->getMetatype() == TYPE_VOID) return TypeOp::getInputLocal(op,slot);
+  if (ct->getMetatype() == TYPE_VOID || (ct->getSize() != op->getIn(slot)->getSize()))
+    return TypeOp::getInputLocal(op,slot);
   return ct;
 }
 
@@ -1710,7 +1711,7 @@ Datatype *TypeOpPtrsub::getOutputToken(const PcodeOp *op,CastStrategy *castStrat
   TypePointer *ptype = (TypePointer *)op->getIn(0)->getHigh()->getType();
   if (ptype->getMetatype() == TYPE_PTR) {
     uintb offset = AddrSpace::addressToByte(op->getIn(1)->getOffset(),ptype->getWordSize());
-    Datatype *rettype = tlst->downChain(ptype,offset);
+    Datatype *rettype = ptype->downChain(offset,false,*tlst);
     if ((offset==0)&&(rettype != (Datatype *)0))
       return rettype;
   }
