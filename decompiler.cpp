@@ -1232,7 +1232,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			executeOnMainThread([&res, addr]() {
 				qstring qs;
 				if (is_strlit(get_flags((ea_t)addr.offset))) {
-					get_strlit_contents(&qs, (ea_t)addr.offset, -1, get_str_type((ea_t)addr.offset), nullptr, STRCONV_ESCAPE);
+					get_strlit_contents(&qs, (ea_t)addr.offset, -1, get_str_type((ea_t)addr.offset), nullptr, 0);
 					res.insert(res.begin(), qs.begin(), qs.end());
 				}
 				});
