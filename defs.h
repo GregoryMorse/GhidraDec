@@ -39,6 +39,7 @@
 
 #include "sleighinterface.h"
 
+
 #if IDA_SDK_VERSION >= 760
 #define inf_is_32bit inf_is_32bit_or_higher
 inline uint32 get_aflags0(ea_t ea) { return flags_t(getnode(ea).altval(NALT_AFLAGS)); }
@@ -181,7 +182,7 @@ struct stkpnt_t
 #define reg_last_sreg regLastSreg
 #define get_sreg_ranges_qty get_srareas_qty2
 #define getn_sreg_range getn_srarea2
-#define get_stkarg_offset() get_stkarg_offset2
+#define get_stkarg_offset() ph.get_stkarg_offset2
 
 //-------------------------------------------------------------------------
 struct graph_location_info_t
@@ -896,6 +897,15 @@ inline bool is_anonymous_udt(const tinfo_t& ti)
 {
 	return ti.is_anonymous_udt();
 }
+#endif
+#if IDA_SDK_VERSION >= 770
+inline sval_t get_stkarg_offset() {
+	stkarg_area_info_t sai = { sizeof(stkarg_area_info_t) };
+	get_ph()->get_stkarg_area_info(&sai, inf_get_cc_cm());
+	return sai.stkarg_offset;
+}
+#elif defined(__X64__)
+#define get_stkarg_offset() ph.get_stkarg_offset()
 #endif
 
 // RetDec includes.

@@ -1622,7 +1622,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			" MaxPtrSize: " + std::to_string(ph.max_ptr_size()) +
 			" SegRegSize: " + std::to_string(ph.segreg_size) +
 			" SegmBitness: " + std::to_string(ph.get_segm_bitness()) +
-			" StkArgOffs: " + std::to_string(ph.get_stkarg_offset()) +
+			" StkArgOffs: " + std::to_string(get_stkarg_offset()) +
 			" Use64: " + std::to_string(ph.use64()) +
 			" Use32: " + std::to_string(ph.use32()) +
 			" DefCCModl: 0x" + to_string((uint)inf_cc_cm, std::hex) +

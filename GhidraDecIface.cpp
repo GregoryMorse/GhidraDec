@@ -387,7 +387,8 @@ public:
 	void launchDecompiler()
 	{
 #if defined(_WINDOWS)
-		std::string cmd = ghidraPath + "/Ghidra/Features/Decompiler/os/win64/" "decompile.exe";
+		//std::string cmd = ghidraPath + "/Ghidra/Features/Decompiler/os/win64/" "decompile.exe";
+		std::string cmd = ghidraPath + "/Ghidra/Features/Decompiler/os/win_x86_64/" "decompile.exe";
 		SECURITY_ATTRIBUTES saAttr; // Set the bInheritHandle flag so pipe handles are inherited. 
 		saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
 		saAttr.bInheritHandle = TRUE;
@@ -418,9 +419,11 @@ public:
 		PROCESS_INFORMATION pi{};
 #else
 #if defined(OS_LINUX)
-		std::string cmd = ghidraPath + "/Ghidra/Features/Decompiler/os/linux64/" "decompile";
+		//std::string cmd = ghidraPath + "/Ghidra/Features/Decompiler/os/linux64/" "decompile";
+		std::string cmd = ghidraPath + "/Ghidra/Features/Decompiler/os/linux_x86_64/" "decompile";
 #else
-		std::string cmd = ghidraPath + "/Ghidra/Features/Decompiler/os/osx64/" "decompile";
+		//std::string cmd = ghidraPath + "/Ghidra/Features/Decompiler/os/osx64/" "decompile";
+		std::string cmd = ghidraPath + "/Ghidra/Features/Decompiler/os/mac_x86_64/" "decompile";
 #endif
 		int rpipefd[2], wpipefd[2];
 		if (_pipe(rpipefd, 4096, _O_BINARY | _O_NOINHERIT) < 0) {
@@ -583,7 +586,7 @@ int __cdecl main()
 #ifdef _WINDOWS
 	char buf[256];
 	GetEnvironmentVariableA("USERPROFILE", buf, 256);
-	ghidraPath = std::string(buf) + "/Documents/ghidra_9.0.4/";
+	ghidraPath = std::string(buf) + "/Desktop/Apps/ghidra_10.1.2_PUBLIC/";
 #endif
 	std::vector<LangInfo> li;
 	std::map<std::string, std::vector<int>> toolMap;

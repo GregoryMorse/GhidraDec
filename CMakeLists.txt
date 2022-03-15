@@ -3,9 +3,9 @@ cmake_minimum_required(VERSION 3.6)
 project(ghidradec-idaplugin CXX C)
 set(RELEASE_VERSION "1.3")
 
-set(GHIDRA_VER "10.0.2")
+set(GHIDRA_VER "10.1.2")
 set(GHIDRA_SRC_ZIP "Ghidra_${GHIDRA_VER}_build.zip")
-set(GHIDRA_SRC_ZIP_HASH "f28e3535178e6b3c1da0d066c2cd44ff7cc10bc2121add990ec98cb7427f6ae8")
+set(GHIDRA_SRC_ZIP_HASH "c8614fa0145254c3540b50df808645290282adc797f1cce948ee3c3dfe9faa1d")
 
 if(NOT EXISTS ${GHIDRA_SRC_ZIP})
 	file(DOWNLOAD "https://github.com/NationalSecurityAgency/ghidra/archive/refs/tags/${GHIDRA_SRC_ZIP}" ${GHIDRA_SRC_ZIP} TIMEOUT 60 EXPECTED_HASH SHA256=${GHIDRA_SRC_ZIP_HASH})

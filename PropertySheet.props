@@ -3,12 +3,14 @@
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros">
     <WIN_FLEX_BISON_PATH>$(UserProfile)\Desktop\Apps\win_flex_bison</WIN_FLEX_BISON_PATH>
-	<IDA_SDK_DIR>D:\Libraries\idasdk76</IDA_SDK_DIR>
+	<IDA_SDK_DIR>D:\Libraries\idasdk77</IDA_SDK_DIR>
+	<!-- <IDA_SDK_DIR>D:\Libraries\idasdk76</IDA_SDK_DIR> -->
     <!-- <IDA_SDK_DIR>D:\Libraries\idasdk75</IDA_SDK_DIR> -->
 	<!-- <IDA_SDK_DIR>D:\Libraries\idasdk72</IDA_SDK_DIR> -->
 	<!-- <IDA_SDK_DIR>D:\Libraries\idasdk70</IDA_SDK_DIR> -->
     <IDA_SDK_DIR32>D:\Libraries\idasdk68</IDA_SDK_DIR32>
-	<IDA_DEPLOY>$(UserProfile)\Desktop\Apps\IDA Pro 7.6</IDA_DEPLOY>
+	<IDA_DEPLOY>$(UserProfile)\Desktop\Apps\IDA Pro 7.7</IDA_DEPLOY>
+	<!-- <IDA_DEPLOY>$(UserProfile)\Desktop\Apps\IDA Pro 7.6</IDA_DEPLOY> -->
 	<!-- <IDA_DEPLOY>$(UserProfile)\Desktop\Apps\IDA Pro 7.5 SP3</IDA_DEPLOY> -->
 	<!-- <IDA_DEPLOY>$(ProgramW6432)\Ida 7.2</IDA_DEPLOY> -->
 	<!-- <IDA_DEPLOY>$(ProgramW6432)\Ida 7.0</IDA_DEPLOY> -->

@@ -133,10 +133,14 @@ void ConfigGenerator::generateCallingConvention(
 		case CM_CC_SPECIALE: configCC.setIsSpecialE(); break;
 		case CM_CC_SPECIALP: configCC.setIsSpecialP(); break;
 		case CM_CC_SPECIAL:  configCC.setIsSpecial(); break;
-
+#if IDA_SDK_VERSION >= 770
+		case CM_CC_GOLANG:  //configCC.setIsGoLang(); break;
+#endif
 		case CM_CC_INVALID:
 		case CM_CC_UNKNOWN:
+#if IDA_SDK_VERSION < 770
 		case CM_CC_RESERVE4:
+#endif
 		case CM_CC_RESERVE3:
 		default:             configCC.setIsUnknown(); break;
 	}
