@@ -1,5 +1,7 @@
 # GhidraDec: Ghidra Decompiler Plugin for IDA Pro
 
+*Note* it has been recently drawn to my attention that some internet troll on a certain forum is attempting to impersonate me in regards to this work.
+
 GhidraDec: Ghidra decompiler plugin for Hex-Rays IDA (Interactive DisAssembler) Pro
 
 Only for Ghidra 10.x, as Ghidra 9.x has been due to some protocol changes.
