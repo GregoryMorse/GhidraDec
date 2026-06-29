@@ -3,13 +3,11 @@ cmake_minimum_required(VERSION 3.6)
 project(ghidradec-idaplugin CXX C)
 set(RELEASE_VERSION "1.3")
 
-set(GHIDRA_VER "10.1.2")
-set(GHIDRA_SRC_ZIP "Ghidra_${GHIDRA_VER}_build.zip")
-set(GHIDRA_SRC_ZIP_HASH "c8614fa0145254c3540b50df808645290282adc797f1cce948ee3c3dfe9faa1d")
+set(GHIDRA_VER "12.1.2" CACHE STRING "Ghidra version used by the plugin.")
+set(GHIDRA_INSTALL_DIR "" CACHE PATH "Optional path to a local Ghidra installation.")
+set(GHIDRA_DECOMPILER_CPP_DIR "" CACHE PATH "Optional path to Ghidra's decompiler C++ sources.")
+option(GHIDRADEC_REFRESH_GHIDRA_SOURCES "Refresh vendored decompiler sources from GHIDRA_DECOMPILER_CPP_DIR during configure." OFF)
 
-if(NOT EXISTS ${GHIDRA_SRC_ZIP})
-	file(DOWNLOAD "https://github.com/NationalSecurityAgency/ghidra/archive/refs/tags/${GHIDRA_SRC_ZIP}" ${GHIDRA_SRC_ZIP} TIMEOUT 60 EXPECTED_HASH SHA256=${GHIDRA_SRC_ZIP_HASH})
-endif()
 set(GHIDRA_DEC_DEPS
 	"address.*"
 	"context.*"
@@ -19,6 +17,7 @@ set(GHIDRA_DEC_DEPS
 	"float.*"
 	"globalcontext.*"
 	"loadimage.*"
+	"marshal.*"
 	"memstate.*"
 	"opbehavior.*"
 	"opcodes.*"
@@ -26,7 +25,9 @@ set(GHIDRA_DEC_DEPS
 	"pcodecompile.*"
 	"pcodeparse.*"
 	"pcoderaw.*"
+	"rangemap.hh"
 	"semantics.*"
+	"slaformat.*"
 	"sleigh.*"
 	"sleighbase.*"
 	"slghpatexpress.*"
@@ -35,25 +36,43 @@ set(GHIDRA_DEC_DEPS
 	"space.*"
 	"translate.*"
 	"types.h"
-	"xml.*")
+	"xml.*"
+	"compression.*"
+	"crc32.*")
 
-set(GHIDRA_DEC_PATH "ghidra-Ghidra_${GHIDRA_VER}_build/Ghidra/Features/Decompiler/src/decompile/cpp/")
-list(TRANSFORM GHIDRA_DEC_DEPS PREPEND "${GHIDRA_DEC_PATH}")
-file(ARCHIVE_EXTRACT INPUT ${GHIDRA_SRC_ZIP} DESTINATION ${CMAKE_SOURCE_DIR}/Ghidra PATTERNS "${GHIDRA_DEC_PATH}*")
-file(ARCHIVE_EXTRACT INPUT ${GHIDRA_SRC_ZIP} DESTINATION ${CMAKE_SOURCE_DIR}/decompile PATTERNS ${GHIDRA_DEC_DEPS})
-file(GLOB FILES_EXTRACTED RELATIVE "${CMAKE_SOURCE_DIR}/Ghidra/${GHIDRA_DEC_PATH}" "${CMAKE_SOURCE_DIR}/Ghidra/${GHIDRA_DEC_PATH}*")
-foreach(FNAME IN LISTS FILES_EXTRACTED)
-	file(RENAME "${CMAKE_SOURCE_DIR}/Ghidra/${GHIDRA_DEC_PATH}${FNAME}" "${CMAKE_SOURCE_DIR}/Ghidra/${FNAME}")
-endforeach()
-file(REMOVE_RECURSE "${CMAKE_SOURCE_DIR}/Ghidra/ghidra-Ghidra_${GHIDRA_VER}_build")
-file(GLOB FILES_EXTRACTED RELATIVE "${CMAKE_SOURCE_DIR}/decompile/${GHIDRA_DEC_PATH}" "${CMAKE_SOURCE_DIR}/decompile/${GHIDRA_DEC_PATH}*")
-foreach(FNAME IN LISTS FILES_EXTRACTED)
-	file(RENAME "${CMAKE_SOURCE_DIR}/decompile/${GHIDRA_DEC_PATH}${FNAME}" "${CMAKE_SOURCE_DIR}/decompile/${FNAME}")
-endforeach()
-file(REMOVE_RECURSE "${CMAKE_SOURCE_DIR}/decompile/ghidra-Ghidra_${GHIDRA_VER}_build")
-file(READ "${CMAKE_SOURCE_DIR}/decompile/filemanage.cc" filedata)
-string(REGEX REPLACE "GetFileAttributes\\(" "GetFileAttributesA(" filedata "${filedata}")
-file(WRITE "${CMAKE_SOURCE_DIR}/decompile/filemanage.cc" "${filedata}")
+if(GHIDRADEC_REFRESH_GHIDRA_SOURCES)
+	if(NOT GHIDRA_DECOMPILER_CPP_DIR AND GHIDRA_INSTALL_DIR)
+		set(GHIDRA_DECOMPILER_CPP_DIR "${GHIDRA_INSTALL_DIR}/Ghidra/Features/Decompiler/src/decompile/cpp")
+	endif()
+	if(NOT EXISTS "${GHIDRA_DECOMPILER_CPP_DIR}/address.cc")
+		message(FATAL_ERROR "Ghidra decompiler sources were not found under GHIDRA_DECOMPILER_CPP_DIR=${GHIDRA_DECOMPILER_CPP_DIR}")
+	endif()
+
+	file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/Ghidra")
+	file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/decompile")
+
+	file(GLOB GHIDRA_DEC_ALL_FILES CONFIGURE_DEPENDS "${GHIDRA_DECOMPILER_CPP_DIR}/*")
+	foreach(FNAME IN LISTS GHIDRA_DEC_ALL_FILES)
+		if(NOT IS_DIRECTORY "${FNAME}")
+			file(COPY "${FNAME}" DESTINATION "${CMAKE_SOURCE_DIR}/Ghidra")
+		endif()
+	endforeach()
+
+	foreach(PATTERN IN LISTS GHIDRA_DEC_DEPS)
+		file(GLOB GHIDRA_DEC_MATCHES CONFIGURE_DEPENDS "${GHIDRA_DECOMPILER_CPP_DIR}/${PATTERN}")
+		foreach(FNAME IN LISTS GHIDRA_DEC_MATCHES)
+			file(COPY "${FNAME}" DESTINATION "${CMAKE_SOURCE_DIR}/decompile")
+		endforeach()
+	endforeach()
+
+	file(READ "${CMAKE_SOURCE_DIR}/decompile/filemanage.cc" filedata)
+	string(REGEX REPLACE "GetFileAttributes\\(" "GetFileAttributesA(" filedata "${filedata}")
+	file(WRITE "${CMAKE_SOURCE_DIR}/decompile/filemanage.cc" "${filedata}")
+
+	if(EXISTS "${GHIDRA_DECOMPILER_CPP_DIR}/../zlib/zlib.h")
+		file(COPY "${GHIDRA_DECOMPILER_CPP_DIR}/../zlib" DESTINATION "${CMAKE_SOURCE_DIR}/decompile")
+	endif()
+endif()
 
 # Set the default build type to 'Release'
 if(NOT CMAKE_BUILD_TYPE)
@@ -105,7 +124,7 @@ else()
 endif()
 
 # Global defines.
-add_definitions(-D__IDP__ -D__PLUGIN__ -DNO_OBSOLETE_FUNCS)
+add_definitions(-D__IDP__ -D__PLUGIN__ -DNO_OBSOLETE_FUNCS -DNO_GZIP)
 if(NOT IDA_SDK_DIR32)
 add_definitions(-D__X64__)
 endif()
@@ -188,7 +207,9 @@ endif()
 # Includes.
 include_directories("..") # Make our includes work.
 include_directories(".") # Make our includes work.
+include_directories("src") # Make our includes work.
 include_directories("decompile") # Make our includes work.
+include_directories("decompile/zlib") # Make Ghidra 12 .sla compression support work.
 include_directories("whereami") # Make our includes work.
 if(IDA_SDK_DIR32)
 include_directories(SYSTEM
@@ -202,40 +223,13 @@ endif()
 
 # GhidraDec idaplugin sources.
 set(IDAPLUGIN_SOURCES
-	code_viewer.cpp
-	config_generator.cpp
-	decompiler.cpp
-	defs.cpp
-	idaplugin.cpp
-	plugin_config.cpp
-	sleighinterface.cpp
-)
-
-find_program(YACC_EXECUTABLE NAMES bison win_bison byacc yacc)
-if(YACC_EXECUTABLE STREQUAL "YACC_EXECUTABLE-NOTFOUND")
-	message(FATAL_ERROR "Neither bison nor win_bison nor byacc nor yacc was found.")
-endif()
-message(STATUS "Parser generator: ${YACC_EXECUTABLE}")
-
-## bison: pcodeparse.y xml.y
-##if(WIN32)
-##	set(YACC_EXECUTABLE "win_bison.exe")
-##	$(YACC_EXECUTABLE) -p pcode -o
-##else()
-##	set(YACC_EXECUTABLE "bison")
-##endif()
-
-add_custom_command(
-	OUTPUT ${CMAKE_SOURCE_DIR}/decompile/xml.tab.cpp ${CMAKE_SOURCE_DIR}/decompile/xml.tab.h
-	SOURCE ${CMAKE_SOURCE_DIR}/decompile/xml.y
-	COMMAND ${YACC_EXECUTABLE} -p xml -o ${CMAKE_SOURCE_DIR}/decompile/xml.tab.cpp -d ${CMAKE_SOURCE_DIR}/decompile/xml.y
-	DEPENDS ${CMAKE_SOURCE_DIR}/decompile/xml.y
-)
-add_custom_command(
-	OUTPUT ${CMAKE_SOURCE_DIR}/decompile/pcodeparse.tab.cpp ${CMAKE_SOURCE_DIR}/decompile/pcodeparse.tab.h
-	SOURCE ${pcap_SOURCE_DIR}/decompile/pcodeparse.y
-	COMMAND ${YACC_EXECUTABLE} -p pcode -o ${CMAKE_SOURCE_DIR}/decompile/pcodeparse.tab.cpp -d ${CMAKE_SOURCE_DIR}/decompile/pcodeparse.y
-	DEPENDS ${CMAKE_SOURCE_DIR}/decompile/pcodeparse.y
+	src/code_viewer.cpp
+	src/config_generator.cpp
+	src/decompiler.cpp
+	src/defs.cpp
+	src/idaplugin.cpp
+	src/plugin_config.cpp
+	src/sleighinterface.cpp
 )
 
 ##config and utils
@@ -287,7 +281,7 @@ add_custom_command(
 
 set(GHIDRA_SLEIGH_SOURCES
 	decompile/sleigh.cc
-	decompile/pcodeparse.tab.cpp
+	decompile/pcodeparse.cc
 	decompile/pcodecompile.cc
 	decompile/sleighbase.cc
 	decompile/slghsymbol.cc
@@ -295,11 +289,14 @@ set(GHIDRA_SLEIGH_SOURCES
 	decompile/slghpattern.cc
 	decompile/semantics.cc
 	decompile/context.cc
+	decompile/slaformat.cc
+	decompile/compression.cc
 	decompile/filemanage.cc
 )
 
 set(GHIDRA_CORE_SOURCES
-	decompile/xml.tab.cpp
+	decompile/xml.cc
+	decompile/marshal.cc
 	decompile/space.cc
 	decompile/float.cc
 	decompile/address.cc
@@ -307,6 +304,7 @@ set(GHIDRA_CORE_SOURCES
 	decompile/translate.cc
 	decompile/opcodes.cc
 	decompile/globalcontext.cc
+	decompile/crc32.cc
 )
 
 set(GHIDRA_LIBSLA_NAMES
@@ -316,9 +314,19 @@ set(GHIDRA_LIBSLA_NAMES
 	decompile/opbehavior.cc
 )
 
+set(GHIDRA_ZLIB_SOURCES
+	decompile/zlib/adler32.c
+	decompile/zlib/deflate.c
+	decompile/zlib/inffast.c
+	decompile/zlib/inflate.c
+	decompile/zlib/inftrees.c
+	decompile/zlib/trees.c
+	decompile/zlib/zutil.c
+)
+
 # GhidraDec idaplugin libs.
-add_library(idaplugin32 SHARED ${IDAPLUGIN_SOURCES} ${GHIDRA_SLEIGH_SOURCES} ${GHIDRA_CORE_SOURCES} ${GHIDRA_LIBSLA_NAMES})
-add_library(idaplugin64 SHARED ${IDAPLUGIN_SOURCES} ${GHIDRA_SLEIGH_SOURCES} ${GHIDRA_CORE_SOURCES} ${GHIDRA_LIBSLA_NAMES})
+add_library(idaplugin32 SHARED ${IDAPLUGIN_SOURCES} ${GHIDRA_SLEIGH_SOURCES} ${GHIDRA_CORE_SOURCES} ${GHIDRA_LIBSLA_NAMES} ${GHIDRA_ZLIB_SOURCES})
+add_library(idaplugin64 SHARED ${IDAPLUGIN_SOURCES} ${GHIDRA_SLEIGH_SOURCES} ${GHIDRA_CORE_SOURCES} ${GHIDRA_LIBSLA_NAMES} ${GHIDRA_ZLIB_SOURCES})
 
 target_compile_definitions(idaplugin64 PUBLIC __EA64__)
 

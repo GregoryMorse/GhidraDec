@@ -2,22 +2,24 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros">
-    <WIN_FLEX_BISON_PATH>$(UserProfile)\Desktop\Apps\win_flex_bison</WIN_FLEX_BISON_PATH>
-	<IDA_SDK_DIR>D:\Libraries\idasdk77</IDA_SDK_DIR>
-	<!-- <IDA_SDK_DIR>D:\Libraries\idasdk76</IDA_SDK_DIR> -->
-    <!-- <IDA_SDK_DIR>D:\Libraries\idasdk75</IDA_SDK_DIR> -->
-	<!-- <IDA_SDK_DIR>D:\Libraries\idasdk72</IDA_SDK_DIR> -->
-	<!-- <IDA_SDK_DIR>D:\Libraries\idasdk70</IDA_SDK_DIR> -->
-    <IDA_SDK_DIR32>D:\Libraries\idasdk68</IDA_SDK_DIR32>
-	<IDA_DEPLOY>$(UserProfile)\Desktop\Apps\IDA Pro 7.7</IDA_DEPLOY>
-	<!-- <IDA_DEPLOY>$(UserProfile)\Desktop\Apps\IDA Pro 7.6</IDA_DEPLOY> -->
-	<!-- <IDA_DEPLOY>$(UserProfile)\Desktop\Apps\IDA Pro 7.5 SP3</IDA_DEPLOY> -->
-	<!-- <IDA_DEPLOY>$(ProgramW6432)\Ida 7.2</IDA_DEPLOY> -->
-	<!-- <IDA_DEPLOY>$(ProgramW6432)\Ida 7.0</IDA_DEPLOY> -->
-    <IDA_DEPLOY32>$(ProgramFiles)\Ida 6.8</IDA_DEPLOY32>
+    <WIN_FLEX_BISON_PATH Condition="'$(WIN_FLEX_BISON_PATH)'==''">$(WIN_FLEX_BISON_DIR)</WIN_FLEX_BISON_PATH>
+    <IDA_SDK_DIR Condition="'$(IDA_SDK_DIR)'==''">$(IDA_SDK_93_DIR)</IDA_SDK_DIR>
+    <IDA_SDK_DIR32 Condition="'$(IDA_SDK_DIR32)'==''">$(IDA_SDK_68_DIR)</IDA_SDK_DIR32>
+    <IDA_DEPLOY Condition="'$(IDA_DEPLOY)'==''">$(IDA_DIR)</IDA_DEPLOY>
+    <IDA_DEPLOY32 Condition="'$(IDA_DEPLOY32)'==''">$(IDA32_DIR)</IDA_DEPLOY32>
   </PropertyGroup>
-  <PropertyGroup />
-  <ItemDefinitionGroup />
+  <PropertyGroup>
+    <GhidraDecIdaSdkInclude Condition="'$(Platform)'=='Win32'">$(IDA_SDK_DIR32)\include</GhidraDecIdaSdkInclude>
+    <GhidraDecIdaSdkInclude Condition="'$(Platform)'!='Win32'">$(IDA_SDK_DIR)\include</GhidraDecIdaSdkInclude>
+    <GhidraDecExternalIncludes>$(GhidraDecIdaSdkInclude);jsoncpp\include;retdec\include;decompile;decompile\zlib;whereami</GhidraDecExternalIncludes>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <ExternalIncludeDirectories>$(GhidraDecExternalIncludes);%(ExternalIncludeDirectories)</ExternalIncludeDirectories>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <AdditionalOptions>/external:I "$(GhidraDecIdaSdkInclude)" /external:I "jsoncpp\include" /external:I "retdec\include" /external:I "decompile" /external:I "decompile\zlib" /external:I "whereami" %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <BuildMacro Include="WIN_FLEX_BISON_PATH">
       <Value>$(WIN_FLEX_BISON_PATH)</Value>

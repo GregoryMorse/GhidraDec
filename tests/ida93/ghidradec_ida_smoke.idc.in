@@ -1,0 +1,152 @@
+#include <idc.idc>
+
+#define GHIDRADEC_MARKER "<ghidradec_select>"
+#define GHIDRADEC_PLUGIN @PLUGIN_DLL@
+#define GHIDRADEC_INPUT @INPUT_FILE@
+#define GHIDRADEC_OUTPUT @OUTPUT_FILE@
+#define GHIDRADEC_MAX_FUNCS @MAX_FUNCS@
+#define GHIDRADEC_START_INDEX @START_INDEX@
+#define GHIDRADEC_MIN_FUNC_BYTES @MIN_FUNC_BYTES@
+#define GHIDRADEC_MAX_FUNC_BYTES @MAX_FUNC_BYTES@
+
+static fail(message, code)
+{
+  msg("[ghidradec-smoke] FAIL: %s\n", message);
+  qexit(code);
+}
+
+static starts_with(value, prefix)
+{
+  return substr(value, 0, strlen(prefix)) == prefix;
+}
+
+static is_unnamed_function(name)
+{
+  return starts_with(name, "sub_")
+      || starts_with(name, "j_sub_");
+}
+
+static file_size(path)
+{
+  auto handle;
+  auto size;
+
+  handle = fopen(path, "rb");
+  if (handle == 0)
+    return -1;
+  size = filelength(handle);
+  fclose(handle);
+  return size;
+}
+
+static clean_output(path)
+{
+  if (file_size(path) >= 0)
+    unlink(path);
+}
+
+static run_one_function(ea, name)
+{
+  auto old_cmt;
+  auto marker_cmt;
+  auto ok;
+  auto size;
+
+  old_cmt = get_func_cmt(ea, 0);
+  marker_cmt = old_cmt;
+  if (strlen(marker_cmt) > 0)
+    marker_cmt = marker_cmt + "\n";
+  marker_cmt = marker_cmt + GHIDRADEC_MARKER;
+
+  clean_output(GHIDRADEC_OUTPUT);
+  set_func_cmt(ea, marker_cmt, 0);
+
+  msg("[ghidradec-smoke] Selected %s at %a size %d bytes\n", name, ea, get_func_attr(ea, FUNCATTR_END) - get_func_attr(ea, FUNCATTR_START));
+  msg("[ghidradec-smoke] Running plugin %s with regression argument 4\n", GHIDRADEC_PLUGIN);
+  ok = load_and_run_plugin(GHIDRADEC_PLUGIN, 4);
+
+  set_func_cmt(ea, old_cmt, 0);
+
+  if (ok == 0)
+    fail(sprintf("Could not load/run plugin: %s", GHIDRADEC_PLUGIN), 4);
+
+  size = file_size(GHIDRADEC_OUTPUT);
+  if (size < 0)
+    fail(sprintf("Plugin did not create output file: %s", GHIDRADEC_OUTPUT), 6);
+  if (size < 64)
+    fail(sprintf("Output file is unexpectedly small: %d bytes", size), 6);
+
+  msg("[ghidradec-smoke] OK %s at %a; wrote %d bytes\n", name, ea, size);
+}
+
+static run_pass(unnamed_only)
+{
+  auto ea;
+  auto flags;
+  auto name;
+  auto size;
+  auto seen;
+  auto best_ea;
+  auto best_name;
+  auto best_size;
+
+  seen = 0;
+  best_ea = BADADDR;
+  best_name = "";
+  best_size = 0x7FFFFFFF;
+  ea = get_next_func(0);
+  while (ea != BADADDR)
+  {
+    flags = get_func_flags(ea);
+    if ((flags & (FUNC_LIB | FUNC_THUNK)) == 0)
+    {
+      name = get_func_name(ea);
+      if (!unnamed_only || is_unnamed_function(name))
+      {
+        if (seen >= GHIDRADEC_START_INDEX)
+        {
+          size = get_func_attr(ea, FUNCATTR_END) - get_func_attr(ea, FUNCATTR_START);
+          if (size >= GHIDRADEC_MIN_FUNC_BYTES && (GHIDRADEC_MAX_FUNC_BYTES == 0 || size <= GHIDRADEC_MAX_FUNC_BYTES) && size < best_size)
+          {
+            best_ea = ea;
+            best_name = name;
+            best_size = size;
+          }
+        }
+        seen = seen + 1;
+      }
+    }
+    ea = get_next_func(ea);
+  }
+  if (best_ea != BADADDR)
+  {
+    run_one_function(best_ea, best_name);
+    return 1;
+  }
+  return 0;
+}
+
+static main()
+{
+  auto ran;
+
+  msg("[ghidradec-smoke] Waiting for autoanalysis\n");
+  auto_wait();
+
+  set_root_filename(GHIDRADEC_INPUT);
+  msg("[ghidradec-smoke] IDA input path is %s\n", get_input_file_path());
+  msg("[ghidradec-smoke] Expecting plugin output at %s\n", GHIDRADEC_OUTPUT);
+
+  ran = run_pass(1);
+  if (ran == 0)
+  {
+    msg("[ghidradec-smoke] No unnamed candidate matched; falling back to any non-library function\n");
+    ran = run_pass(0);
+  }
+
+  if (ran == 0)
+    fail("No suitable functions found", 3);
+
+  msg("[ghidradec-smoke] PASS: %d function(s) decompiled\n", ran);
+  qexit(0);
+}

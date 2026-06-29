@@ -78,7 +78,7 @@ retdec::config::Storage ConfigGenerator::generateObjectLocation(
 	}
 	else if (loc.is_stkoff())
 	{
-		return retdec::config::Storage::onStack(loc.stkoff());
+		return retdec::config::Storage::onStack(static_cast<int>(loc.stkoff()));
 	}
 	else if (loc.is_ea())
 	{
@@ -128,7 +128,9 @@ void ConfigGenerator::generateCallingConvention(
 		case CM_CC_PASCAL:   configCC.setIsPascal(); break;
 		case CM_CC_FASTCALL: configCC.setIsFastcall(); break;
 		case CM_CC_THISCALL: configCC.setIsThiscall(); break;
+#if IDA_SDK_VERSION < 900
 		case CM_CC_MANUAL:   configCC.setIsManual(); break;
+#endif
 		case CM_CC_SPOILED:  configCC.setIsSpoiled(); break;
 		case CM_CC_SPECIALE: configCC.setIsSpecialE(); break;
 		case CM_CC_SPECIALP: configCC.setIsSpecialP(); break;
@@ -208,7 +210,7 @@ bool isLinkedFunction(func_t *fnc)
 	//
 	for (ea_t addr = fnc->start_ea; addr < fnc->end_ea; ++addr)
 	{
-		flags_t flags = get_flags(addr);
+		auto flags = get_flags(addr);
 		if (is_code(flags))
 		{
 			qstring mnem;
@@ -327,7 +329,7 @@ void ConfigGenerator::generateSegmentsAndGlobals()
 		ea_t head = seg->start_ea - 1;
 		while ( (head = next_head(head, seg->end_ea)) != BADADDR)
 		{
-			flags_t f = get_full_flags(head);
+			auto f = get_full_flags(head);
 			if (f == 0)
 			{
 				continue;
@@ -408,7 +410,7 @@ void ConfigGenerator::generateSegmentsAndGlobals()
  */
 std::string ConfigGenerator::addrType2string(ea_t addr)
 {
-	flags_t f = get_full_flags(addr);
+	auto f = get_full_flags(addr);
 	if (f == 0)
 	{
 		return defaultTypeString();

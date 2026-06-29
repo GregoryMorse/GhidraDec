@@ -69,7 +69,7 @@ struct ShowOutput : public exec_request_t
 	ShowOutput(RdGlobalInfo *i) : di(i) {}
 	virtual ~ShowOutput() override {}
 
-	virtual int idaapi execute() override
+	virtual GHIDRADEC_EXEC_RETURN idaapi execute() override
 	{
 		if (di->custViewer) {
 			close_widget(di->custViewer, 0);

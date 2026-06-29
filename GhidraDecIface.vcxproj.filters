@@ -33,16 +33,16 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="GhidraDecIface.cpp">
+    <ClCompile Include="src\GhidraDecIface.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="sleighinterface.cpp">
+    <ClCompile Include="src\sleighinterface.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="decompile\sleigh.cc">
       <Filter>Source Files\Sleigh</Filter>
     </ClCompile>
-    <ClCompile Include="decompile\pcodeparse.tab.cpp">
+    <ClCompile Include="decompile\pcodeparse.cc">
       <Filter>Source Files\Sleigh</Filter>
     </ClCompile>
     <ClCompile Include="decompile\pcodecompile.cc">
@@ -69,8 +69,41 @@
     <ClCompile Include="decompile\filemanage.cc">
       <Filter>Source Files\Sleigh</Filter>
     </ClCompile>
-    <ClCompile Include="decompile\xml.tab.cpp">
+    <ClCompile Include="decompile\slaformat.cc">
+      <Filter>Source Files\Sleigh</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\compression.cc">
+      <Filter>Source Files\Sleigh</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\xml.cc">
       <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\marshal.cc">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\crc32.cc">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\zlib\adler32.c">
+      <Filter>Source Files\LibSLA</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\zlib\deflate.c">
+      <Filter>Source Files\LibSLA</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\zlib\inffast.c">
+      <Filter>Source Files\LibSLA</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\zlib\inflate.c">
+      <Filter>Source Files\LibSLA</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\zlib\inftrees.c">
+      <Filter>Source Files\LibSLA</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\zlib\trees.c">
+      <Filter>Source Files\LibSLA</Filter>
+    </ClCompile>
+    <ClCompile Include="decompile\zlib\zutil.c">
+      <Filter>Source Files\LibSLA</Filter>
     </ClCompile>
     <ClCompile Include="decompile\space.cc">
       <Filter>Source Files\Core</Filter>
@@ -107,7 +140,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="sleighinterface.h">
+    <ClInclude Include="src\sleighinterface.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="decompile\sleigh.hh">
@@ -143,10 +176,13 @@
     <ClInclude Include="decompile\address.hh">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
-    <ClInclude Include="decompile\xml.tab.h">
+    <ClInclude Include="decompile\xml.hh">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
-    <ClInclude Include="decompile\xml.hh">
+    <ClInclude Include="decompile\marshal.hh">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\crc32.hh">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
     <ClInclude Include="decompile\space.hh">
@@ -167,7 +203,10 @@
     <ClInclude Include="decompile\globalcontext.hh">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
-    <ClInclude Include="decompile\pcodeparse.tab.h">
+    <ClInclude Include="decompile\slaformat.hh">
+      <Filter>Header Files\Sleigh</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\compression.hh">
       <Filter>Header Files\Sleigh</Filter>
     </ClInclude>
     <ClInclude Include="decompile\loadimage.hh">
@@ -188,12 +227,41 @@
     <ClInclude Include="decompile\partmap.hh">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
+    <ClInclude Include="decompile\rangemap.hh">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\zlib\deflate.h">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\zlib\gzguts.h">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\zlib\inffast.h">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\zlib\inffixed.h">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\zlib\inflate.h">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\zlib\inftrees.h">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\zlib\trees.h">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\zlib\zconf.h">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\zlib\zlib.h">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
+    <ClInclude Include="decompile\zlib\zutil.h">
+      <Filter>Header Files\LibSLA</Filter>
+    </ClInclude>
     <ClInclude Include="decompile\error.hh">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-  </ItemGroup>
-  <ItemGroup>
-    <Bison Include="decompile\pcodeparse.y" />
-    <Bison Include="decompile\xml.y" />
   </ItemGroup>
 </Project>

@@ -29,33 +29,33 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
     <Import Project="PropertySheet.props" />
-    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.props" />
+    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.props" Condition="Exists('$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.props')" />
   </ImportGroup>
   <ImportGroup Label="Shared">
   </ImportGroup>
@@ -101,10 +101,10 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;_WINDOWS;_WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;_WINDOWS;_WIN64;NO_GZIP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <CallingConvention>StdCall</CallingConvention>
-      <AdditionalIncludeDirectories>decompile</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>src;decompile;decompile\zlib</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -120,10 +120,10 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;_WINDOWS;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;_DEBUG;_CONSOLE;NO_GZIP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <CallingConvention>StdCall</CallingConvention>
-      <AdditionalIncludeDirectories>decompile</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>src;decompile;decompile\zlib</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -137,10 +137,10 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;_WINDOWS;_WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;_WINDOWS;_WIN64;NO_GZIP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <CallingConvention>StdCall</CallingConvention>
-      <AdditionalIncludeDirectories>decompile</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>src;decompile;decompile\zlib</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -156,10 +156,10 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;_WINDOWS;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;NDEBUG;_CONSOLE;NO_GZIP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <CallingConvention>StdCall</CallingConvention>
-      <AdditionalIncludeDirectories>decompile</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>src;decompile;decompile\zlib</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -174,25 +174,36 @@
     <ClCompile Include="decompile\emulate.cc" />
     <ClCompile Include="decompile\filemanage.cc" />
     <ClCompile Include="decompile\float.cc" />
-    <ClCompile Include="GhidraDecIface.cpp" />
+    <ClCompile Include="src\GhidraDecIface.cpp" />
     <ClCompile Include="decompile\globalcontext.cc" />
     <ClCompile Include="decompile\loadimage.cc" />
+    <ClCompile Include="decompile\marshal.cc" />
     <ClCompile Include="decompile\memstate.cc" />
     <ClCompile Include="decompile\opbehavior.cc" />
     <ClCompile Include="decompile\opcodes.cc" />
     <ClCompile Include="decompile\pcodecompile.cc" />
-    <ClCompile Include="decompile\pcodeparse.tab.cpp" />
+    <ClCompile Include="decompile\pcodeparse.cc" />
     <ClCompile Include="decompile\pcoderaw.cc" />
     <ClCompile Include="decompile\semantics.cc" />
+    <ClCompile Include="decompile\slaformat.cc" />
     <ClCompile Include="decompile\sleigh.cc" />
     <ClCompile Include="decompile\sleighbase.cc" />
-    <ClCompile Include="sleighinterface.cpp" />
+    <ClCompile Include="src\sleighinterface.cpp" />
     <ClCompile Include="decompile\slghpatexpress.cc" />
     <ClCompile Include="decompile\slghpattern.cc" />
     <ClCompile Include="decompile\slghsymbol.cc" />
     <ClCompile Include="decompile\space.cc" />
     <ClCompile Include="decompile\translate.cc" />
-    <ClCompile Include="decompile\xml.tab.cpp" />
+    <ClCompile Include="decompile\xml.cc" />
+    <ClCompile Include="decompile\compression.cc" />
+    <ClCompile Include="decompile\crc32.cc" />
+    <ClCompile Include="decompile\zlib\adler32.c" />
+    <ClCompile Include="decompile\zlib\deflate.c" />
+    <ClCompile Include="decompile\zlib\inffast.c" />
+    <ClCompile Include="decompile\zlib\inflate.c" />
+    <ClCompile Include="decompile\zlib\inftrees.c" />
+    <ClCompile Include="decompile\zlib\trees.c" />
+    <ClCompile Include="decompile\zlib\zutil.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="decompile\address.hh" />
@@ -203,18 +214,20 @@
     <ClInclude Include="decompile\float.hh" />
     <ClInclude Include="decompile\globalcontext.hh" />
     <ClInclude Include="decompile\loadimage.hh" />
+    <ClInclude Include="decompile\marshal.hh" />
     <ClInclude Include="decompile\memstate.hh" />
     <ClInclude Include="decompile\opbehavior.hh" />
     <ClInclude Include="decompile\opcodes.hh" />
     <ClInclude Include="decompile\partmap.hh" />
     <ClInclude Include="decompile\pcodecompile.hh" />
     <ClInclude Include="decompile\pcodeparse.hh" />
-    <ClInclude Include="decompile\pcodeparse.tab.h" />
     <ClInclude Include="decompile\pcoderaw.hh" />
+    <ClInclude Include="decompile\rangemap.hh" />
     <ClInclude Include="decompile\semantics.hh" />
+    <ClInclude Include="decompile\slaformat.hh" />
     <ClInclude Include="decompile\sleigh.hh" />
     <ClInclude Include="decompile\sleighbase.hh" />
-    <ClInclude Include="sleighinterface.h" />
+    <ClInclude Include="src\sleighinterface.h" />
     <ClInclude Include="decompile\slghpatexpress.hh" />
     <ClInclude Include="decompile\slghpattern.hh" />
     <ClInclude Include="decompile\slghsymbol.hh" />
@@ -222,24 +235,21 @@
     <ClInclude Include="decompile\translate.hh" />
     <ClInclude Include="decompile\types.h" />
     <ClInclude Include="decompile\xml.hh" />
-    <ClInclude Include="decompile\xml.tab.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <Bison Include="decompile\pcodeparse.y">
-      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">-p pcode %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-p pcode %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">-p pcode %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-p pcode %(AdditionalOptions)</AdditionalOptions>
-    </Bison>
-    <Bison Include="decompile\xml.y">
-      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">-p xml %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-p xml %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">-p xml %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-p xml %(AdditionalOptions)</AdditionalOptions>
-    </Bison>
+    <ClInclude Include="decompile\compression.hh" />
+    <ClInclude Include="decompile\crc32.hh" />
+    <ClInclude Include="decompile\zlib\deflate.h" />
+    <ClInclude Include="decompile\zlib\gzguts.h" />
+    <ClInclude Include="decompile\zlib\inffast.h" />
+    <ClInclude Include="decompile\zlib\inffixed.h" />
+    <ClInclude Include="decompile\zlib\inflate.h" />
+    <ClInclude Include="decompile\zlib\inftrees.h" />
+    <ClInclude Include="decompile\zlib\trees.h" />
+    <ClInclude Include="decompile\zlib\zconf.h" />
+    <ClInclude Include="decompile\zlib\zlib.h" />
+    <ClInclude Include="decompile\zlib\zutil.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.targets" />
+    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.targets" Condition="Exists('$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.targets')" />
   </ImportGroup>
 </Project>

@@ -32,6 +32,39 @@ const std::string JSON_numChars = "numChars";
 const std::string JSON_comStyle = "comStyle";
 const std::string JSON_intFormat = "intFormat";
 
+void applyEnvironmentConfig(idaplugin::RdGlobalInfo& rdgi)
+{
+	if (rdgi.ghidraPath.empty())
+	{
+		qstring ghidraDir;
+		if (qgetenv("GHIDRADEC_GHIDRA_DIR", &ghidraDir))
+		{
+			rdgi.ghidraPath = ghidraDir.c_str();
+		}
+		else if (qgetenv("GHIDRA_INSTALL_DIR", &ghidraDir))
+		{
+			rdgi.ghidraPath = ghidraDir.c_str();
+		}
+	}
+
+	qstring value;
+	if (qgetenv("GHIDRADEC_PSPEC", &value))
+	{
+		rdgi.customPspec = value.c_str();
+	}
+	if (qgetenv("GHIDRADEC_CSPEC", &value))
+	{
+		rdgi.customCspec = value.c_str();
+	}
+	if (qgetenv("GHIDRADEC_SLEIGH", &value))
+	{
+		rdgi.customSlafile = value.c_str();
+	}
+	if (qgetenv("GHIDRADEC_CALL_STYLE", &value))
+	{
+		rdgi.customCallStyle = value.c_str();
+	}
+}
 
 } // anonymous namespace
 
@@ -105,6 +138,7 @@ bool readConfigFile(RdGlobalInfo& rdgi)
 
 	if (getConfigRootFromFile(rdgi.pluginConfigFile.getPath(), root))
 	{
+		applyEnvironmentConfig(rdgi);
 		return true;
 	}
 
@@ -121,6 +155,8 @@ bool readConfigFile(RdGlobalInfo& rdgi)
 	rdgi.comStyle = root.get(JSON_comStyle, 0).asInt();
 	rdgi.intFormat = root.get(JSON_intFormat, 2).asInt();
 
+	applyEnvironmentConfig(rdgi);
+
 	netnode nn("GhidraConfig");
 	qstring qs;
 	;
@@ -134,6 +170,8 @@ bool readConfigFile(RdGlobalInfo& rdgi)
 		rdgi.customSlafile = split[2];
 		rdgi.customCallStyle = split[3];
 	}
+
+	applyEnvironmentConfig(rdgi);
 
 	return false;
 }

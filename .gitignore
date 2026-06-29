@@ -330,6 +330,12 @@ ASALocalRun/
 .mfractor/
 /build
 /Tests
+!/tests/
+/tests/*
+!/tests/ida93/
+!/tests/ida93/*.idc.in
+!/tests/ida93/*.ps1
+!/tests/ida93/*.py
 /retdec
 /jsoncpp
 /Release32EA
@@ -338,3 +344,4 @@ ASALocalRun/
 /Debug32EA
 /Debug32EA
 /Debug32EA/GhidraDec.tlog
+/tests/ida93/work/
