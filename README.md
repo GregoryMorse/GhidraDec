@@ -27,8 +27,10 @@ Currently, we officially support only Windows and Linux. It may be possible to b
   * On Windows, only Microsoft Visual C++ is supported (version >= Visual Studio 2015).
 * IDA SDK
   * Supported build targets are defined in `ghidradec.targets.json`.
-  * IDA SDK 9.2 and 9.3 are fetched from the public Hex-Rays SDK releases.
+  * IDA SDK 9.2, 9.3, and `latest` are fetched from the public Hex-Rays SDK repository.
+  * CI and release builds target IDA SDK 9.3 by default; older SDK packages can be generated on demand from the manual release workflow.
   * Older SDKs remain private and are restored from encrypted archives for CI.
+  * EA32 libraries are present through the 8.4 SDK targets; 8.5 and newer are EA64-only.
 
 * Bison, the GNU parser generator, only when regenerating parser outputs.
   * On Windows, [win_flex_bison](https://sourceforge.net/projects/winflexbison/).
@@ -65,6 +67,7 @@ Do not commit machine-specific paths. Use environment variables, MSBuild propert
 * Local manifest-driven build:
   * `cd ghidradec`
   * `pwsh tools/build.ps1 -IdaVersion 9.3`
+  * Use `-IdaVersion latest` to build against the moving Hex-Rays `ida-sdk` master branch.
 * Manual CMake:
   * `python tools/ida_sdk.py ensure --version 9.3`
   * `cmake -S . -B build -DGHIDRADEC_IDA_VERSION=9.3`

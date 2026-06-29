@@ -6,6 +6,10 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
+      ida_versions:
+        description: "IDA SDK versions to publish: 9.3, latest, 7.3,8.5, or all"
+        type: string
+        default: "9.3"
       include_private_sdks:
         description: "Include encrypted/private SDK targets"
         type: boolean
@@ -25,6 +29,15 @@ jobs:
         shell: bash
         run: |
           args=()
+          versions="${{ github.event.inputs.ida_versions }}"
+          if [[ -z "$versions" ]]; then
+            versions="9.3"
+          fi
+          if [[ "$versions" == "all" ]]; then
+            args+=(--all)
+          else
+            args+=(--versions "$versions")
+          fi
           if [[ "${{ github.event.inputs.include_private_sdks }}" != "false" ]]; then
             args+=(--include-private)
           fi
@@ -32,6 +45,7 @@ jobs:
 
   build:
     needs: matrix
+    if: ${{ fromJson(needs.matrix.outputs.matrix).include[0] != null }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
@@ -40,7 +54,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Decrypt private SDK archives
-        if: ${{ matrix.sdk_source != 'public-release' }}
+        if: ${{ matrix.sdk_source != 'public-release' && matrix.sdk_source != 'public-branch' }}
         shell: pwsh
         env:
           IDA_SDK_AES_KEY: ${{ secrets.IDA_SDK_AES_KEY }}
@@ -76,13 +90,40 @@ jobs:
 
   publish:
     needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      - id: missing-assets
+        name: Keep only missing release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          mkdir -p upload
+          existing="$(gh release view "$TAG_NAME" --json assets --jq '.assets[].name' 2>/dev/null || true)"
+          shopt -s nullglob
+          for file in dist/*.zip; do
+            name="$(basename "$file")"
+            if grep -Fxq "$name" <<< "$existing"; then
+              echo "Skipping existing release asset: $name"
+            else
+              cp "$file" upload/
+            fi
+          done
+          if compgen -G "upload/*.zip" > /dev/null; then
+            echo "has_uploads=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_uploads=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: softprops/action-gh-release@v2
+        if: ${{ steps.missing-assets.outputs.has_uploads == 'true' }}
         with:
-          files: dist/*.zip
-          draft: true
+          files: upload/*.zip
+          draft: false
+          make_latest: false
+          overwrite_files: false

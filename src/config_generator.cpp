@@ -128,7 +128,7 @@ void ConfigGenerator::generateCallingConvention(
 		case CM_CC_PASCAL:   configCC.setIsPascal(); break;
 		case CM_CC_FASTCALL: configCC.setIsFastcall(); break;
 		case CM_CC_THISCALL: configCC.setIsThiscall(); break;
-#if IDA_SDK_VERSION < 900
+#if IDA_SDK_VERSION < 830
 		case CM_CC_MANUAL:   configCC.setIsManual(); break;
 #endif
 		case CM_CC_SPOILED:  configCC.setIsSpoiled(); break;

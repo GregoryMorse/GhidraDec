@@ -5,6 +5,10 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      ida_versions:
+        description: "IDA SDK versions to build: 9.3, latest, 7.3,8.5, or all"
+        type: string
+        default: "9.3"
       include_private_sdks:
         description: "Include encrypted/private SDK targets"
         type: boolean
@@ -21,6 +25,15 @@ jobs:
         shell: bash
         run: |
           args=()
+          versions="${{ github.event.inputs.ida_versions }}"
+          if [[ -z "$versions" ]]; then
+            versions="9.3"
+          fi
+          if [[ "$versions" == "all" ]]; then
+            args+=(--all)
+          else
+            args+=(--versions "$versions")
+          fi
           if [[ "${{ github.event.inputs.include_private_sdks }}" == "true" ]]; then
             args+=(--include-private)
           fi
@@ -37,7 +50,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Decrypt private SDK archives
-        if: ${{ matrix.sdk_source != 'public-release' }}
+        if: ${{ matrix.sdk_source != 'public-release' && matrix.sdk_source != 'public-branch' }}
         shell: pwsh
         env:
           IDA_SDK_AES_KEY: ${{ secrets.IDA_SDK_AES_KEY }}

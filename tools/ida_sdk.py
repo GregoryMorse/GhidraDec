@@ -59,6 +59,22 @@ def extract_archive(archive: Path, destination_root: Path, directory: str) -> Pa
     with zipfile.ZipFile(archive) as zf:
         zf.extractall(scratch)
 
+    nested_archive = scratch / f"{directory}.zip"
+    if not any(scratch.rglob("include/ida.hpp")) and nested_archive.exists():
+        nested_scratch = scratch / ".nested"
+        nested_scratch.mkdir(parents=True)
+        with zipfile.ZipFile(nested_archive) as zf:
+            zf.extractall(nested_scratch)
+        for child in list(scratch.iterdir()):
+            if child != nested_scratch:
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+        for child in nested_scratch.iterdir():
+            shutil.move(str(child), str(scratch / child.name))
+        shutil.rmtree(nested_scratch, ignore_errors=True)
+
     source_dir = scratch
     for marker in scratch.rglob("include/ida.hpp"):
         source_dir = marker.parent.parent
@@ -88,7 +104,7 @@ def ensure_sdk(args: argparse.Namespace) -> None:
     sdk = find_sdk(manifest, args.version or manifest["project"]["defaultIdaSdk"])
     destination_root = Path(args.destination).resolve() if args.destination else PRIVATE_SDK_DIR
 
-    if sdk["source"] == "public-release":
+    if sdk["source"] in {"public-release", "public-branch"}:
         archive = download(sdk["url"], destination_root / sdk["archive"])
     else:
         archive = destination_root / sdk["archive"]
@@ -108,14 +124,36 @@ def matrix(args: argparse.Namespace) -> None:
     include_private = args.include_private or os.environ.get("GHIDRADEC_INCLUDE_PRIVATE_SDKS") == "1"
     only_host = args.current_host
     current = host_platform()
+    default_version = manifest["project"]["defaultIdaSdk"]
+    requested_versions = {
+        version.strip()
+        for version in (args.versions or "").split(",")
+        if version.strip()
+    }
+    if args.all and requested_versions:
+        raise SystemExit("--all and --versions are mutually exclusive")
+    known_versions = {sdk["version"] for sdk in manifest["idaSdks"]}
+    unknown_versions = sorted(requested_versions - known_versions)
+    if unknown_versions:
+        raise SystemExit(
+            "Unknown IDA SDK version(s): "
+            + ", ".join(unknown_versions)
+            + ". Check ghidradec.targets.json for valid version names."
+        )
     include = []
 
     for sdk in manifest["idaSdks"]:
         if not sdk.get("enabled", False):
             continue
-        if sdk["source"] != "public-release" and not include_private:
+        if requested_versions:
+            if sdk["version"] not in requested_versions:
+                continue
+        elif not args.all:
+            if sdk["version"] != default_version:
+                continue
+        if sdk["source"] not in {"public-release", "public-branch"} and not include_private:
             continue
-        for os_name in sdk["platforms"]:
+        for os_name in sdk.get("platforms", ["windows", "linux", "macos"]):
             if only_host and os_name != current:
                 continue
             runner = {
@@ -149,6 +187,8 @@ def main() -> int:
     mat = sub.add_parser("matrix", help="Emit GitHub Actions matrix JSON")
     mat.add_argument("--include-private", action="store_true")
     mat.add_argument("--current-host", action="store_true")
+    mat.add_argument("--all", action="store_true", help="Include every enabled SDK target.")
+    mat.add_argument("--versions", help="Comma-separated SDK versions to include.")
     mat.set_defaults(func=matrix)
 
     args = parser.parse_args()

@@ -31,11 +31,13 @@
 #include <lines.hpp>
 #include <loader.hpp>
 #include <segment.hpp>
-#include <strlist.hpp>
 #include <typeinf.hpp>
 #include <ua.hpp>
 #include <xref.hpp>
-#if IDA_SDK_VERSION < 900
+#if IDA_SDK_VERSION >= 695
+#include <strlist.hpp>
+#endif
+#if IDA_SDK_VERSION < 850
 #include <struct.hpp>
 #endif
 
@@ -49,21 +51,23 @@ inline uint32 get_aflags0(ea_t ea) { return flags_t(getnode(ea).altval(NALT_AFLA
 #if IDA_SDK_VERSION < 750
 #define PLUGIN_MULTI 0
 #define is_idaqt is_idaq
+#ifndef WOPN_DP_TAB
 #define WOPN_DP_TAB WOPN_TAB
+#endif
 #define ACTION_DESC_LITERAL_PLUGMOD(t,u,v,w,x,y,z) ACTION_DESC_LITERAL(t,u,v,x,y,z)
 #define inf_filetype inf.filetype
 #define inf_start_ea inf.start_ea
 #define inf_min_ea inf.min_ea
 #define inf_max_ea inf.max_ea
 #define inf_procname std::string(inf.procname)
-#define inf_is_32bit inf.is_32bit
-#define inf_is_64bit inf.is_64bit
+#define inf_is_32bit() inf.is_32bit
+#define inf_is_64bit() inf.is_64bit
 #define inf_cc_cm inf.cc.cm
-#define inf_is_be inf.is_be
+#define inf_is_be() inf.is_be
 #else
 #define PLUGIN_SKIP  0
 #define PLUGIN_KEEP 2
-#if IDA_SDK_VERSION >= 900
+#if IDA_SDK_VERSION >= 840
 using udt_member_t = udm_t;
 using enum_member_t = edm_t;
 #define find_udt_member find_udm
@@ -91,6 +95,37 @@ inline std::string qstring_to_string(qstring qs) {
 }
 #define inf_procname qstring_to_string(inf_get_procname())
 #define inf_cc_cm inf_get_cc_cm()
+#endif
+
+#if IDA_SDK_VERSION >= 730 && IDA_SDK_VERSION < 750
+#undef inf_filetype
+#undef inf_start_ea
+#undef inf_min_ea
+#undef inf_max_ea
+#undef inf_procname
+#undef inf_is_32bit
+#undef inf_is_64bit
+#undef inf_cc_cm
+#undef inf_is_be
+inline std::string qstring_to_string(qstring qs) {
+	return std::string(qs.c_str());
+}
+inline bool ghidradec_inf_is_32bit() { return inf_is_32bit(); }
+inline bool ghidradec_inf_is_64bit() { return inf_is_64bit(); }
+inline bool ghidradec_inf_is_be() { return inf_is_be(); }
+#define inf_filetype inf_get_filetype()
+#define inf_start_ea inf_get_start_ea()
+#define inf_min_ea inf_get_min_ea()
+#define inf_max_ea inf_get_max_ea()
+#define inf_procname qstring_to_string(inf_get_procname())
+#define inf_is_32bit() ghidradec_inf_is_32bit()
+#define inf_is_64bit() ghidradec_inf_is_64bit()
+#define inf_cc_cm inf_get_cc_cm()
+#define inf_is_be() ghidradec_inf_is_be()
+#endif
+
+#if IDA_SDK_VERSION < 760
+#define inf_get_app_bitness() (inf_is_64bit() ? 64 : (inf_is_32bit() ? 32 : 16))
 #endif
 
 #if !defined(__X64__) || IDA_SDK_VERSION < 720
@@ -191,6 +226,7 @@ struct stkpnt_t
 #define getn_sreg_range getn_srarea2
 #define get_stkarg_offset() ph.get_stkarg_offset2
 
+#if IDA_SDK_VERSION < 695
 //-------------------------------------------------------------------------
 struct graph_location_info_t
 {
@@ -554,19 +590,6 @@ public:
 	custom_viewer_can_navigate_t* can_navigate;
 };
 #endif // SWIG
-enum path_type_t
-{
-	PATH_TYPE_CMD,  ///< full path to the file specified in the command line
-	PATH_TYPE_IDB,  ///< full path of IDB file
-	PATH_TYPE_ID0,  ///< full path of ID0 file
-};
-inline const char* get_path(path_type_t pt)
-{
-	if (pt == PATH_TYPE_CMD) return command_line_file;
-	else if (pt == PATH_TYPE_IDB) return database_idb;
-	else if (pt == PATH_TYPE_ID0) return database_id0;
-	else return nullptr;
-}
 inline TWidget* create_custom_viewer(
 	const char* title,
 	const place_t* minplace,
@@ -584,6 +607,46 @@ inline TWidget* create_custom_viewer(
 		cvhandlers->dblclick, cvhandlers->curpos, cvhandlers->close, cvhandlers_ud);
 	return (TWidget*)widget;
 }
+#elif IDA_SDK_VERSION < 750
+inline TWidget* create_custom_viewer(
+	const char* title,
+	const place_t* minplace,
+	const place_t* maxplace,
+	const place_t* curplace,
+	const renderer_info_t* rinfo,
+	void* ud,
+	const custom_viewer_handlers_t* cvhandlers,
+	void* cvhandlers_ud,
+	TWidget* parent = NULL)
+{
+	return (TWidget*)create_custom_viewer(
+		title,
+		(Controls::TWinControl*)parent,
+		minplace,
+		maxplace,
+		curplace,
+		rinfo,
+		ud,
+		cvhandlers,
+		cvhandlers_ud);
+}
+#endif
+
+#if IDA_SDK_VERSION < 750
+enum path_type_t
+{
+	PATH_TYPE_CMD,  ///< full path to the file specified in the command line
+	PATH_TYPE_IDB,  ///< full path of IDB file
+	PATH_TYPE_ID0,  ///< full path of ID0 file
+};
+inline const char* get_path(path_type_t pt)
+{
+	if (pt == PATH_TYPE_CMD) return command_line_file;
+	else if (pt == PATH_TYPE_IDB) return database_idb;
+	else if (pt == PATH_TYPE_ID0) return database_id0;
+	else return nullptr;
+}
+#endif
 
 inline void display_widget(TWidget* widget, int options)
 {
@@ -908,7 +971,7 @@ inline bool is_anonymous_udt(const tinfo_t& ti)
 #if IDA_SDK_VERSION >= 770
 inline sval_t get_stkarg_offset() {
 	stkarg_area_info_t sai = { sizeof(stkarg_area_info_t) };
-#if IDA_SDK_VERSION >= 900
+#if IDA_SDK_VERSION >= 920
 	get_stkarg_area_info(&sai, inf_get_cc_cm());
 #else
 	get_ph()->get_stkarg_area_info(&sai, inf_get_cc_cm());
@@ -917,6 +980,21 @@ inline sval_t get_stkarg_offset() {
 }
 #elif defined(__X64__)
 #define get_stkarg_offset() ph.get_stkarg_offset()
+#endif
+
+#if IDA_SDK_VERSION >= 850
+#define GHIDRADEC_EXEC_RETURN ssize_t
+using mutable_graph_t = interactive_graph_t;
+inline mutable_graph_t* create_mutable_graph(netnode id)
+{
+	return create_interactive_graph(id);
+}
+inline void delete_mutable_graph(mutable_graph_t* graph)
+{
+	if (graph != nullptr) delete_interactive_graph(graph);
+}
+#else
+#define GHIDRADEC_EXEC_RETURN int
 #endif
 
 #if IDA_SDK_VERSION >= 900
@@ -929,26 +1007,20 @@ inline sval_t get_stkarg_offset() {
 #ifndef CM_CC_MANUAL
 #define CM_CC_MANUAL CM_CC_SPECIAL
 #endif
-#define GHIDRADEC_EXEC_RETURN ssize_t
+#if IDA_SDK_VERSION >= 920
 #define GHIDRADEC_FTD_CC(ftd) ((ftd).get_explicit_cc())
 #define GHIDRADEC_SET_FTD_CC(ftd, cc) ((ftd).set_cc((callcnv_t)(cc)))
-using mutable_graph_t = interactive_graph_t;
-inline mutable_graph_t* create_mutable_graph(netnode id)
-{
-	return create_interactive_graph(id);
-}
-inline void delete_mutable_graph(mutable_graph_t* graph)
-{
-	if (graph != nullptr) delete_interactive_graph(graph);
-}
-#if IDA_SDK_VERSION < 920 || IDA_SDK_VERSION >= 930
+#else
+#define GHIDRADEC_FTD_CC(ftd) ((ftd).cc)
+#define GHIDRADEC_SET_FTD_CC(ftd, cc_value) ((ftd).cc = (cc_value))
+#endif
+#if IDA_SDK_VERSION >= 930
 inline TWidget* open_calls_window(ea_t ea)
 {
 	return (TWidget*)callui(ui_open_builtin, BWN_RESERVED_1, ea).vptr;
 }
 #endif
 #else
-#define GHIDRADEC_EXEC_RETURN int
 #define GHIDRADEC_FTD_CC(ftd) ((ftd).cc)
 #define GHIDRADEC_SET_FTD_CC(ftd, cc_value) ((ftd).cc = (cc_value))
 #endif

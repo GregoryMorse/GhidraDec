@@ -79,7 +79,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	{
 		out.clear();
 		if (f == nullptr || f->frame == BADNODE) return false;
-#if IDA_SDK_VERSION >= 900
+#if IDA_SDK_VERSION >= 850
 		tinfo_t frame;
 		udt_type_data_t udt;
 		if (!get_func_frame(&frame, f) || !frame.get_udt_details(&udt)) return false;
@@ -865,7 +865,13 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			argloc_t al;
 			const tinfo_t t(inf_is_64bit() ? BT_INT64 : (inf_is_32bit() ? BT_INT32 : BT_INT16)); //or use BT_INT8 - 1 byte like Ghidra?
 #ifdef __X64__
+#if IDA_SDK_VERSION >= 920
 			if (calc_retloc(&al, t, inf_cc_cm))
+#elif IDA_SDK_VERSION >= 750
+			if (get_ph()->calc_retloc(&al, t, inf_cc_cm))
+#else
+			if (ph.calc_retloc(&al, t, inf_cc_cm))
+#endif
 #else
 			if (ph.notify(ph.calc_retloc3, &t, inf_cc_cm, &al) == 2)
 #endif
@@ -3072,7 +3078,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				}
 			}
 		}
-		callcnv_t ftdCc = GHIDRADEC_FTD_CC(ftd);
+		auto ftdCc = GHIDRADEC_FTD_CC(ftd);
 		if ((ftdCc & CM_M_MASK) == CM_M_FN && isFar) ftdCc = (ftdCc & ~CM_M_MASK) | CM_M_FF;
 		else if ((ftdCc & CM_M_MASK) == CM_M_NN && isFar) ftdCc = (ftdCc & ~CM_M_MASK) | CM_M_NF;
 		else if ((ftdCc & CM_M_MASK) == CM_M_NF && isNear) ftdCc = (ftdCc & ~CM_M_MASK) | CM_M_NN;
@@ -3629,7 +3635,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 							tinfo_t ti;
 							typeInfoToIDA(0, paramInfo.syminfo[i].pi.ti, ti);
 							opinfo_t oi = {};
-#if IDA_SDK_VERSION >= 900
+#if IDA_SDK_VERSION >= 850
 							define_stkvar(f, paramInfo.syminfo[i].pi.name.c_str(),
 								(sval_t)(paramInfo.syminfo[i].addr.addr.offset - (frame_off_args(f) - frame_off_retaddr(f))),
 								ti, nullptr);
