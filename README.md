@@ -109,6 +109,10 @@ At runtime, set `GHIDRA_INSTALL_DIR` before launching x64dbg.
 
 ### IDA 9.3 smoke test
 
+The old `tests/ida93` harness is kept for local reference. New corpus-scale
+testing should use the batch runner described in
+`docs/ida-regression-testing.md`.
+
 The IDA smoke test runs IDA in batch mode, marks one or more functions with the plugin's internal `<ghidradec_select>` regression marker, invokes the plugin with argument `4`, and verifies that a C output file was produced. It uses IDC by default, so IDAPython is not required.
 
 ```

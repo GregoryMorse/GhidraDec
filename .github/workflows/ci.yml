@@ -51,18 +51,15 @@ jobs:
 
       - name: Decrypt private SDK archives
         if: ${{ matrix.sdk_source != 'public-release' && matrix.sdk_source != 'public-branch' }}
-        shell: pwsh
+        shell: bash
         env:
           IDA_SDK_AES_KEY: ${{ secrets.IDA_SDK_AES_KEY }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:IDA_SDK_AES_KEY)) {
-            throw "IDA_SDK_AES_KEY is required for private SDK targets."
-          }
-          New-Item -ItemType Directory -Force -Path .idasdks | Out-Null
-          Get-ChildItem idasdks -Filter '*.enc' | ForEach-Object {
-            $outName = $_.Name -replace '\.enc$', ''
-            pwsh tools/ida_sdk_crypto.ps1 decrypt -InputPath $_.FullName -OutputPath (Join-Path '.idasdks' $outName)
-          }
+          if [[ -z "$IDA_SDK_AES_KEY" ]]; then
+            echo "IDA_SDK_AES_KEY is required for private SDK targets." >&2
+            exit 1
+          fi
+          python tools/ida_sdk.py decrypt-private
 
       - name: Prepare IDA SDK
         shell: bash

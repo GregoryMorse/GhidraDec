@@ -21,16 +21,18 @@ CMake with `GHIDRADEC_IDA_VERSION`.
 
 ## Private SDK Encryption
 
-```powershell
-$env:IDA_SDK_AES_KEY = "<strong shared secret>"
-pwsh tools/ida_sdk_crypto.ps1 encrypt `
-  -InputPath .idasdks/idasdk68.zip `
-  -OutputPath idasdks/idasdk68.zip.enc
+```bash
+export IDA_SDK_AES_KEY="<strong shared secret>"
+python tools/ida_sdk.py encrypt \
+  --input .idasdks/idasdk68.zip \
+  --output idasdks/idasdk68.zip.enc
+python tools/ida_sdk.py decrypt-private
 ```
 
 In GitHub Actions, store the same value as the `IDA_SDK_AES_KEY` secret. The CI
-workflow decrypts `idasdks/*.enc` into `.idasdks` before building private SDK
-targets.
+workflow uses `python tools/ida_sdk.py decrypt-private` to decrypt
+`idasdks/*.enc` into `.idasdks` before building private SDK targets. The Python
+command uses OpenSSL for AES-CBC, so OpenSSL must be available on the runner.
 
 ## Target Matrix
 
