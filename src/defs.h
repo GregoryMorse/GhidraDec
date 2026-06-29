@@ -941,10 +941,12 @@ inline void delete_mutable_graph(mutable_graph_t* graph)
 {
 	if (graph != nullptr) delete_interactive_graph(graph);
 }
+#if IDA_SDK_VERSION < 920 || IDA_SDK_VERSION >= 930
 inline TWidget* open_calls_window(ea_t ea)
 {
 	return (TWidget*)callui(ui_open_builtin, BWN_RESERVED_1, ea).vptr;
 }
+#endif
 #else
 #define GHIDRADEC_EXEC_RETURN int
 #define GHIDRADEC_FTD_CC(ftd) ((ftd).cc)

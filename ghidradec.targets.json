@@ -1,0 +1,124 @@
+{
+  "schema": 1,
+  "project": {
+    "name": "GhidraDec",
+    "releaseVersion": "1.3",
+    "defaultIdaSdk": "9.3",
+    "defaultGhidraVersion": "12.1.2"
+  },
+  "dependencies": {
+    "jsoncpp": {
+      "version": "1.8.4",
+      "url": "https://github.com/open-source-parsers/jsoncpp/archive/1.8.4.zip",
+      "sha256": "2979436dbd4c48a3284dca9fa8f212298425ba3920ed6bacdda8905a94b111a8"
+    },
+    "retdec": {
+      "version": "10c0ddcf5e0fdb8ee4c5256787a0fa74bd069883",
+      "url": "https://github.com/avast/retdec/archive/10c0ddcf5e0fdb8ee4c5256787a0fa74bd069883.zip",
+      "sha256": "2e2112ac8d5a31721c2cafe3d7657b13b5efaed9b22486e20fd2ac8de79a7311"
+    }
+  },
+  "idaSdks": [
+    {
+      "version": "6.8",
+      "directory": "idasdk68",
+      "archive": "idasdk68.zip",
+      "source": "private-encrypted",
+      "enabled": false,
+      "platforms": ["windows"],
+      "hostArchitectures": ["x86"],
+      "eaModes": [32, 64],
+      "cmakeVariable": "IDA_SDK_DIR32"
+    },
+    {
+      "version": "6.95",
+      "directory": "idasdk695",
+      "archive": "idasdk695.zip",
+      "source": "private-encrypted",
+      "enabled": false,
+      "platforms": ["windows"],
+      "hostArchitectures": ["x86"],
+      "eaModes": [32, 64],
+      "cmakeVariable": "IDA_SDK_DIR32"
+    },
+    {
+      "version": "7.0",
+      "directory": "idasdk70",
+      "archive": "idasdk70.zip",
+      "source": "private-encrypted",
+      "enabled": false,
+      "platforms": ["windows"],
+      "hostArchitectures": ["x64"],
+      "eaModes": [32, 64],
+      "cmakeVariable": "IDA_SDK_DIR"
+    },
+    {
+      "version": "7.1",
+      "directory": "idasdk71",
+      "archive": "idasdk71.zip",
+      "source": "private-encrypted",
+      "enabled": false,
+      "platforms": ["windows"],
+      "hostArchitectures": ["x64"],
+      "eaModes": [32, 64],
+      "cmakeVariable": "IDA_SDK_DIR"
+    },
+    {
+      "version": "7.3",
+      "directory": "idasdk73",
+      "archive": "idasdk73.zip",
+      "source": "private-encrypted",
+      "enabled": false,
+      "platforms": ["windows"],
+      "hostArchitectures": ["x64"],
+      "eaModes": [32, 64],
+      "cmakeVariable": "IDA_SDK_DIR"
+    },
+    {
+      "version": "7.6",
+      "directory": "idasdk76",
+      "archive": "idasdk76.zip",
+      "source": "private-encrypted",
+      "enabled": false,
+      "platforms": ["windows"],
+      "hostArchitectures": ["x64"],
+      "eaModes": [32, 64],
+      "cmakeVariable": "IDA_SDK_DIR"
+    },
+    {
+      "version": "7.7",
+      "directory": "idasdk77",
+      "archive": "idasdk77.zip",
+      "source": "private-encrypted",
+      "enabled": false,
+      "platforms": ["windows"],
+      "hostArchitectures": ["x64"],
+      "eaModes": [32, 64],
+      "cmakeVariable": "IDA_SDK_DIR"
+    },
+    {
+      "version": "9.2",
+      "directory": "idasdk92",
+      "archive": "ida-sdk-v9.2.zip",
+      "source": "public-release",
+      "url": "https://github.com/HexRaysSA/ida-sdk/archive/refs/tags/v9.2.zip",
+      "enabled": true,
+      "platforms": ["windows", "linux", "macos"],
+      "hostArchitectures": ["x64", "arm64"],
+      "eaModes": [32, 64],
+      "cmakeVariable": "IDA_SDK_DIR"
+    },
+    {
+      "version": "9.3",
+      "directory": "idasdk93",
+      "archive": "ida-sdk-v9.3.zip",
+      "source": "public-release",
+      "url": "https://github.com/HexRaysSA/ida-sdk/archive/refs/tags/v9.3.zip",
+      "enabled": true,
+      "platforms": ["windows", "linux", "macos"],
+      "hostArchitectures": ["x64", "arm64"],
+      "eaModes": [32, 64],
+      "cmakeVariable": "IDA_SDK_DIR"
+    }
+  ]
+}

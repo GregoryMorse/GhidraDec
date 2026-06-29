@@ -183,7 +183,7 @@
       <PreprocessorDefinitions>__IDP__;__PLUGIN__;NO_OBSOLETE_FUNCS;NO_GZIP;__X64__;__NT__;_DEBUG;GHIDRADEC_EXPORTS;_WINDOWS;_USRDLL;__EA64__;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>src;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(GhidraDecRoot)src;$(GhidraDecRoot);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <CallingConvention>StdCall</CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
@@ -211,7 +211,7 @@
       <PreprocessorDefinitions>__IDP__;__PLUGIN__;NO_OBSOLETE_FUNCS;NO_GZIP;__NT__;_DEBUG;GHIDRADEC_EXPORTS;_WINDOWS;_USRDLL;__EA64__;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>src;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(GhidraDecRoot)src;$(GhidraDecRoot);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <CallingConvention>StdCall</CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
@@ -238,7 +238,7 @@
       <PreprocessorDefinitions>__IDP__;__PLUGIN__;NO_OBSOLETE_FUNCS;NO_GZIP;__X64__;__NT__;_DEBUG;GHIDRADEC_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>src;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(GhidraDecRoot)src;$(GhidraDecRoot);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <CallingConvention>StdCall</CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -265,7 +265,7 @@
       <PreprocessorDefinitions>__IDP__;__PLUGIN__;NO_OBSOLETE_FUNCS;NO_GZIP;__NT__;_DEBUG;GHIDRADEC_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>src;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(GhidraDecRoot)src;$(GhidraDecRoot);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <CallingConvention>StdCall</CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -294,7 +294,7 @@
       <PreprocessorDefinitions>__IDP__;__PLUGIN__;NO_OBSOLETE_FUNCS;NO_GZIP;__X64__;__NT__;NDEBUG;GHIDRADEC_EXPORTS;_WINDOWS;_USRDLL;__EA64__;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>src;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(GhidraDecRoot)src;$(GhidraDecRoot);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <CallingConvention>StdCall</CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <BufferSecurityCheck>true</BufferSecurityCheck>
@@ -325,7 +325,7 @@
       <PreprocessorDefinitions>__IDP__;__PLUGIN__;NO_OBSOLETE_FUNCS;NO_GZIP;__NT__;NDEBUG;GHIDRADEC_EXPORTS;_WINDOWS;_USRDLL;__EA64__;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>src;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(GhidraDecRoot)src;$(GhidraDecRoot);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <CallingConvention>StdCall</CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <BufferSecurityCheck>true</BufferSecurityCheck>
@@ -356,7 +356,7 @@
       <PreprocessorDefinitions>__IDP__;__PLUGIN__;NO_OBSOLETE_FUNCS;NO_GZIP;__X64__;__NT__;NDEBUG;GHIDRADEC_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>src;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(GhidraDecRoot)src;$(GhidraDecRoot);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <CallingConvention>StdCall</CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <BufferSecurityCheck>true</BufferSecurityCheck>
@@ -387,7 +387,7 @@
       <PreprocessorDefinitions>__IDP__;__PLUGIN__;NO_OBSOLETE_FUNCS;NO_GZIP;__NT__;NDEBUG;GHIDRADEC_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>src;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(GhidraDecRoot)src;$(GhidraDecRoot);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <CallingConvention>StdCall</CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <BufferSecurityCheck>true</BufferSecurityCheck>
@@ -408,136 +408,135 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <None Include="cpp.hint" />
-    <None Include="jsoncpp\src\lib_json\json_valueiterator.inl" />
+    <None Include="$(GhidraDecRoot)jsoncpp\src\lib_json\json_valueiterator.inl" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="address.hh" />
-    <ClInclude Include="src\code_viewer.h" />
-    <ClInclude Include="src\config_generator.h" />
-    <ClInclude Include="decompile\context.hh" />
-    <ClInclude Include="src\decompiler.h" />
-    <ClInclude Include="src\defs.h" />
-    <ClInclude Include="retdec\src\utils\doxygen.h" />
-    <ClInclude Include="decompile\emulate.hh" />
-    <ClInclude Include="decompile\error.hh" />
-    <ClInclude Include="decompile\filemanage.hh" />
-    <ClInclude Include="decompile\float.hh" />
-    <ClInclude Include="src\framework.h" />
-    <ClInclude Include="decompile\globalcontext.hh" />
-    <ClInclude Include="src\idaplugin.h" />
-    <ClInclude Include="jsoncpp\src\lib_json\json_tool.h" />
-    <ClInclude Include="decompile\loadimage.hh" />
-    <ClInclude Include="decompile\marshal.hh" />
-    <ClInclude Include="decompile\memstate.hh" />
-    <ClInclude Include="decompile\opbehavior.hh" />
-    <ClInclude Include="decompile\opcodes.hh" />
-    <ClInclude Include="decompile\partmap.hh" />
-    <ClInclude Include="decompile\pcodecompile.hh" />
-    <ClInclude Include="decompile\pcodeparse.hh" />
-    <ClInclude Include="decompile\pcoderaw.hh" />
-    <ClInclude Include="src\plugin_config.h" />
-    <ClInclude Include="decompile\rangemap.hh" />
-    <ClInclude Include="decompile\semantics.hh" />
-    <ClInclude Include="decompile\slaformat.hh" />
-    <ClInclude Include="decompile\sleigh.hh" />
-    <ClInclude Include="decompile\sleighbase.hh" />
-    <ClInclude Include="src\sleighinterface.h" />
-    <ClInclude Include="decompile\slghpatexpress.hh" />
-    <ClInclude Include="decompile\slghpattern.hh" />
-    <ClInclude Include="decompile\slghsymbol.hh" />
-    <ClInclude Include="decompile\space.hh" />
-    <ClInclude Include="decompile\translate.hh" />
-    <ClInclude Include="decompile\types.h" />
-    <ClInclude Include="decompile\xml.hh" />
-    <ClInclude Include="decompile\compression.hh" />
-    <ClInclude Include="decompile\crc32.hh" />
-    <ClInclude Include="decompile\zlib\deflate.h" />
-    <ClInclude Include="decompile\zlib\gzguts.h" />
-    <ClInclude Include="decompile\zlib\inffast.h" />
-    <ClInclude Include="decompile\zlib\inffixed.h" />
-    <ClInclude Include="decompile\zlib\inflate.h" />
-    <ClInclude Include="decompile\zlib\inftrees.h" />
-    <ClInclude Include="decompile\zlib\trees.h" />
-    <ClInclude Include="decompile\zlib\zconf.h" />
-    <ClInclude Include="decompile\zlib\zlib.h" />
-    <ClInclude Include="decompile\zlib\zutil.h" />
+    <ClInclude Include="$(GhidraDecRoot)address.hh" />
+    <ClInclude Include="$(GhidraDecRoot)src\code_viewer.h" />
+    <ClInclude Include="$(GhidraDecRoot)src\config_generator.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\context.hh" />
+    <ClInclude Include="$(GhidraDecRoot)src\decompiler.h" />
+    <ClInclude Include="$(GhidraDecRoot)src\defs.h" />
+    <ClInclude Include="$(GhidraDecRoot)retdec\src\utils\doxygen.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\emulate.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\error.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\filemanage.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\float.hh" />
+    <ClInclude Include="$(GhidraDecRoot)src\framework.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\globalcontext.hh" />
+    <ClInclude Include="$(GhidraDecRoot)src\idaplugin.h" />
+    <ClInclude Include="$(GhidraDecRoot)jsoncpp\src\lib_json\json_tool.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\loadimage.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\marshal.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\memstate.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\opbehavior.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\opcodes.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\partmap.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\pcodecompile.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\pcodeparse.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\pcoderaw.hh" />
+    <ClInclude Include="$(GhidraDecRoot)src\plugin_config.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\rangemap.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\semantics.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\slaformat.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\sleigh.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\sleighbase.hh" />
+    <ClInclude Include="$(GhidraDecRoot)src\sleighinterface.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\slghpatexpress.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\slghpattern.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\slghsymbol.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\space.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\translate.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\types.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\xml.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\compression.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\crc32.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\deflate.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\gzguts.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\inffast.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\inffixed.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\inflate.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\inftrees.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\trees.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\zconf.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\zlib.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\zutil.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="decompile\address.cc" />
-    <ClCompile Include="retdec\src\utils\address.cpp" />
-    <ClCompile Include="retdec\src\utils\alignment.cpp" />
-    <ClCompile Include="retdec\src\config\architecture.cpp" />
-    <ClCompile Include="retdec\src\config\base.cpp" />
-    <ClCompile Include="retdec\src\utils\binary_path.cpp" />
-    <ClCompile Include="retdec\src\utils\byte_value_storage.cpp" />
-    <ClCompile Include="retdec\src\config\calling_convention.cpp" />
-    <ClCompile Include="retdec\src\config\classes.cpp" />
-    <ClCompile Include="src\code_viewer.cpp" />
-    <ClCompile Include="retdec\src\config\config.cpp" />
-    <ClCompile Include="src\config_generator.cpp" />
-    <ClCompile Include="decompile\context.cc" />
-    <ClCompile Include="retdec\src\utils\conversion.cpp" />
-    <ClCompile Include="src\decompiler.cpp" />
-    <ClCompile Include="src\defs.cpp" />
-    <ClCompile Include="retdec\src\utils\dynamic_buffer.cpp" />
-    <ClCompile Include="decompile\emulate.cc" />
-    <ClCompile Include="decompile\filemanage.cc" />
-    <ClCompile Include="retdec\src\utils\filesystem_path.cpp" />
-    <ClCompile Include="retdec\src\config\file_format.cpp" />
-    <ClCompile Include="retdec\src\utils\file_io.cpp" />
-    <ClCompile Include="retdec\src\config\file_type.cpp" />
-    <ClCompile Include="decompile\float.cc" />
-    <ClCompile Include="retdec\src\config\functions.cpp" />
-    <ClCompile Include="decompile\globalcontext.cc" />
-    <ClCompile Include="src\idaplugin.cpp" />
-    <ClCompile Include="jsoncpp\src\lib_json\json_reader.cpp" />
-    <ClCompile Include="jsoncpp\src\lib_json\json_value.cpp" />
-    <ClCompile Include="jsoncpp\src\lib_json\json_writer.cpp" />
-    <ClCompile Include="retdec\src\config\language.cpp" />
-    <ClCompile Include="decompile\loadimage.cc" />
-    <ClCompile Include="decompile\marshal.cc" />
-    <ClCompile Include="retdec\src\utils\math.cpp" />
-    <ClCompile Include="retdec\src\utils\memory.cpp" />
-    <ClCompile Include="decompile\memstate.cc" />
-    <ClCompile Include="retdec\src\config\objects.cpp" />
-    <ClCompile Include="decompile\opbehavior.cc" />
-    <ClCompile Include="decompile\opcodes.cc" />
-    <ClCompile Include="retdec\src\config\parameters.cpp" />
-    <ClCompile Include="retdec\src\config\patterns.cpp" />
-    <ClCompile Include="decompile\pcodecompile.cc" />
-    <ClCompile Include="decompile\pcodeparse.cc" />
-    <ClCompile Include="decompile\pcoderaw.cc" />
-    <ClCompile Include="src\plugin_config.cpp" />
-    <ClCompile Include="retdec\src\config\segments.cpp" />
-    <ClCompile Include="decompile\semantics.cc" />
-    <ClCompile Include="decompile\slaformat.cc" />
-    <ClCompile Include="decompile\sleigh.cc" />
-    <ClCompile Include="decompile\sleighbase.cc" />
-    <ClCompile Include="src\sleighinterface.cpp" />
-    <ClCompile Include="decompile\slghpatexpress.cc" />
-    <ClCompile Include="decompile\slghpattern.cc" />
-    <ClCompile Include="decompile\slghsymbol.cc" />
-    <ClCompile Include="decompile\space.cc" />
-    <ClCompile Include="retdec\src\config\storage.cpp" />
-    <ClCompile Include="retdec\src\utils\string.cpp" />
-    <ClCompile Include="retdec\src\utils\system.cpp" />
-    <ClCompile Include="retdec\src\utils\time.cpp" />
-    <ClCompile Include="retdec\src\config\tool_info.cpp" />
-    <ClCompile Include="decompile\translate.cc" />
-    <ClCompile Include="retdec\src\config\types.cpp" />
-    <ClCompile Include="retdec\src\config\vtables.cpp" />
-    <ClCompile Include="whereami\whereami.c" />
-    <ClCompile Include="decompile\xml.cc" />
-    <ClCompile Include="decompile\compression.cc" />
-    <ClCompile Include="decompile\crc32.cc" />
-    <ClCompile Include="decompile\zlib\adler32.c" />
-    <ClCompile Include="decompile\zlib\deflate.c" />
-    <ClCompile Include="decompile\zlib\inffast.c" />
-    <ClCompile Include="decompile\zlib\inflate.c" />
-    <ClCompile Include="decompile\zlib\inftrees.c" />
-    <ClCompile Include="decompile\zlib\trees.c" />
-    <ClCompile Include="decompile\zlib\zutil.c" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\address.cc" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\utils\address.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\utils\alignment.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\architecture.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\base.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\utils\binary_path.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\utils\byte_value_storage.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\calling_convention.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\classes.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)src\code_viewer.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\config.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)src\config_generator.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\context.cc" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\utils\conversion.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)src\decompiler.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)src\defs.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\utils\dynamic_buffer.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\emulate.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\filemanage.cc" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\utils\filesystem_path.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\file_format.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\utils\file_io.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\file_type.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\float.cc" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\functions.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\globalcontext.cc" />
+    <ClCompile Include="$(GhidraDecRoot)src\idaplugin.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)jsoncpp\src\lib_json\json_reader.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)jsoncpp\src\lib_json\json_value.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)jsoncpp\src\lib_json\json_writer.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\language.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\loadimage.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\marshal.cc" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\utils\math.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\utils\memory.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\memstate.cc" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\objects.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\opbehavior.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\opcodes.cc" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\parameters.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\patterns.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\pcodecompile.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\pcodeparse.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\pcoderaw.cc" />
+    <ClCompile Include="$(GhidraDecRoot)src\plugin_config.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\segments.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\semantics.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\slaformat.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\sleigh.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\sleighbase.cc" />
+    <ClCompile Include="$(GhidraDecRoot)src\sleighinterface.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\slghpatexpress.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\slghpattern.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\slghsymbol.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\space.cc" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\storage.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\utils\string.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\utils\system.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\utils\time.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\tool_info.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\translate.cc" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\types.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)retdec\src\config\vtables.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)whereami\whereami.c" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\xml.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\compression.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\crc32.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\adler32.c" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\deflate.c" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\inffast.c" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\inflate.c" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\inftrees.c" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\trees.c" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\zutil.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

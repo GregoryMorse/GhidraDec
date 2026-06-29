@@ -23,6 +23,7 @@
     <ProjectGuid>{FBC85CDD-37C5-44EF-9085-50E616D5A1B3}</ProjectGuid>
     <RootNamespace>Ghidra</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <GhidraDecMsvcProjectName>Ghidra9</GhidraDecMsvcProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -53,8 +54,8 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
-    <Import Project="../PropertySheet.props" />
-    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.props" />
+    <Import Project="../ide/vs/PropertySheet.props" />
+    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.props" Condition="'$(WIN_FLEX_BISON_PATH)'!='' And Exists('$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.props')" />
   </ImportGroup>
   <ImportGroup Label="Shared">
   </ImportGroup>
@@ -371,6 +372,6 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.targets" />
+    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.targets" Condition="'$(WIN_FLEX_BISON_PATH)'!='' And Exists('$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.targets')" />
   </ImportGroup>
 </Project>

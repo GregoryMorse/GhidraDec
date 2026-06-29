@@ -345,3 +345,7 @@ ASALocalRun/
 /Debug32EA
 /Debug32EA/GhidraDec.tlog
 /tests/ida93/work/
+/.idasdks/
+/idasdks/*
+!/idasdks/.gitkeep
+!/idasdks/*.enc

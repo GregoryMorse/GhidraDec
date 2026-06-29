@@ -74,22 +74,22 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IntDir>$(Platform)\$(Configuration)\GhidraDeclIface\</IntDir>
+    <IntDir>$(GhidraDecMsvcBuildRoot)obj\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</IntDir>
     <ExecutablePath>$(VC_ExecutablePath_x64);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
-    <IntDir>$(Configuration)\GhidraDeclIface\</IntDir>
+    <IntDir>$(GhidraDecMsvcBuildRoot)obj\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</IntDir>
     <ExecutablePath>$(VC_ExecutablePath_x86);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IntDir>$(Platform)\$(Configuration)\GhidraDeclIface\</IntDir>
+    <IntDir>$(GhidraDecMsvcBuildRoot)obj\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</IntDir>
     <ExecutablePath>$(VC_ExecutablePath_x64);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
-    <IntDir>$(Configuration)\GhidraDeclIface\</IntDir>
+    <IntDir>$(GhidraDecMsvcBuildRoot)obj\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</IntDir>
     <ExecutablePath>$(VC_ExecutablePath_x86);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -169,84 +169,84 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="decompile\address.cc" />
-    <ClCompile Include="decompile\context.cc" />
-    <ClCompile Include="decompile\emulate.cc" />
-    <ClCompile Include="decompile\filemanage.cc" />
-    <ClCompile Include="decompile\float.cc" />
-    <ClCompile Include="src\GhidraDecIface.cpp" />
-    <ClCompile Include="decompile\globalcontext.cc" />
-    <ClCompile Include="decompile\loadimage.cc" />
-    <ClCompile Include="decompile\marshal.cc" />
-    <ClCompile Include="decompile\memstate.cc" />
-    <ClCompile Include="decompile\opbehavior.cc" />
-    <ClCompile Include="decompile\opcodes.cc" />
-    <ClCompile Include="decompile\pcodecompile.cc" />
-    <ClCompile Include="decompile\pcodeparse.cc" />
-    <ClCompile Include="decompile\pcoderaw.cc" />
-    <ClCompile Include="decompile\semantics.cc" />
-    <ClCompile Include="decompile\slaformat.cc" />
-    <ClCompile Include="decompile\sleigh.cc" />
-    <ClCompile Include="decompile\sleighbase.cc" />
-    <ClCompile Include="src\sleighinterface.cpp" />
-    <ClCompile Include="decompile\slghpatexpress.cc" />
-    <ClCompile Include="decompile\slghpattern.cc" />
-    <ClCompile Include="decompile\slghsymbol.cc" />
-    <ClCompile Include="decompile\space.cc" />
-    <ClCompile Include="decompile\translate.cc" />
-    <ClCompile Include="decompile\xml.cc" />
-    <ClCompile Include="decompile\compression.cc" />
-    <ClCompile Include="decompile\crc32.cc" />
-    <ClCompile Include="decompile\zlib\adler32.c" />
-    <ClCompile Include="decompile\zlib\deflate.c" />
-    <ClCompile Include="decompile\zlib\inffast.c" />
-    <ClCompile Include="decompile\zlib\inflate.c" />
-    <ClCompile Include="decompile\zlib\inftrees.c" />
-    <ClCompile Include="decompile\zlib\trees.c" />
-    <ClCompile Include="decompile\zlib\zutil.c" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\address.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\context.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\emulate.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\filemanage.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\float.cc" />
+    <ClCompile Include="$(GhidraDecRoot)src\GhidraDecIface.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\globalcontext.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\loadimage.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\marshal.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\memstate.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\opbehavior.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\opcodes.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\pcodecompile.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\pcodeparse.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\pcoderaw.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\semantics.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\slaformat.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\sleigh.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\sleighbase.cc" />
+    <ClCompile Include="$(GhidraDecRoot)src\sleighinterface.cpp" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\slghpatexpress.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\slghpattern.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\slghsymbol.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\space.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\translate.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\xml.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\compression.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\crc32.cc" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\adler32.c" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\deflate.c" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\inffast.c" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\inflate.c" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\inftrees.c" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\trees.c" />
+    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\zutil.c" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="decompile\address.hh" />
-    <ClInclude Include="decompile\context.hh" />
-    <ClInclude Include="decompile\emulate.hh" />
-    <ClInclude Include="decompile\error.hh" />
-    <ClInclude Include="decompile\filemanage.hh" />
-    <ClInclude Include="decompile\float.hh" />
-    <ClInclude Include="decompile\globalcontext.hh" />
-    <ClInclude Include="decompile\loadimage.hh" />
-    <ClInclude Include="decompile\marshal.hh" />
-    <ClInclude Include="decompile\memstate.hh" />
-    <ClInclude Include="decompile\opbehavior.hh" />
-    <ClInclude Include="decompile\opcodes.hh" />
-    <ClInclude Include="decompile\partmap.hh" />
-    <ClInclude Include="decompile\pcodecompile.hh" />
-    <ClInclude Include="decompile\pcodeparse.hh" />
-    <ClInclude Include="decompile\pcoderaw.hh" />
-    <ClInclude Include="decompile\rangemap.hh" />
-    <ClInclude Include="decompile\semantics.hh" />
-    <ClInclude Include="decompile\slaformat.hh" />
-    <ClInclude Include="decompile\sleigh.hh" />
-    <ClInclude Include="decompile\sleighbase.hh" />
-    <ClInclude Include="src\sleighinterface.h" />
-    <ClInclude Include="decompile\slghpatexpress.hh" />
-    <ClInclude Include="decompile\slghpattern.hh" />
-    <ClInclude Include="decompile\slghsymbol.hh" />
-    <ClInclude Include="decompile\space.hh" />
-    <ClInclude Include="decompile\translate.hh" />
-    <ClInclude Include="decompile\types.h" />
-    <ClInclude Include="decompile\xml.hh" />
-    <ClInclude Include="decompile\compression.hh" />
-    <ClInclude Include="decompile\crc32.hh" />
-    <ClInclude Include="decompile\zlib\deflate.h" />
-    <ClInclude Include="decompile\zlib\gzguts.h" />
-    <ClInclude Include="decompile\zlib\inffast.h" />
-    <ClInclude Include="decompile\zlib\inffixed.h" />
-    <ClInclude Include="decompile\zlib\inflate.h" />
-    <ClInclude Include="decompile\zlib\inftrees.h" />
-    <ClInclude Include="decompile\zlib\trees.h" />
-    <ClInclude Include="decompile\zlib\zconf.h" />
-    <ClInclude Include="decompile\zlib\zlib.h" />
-    <ClInclude Include="decompile\zlib\zutil.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\address.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\context.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\emulate.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\error.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\filemanage.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\float.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\globalcontext.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\loadimage.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\marshal.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\memstate.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\opbehavior.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\opcodes.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\partmap.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\pcodecompile.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\pcodeparse.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\pcoderaw.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\rangemap.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\semantics.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\slaformat.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\sleigh.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\sleighbase.hh" />
+    <ClInclude Include="$(GhidraDecRoot)src\sleighinterface.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\slghpatexpress.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\slghpattern.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\slghsymbol.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\space.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\translate.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\types.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\xml.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\compression.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\crc32.hh" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\deflate.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\gzguts.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\inffast.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\inffixed.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\inflate.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\inftrees.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\trees.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\zconf.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\zlib.h" />
+    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\zutil.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

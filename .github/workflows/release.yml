@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      include_private_sdks:
+        description: "Include encrypted/private SDK targets"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: matrix
+        shell: bash
+        run: |
+          args=()
+          if [[ "${{ github.event.inputs.include_private_sdks }}" != "false" ]]; then
+            args+=(--include-private)
+          fi
+          echo "matrix=$(python tools/ida_sdk.py matrix "${args[@]}")" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: matrix
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decrypt private SDK archives
+        if: ${{ matrix.sdk_source != 'public-release' }}
+        shell: pwsh
+        env:
+          IDA_SDK_AES_KEY: ${{ secrets.IDA_SDK_AES_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:IDA_SDK_AES_KEY)) {
+            throw "IDA_SDK_AES_KEY is required for private SDK release targets."
+          }
+          New-Item -ItemType Directory -Force -Path .idasdks | Out-Null
+          Get-ChildItem idasdks -Filter '*.enc' | ForEach-Object {
+            $outName = $_.Name -replace '\.enc$', ''
+            pwsh tools/ida_sdk_crypto.ps1 decrypt -InputPath $_.FullName -OutputPath (Join-Path '.idasdks' $outName)
+          }
+
+      - name: Prepare IDA SDK
+        shell: bash
+        run: python tools/ida_sdk.py ensure --version "${{ matrix.ida }}"
+
+      - name: Configure
+        shell: bash
+        run: cmake -S . -B "build/ida-${{ matrix.ida }}" -DGHIDRADEC_IDA_VERSION="${{ matrix.ida }}" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build package
+        shell: bash
+        run: |
+          cmake --build "build/ida-${{ matrix.ida }}" --config Release --parallel
+          cmake --build "build/ida-${{ matrix.ida }}" --config Release --target package_plugins
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghidradec-ida${{ matrix.ida }}-${{ matrix.os }}
+          path: build/ida-${{ matrix.ida }}/artifacts/*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          draft: true

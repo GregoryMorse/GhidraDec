@@ -2,6 +2,7 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros">
+    <GhidraDecRoot Condition="'$(GhidraDecRoot)'==''">$(MSBuildThisFileDirectory)..\..\</GhidraDecRoot>
     <WIN_FLEX_BISON_PATH Condition="'$(WIN_FLEX_BISON_PATH)'==''">$(WIN_FLEX_BISON_DIR)</WIN_FLEX_BISON_PATH>
     <IDA_SDK_DIR Condition="'$(IDA_SDK_DIR)'==''">$(IDA_SDK_93_DIR)</IDA_SDK_DIR>
     <IDA_SDK_DIR32 Condition="'$(IDA_SDK_DIR32)'==''">$(IDA_SDK_68_DIR)</IDA_SDK_DIR32>
@@ -9,18 +10,25 @@
     <IDA_DEPLOY32 Condition="'$(IDA_DEPLOY32)'==''">$(IDA32_DIR)</IDA_DEPLOY32>
   </PropertyGroup>
   <PropertyGroup>
+    <GhidraDecMsvcBuildRoot Condition="'$(GhidraDecMsvcBuildRoot)'==''">$(GhidraDecRoot)build\msvc\</GhidraDecMsvcBuildRoot>
+    <GhidraDecMsvcProjectName Condition="'$(GhidraDecMsvcProjectName)'==''">$(MSBuildProjectName)</GhidraDecMsvcProjectName>
+    <OutDir>$(GhidraDecMsvcBuildRoot)bin\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(GhidraDecMsvcBuildRoot)obj\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</IntDir>
     <GhidraDecIdaSdkInclude Condition="'$(Platform)'=='Win32'">$(IDA_SDK_DIR32)\include</GhidraDecIdaSdkInclude>
     <GhidraDecIdaSdkInclude Condition="'$(Platform)'!='Win32'">$(IDA_SDK_DIR)\include</GhidraDecIdaSdkInclude>
-    <GhidraDecExternalIncludes>$(GhidraDecIdaSdkInclude);jsoncpp\include;retdec\include;decompile;decompile\zlib;whereami</GhidraDecExternalIncludes>
+    <GhidraDecExternalIncludes>$(GhidraDecIdaSdkInclude);$(GhidraDecRoot)jsoncpp\include;$(GhidraDecRoot)retdec\include;$(GhidraDecRoot)decompile;$(GhidraDecRoot)decompile\zlib;$(GhidraDecRoot)whereami</GhidraDecExternalIncludes>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <ExternalIncludeDirectories>$(GhidraDecExternalIncludes);%(ExternalIncludeDirectories)</ExternalIncludeDirectories>
       <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
-      <AdditionalOptions>/external:I "$(GhidraDecIdaSdkInclude)" /external:I "jsoncpp\include" /external:I "retdec\include" /external:I "decompile" /external:I "decompile\zlib" /external:I "whereami" %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/external:I "$(GhidraDecIdaSdkInclude)" /external:I "$(GhidraDecRoot)jsoncpp\include" /external:I "$(GhidraDecRoot)retdec\include" /external:I "$(GhidraDecRoot)decompile" /external:I "$(GhidraDecRoot)decompile\zlib" /external:I "$(GhidraDecRoot)whereami" %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <BuildMacro Include="GhidraDecRoot">
+      <Value>$(GhidraDecRoot)</Value>
+    </BuildMacro>
     <BuildMacro Include="WIN_FLEX_BISON_PATH">
       <Value>$(WIN_FLEX_BISON_PATH)</Value>
     </BuildMacro>
