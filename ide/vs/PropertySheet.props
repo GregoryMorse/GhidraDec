@@ -12,17 +12,22 @@
   <PropertyGroup>
     <GhidraDecMsvcBuildRoot Condition="'$(GhidraDecMsvcBuildRoot)'==''">$(GhidraDecRoot)build\msvc\</GhidraDecMsvcBuildRoot>
     <GhidraDecMsvcProjectName Condition="'$(GhidraDecMsvcProjectName)'==''">$(MSBuildProjectName)</GhidraDecMsvcProjectName>
+    <GhidraDecGeneratedDeps Condition="'$(GhidraDecGeneratedDeps)'==''">$(GhidraDecRoot)build\deps\</GhidraDecGeneratedDeps>
+    <GhidraDecJsoncppSourceDir Condition="'$(GhidraDecJsoncppSourceDir)'==''">$(GhidraDecGeneratedDeps)jsoncpp\jsoncpp-project-prefix\src\jsoncpp-project\</GhidraDecJsoncppSourceDir>
+    <GhidraDecRetdecSourceDir Condition="'$(GhidraDecRetdecSourceDir)'==''">$(GhidraDecGeneratedDeps)retdec\retdec-project-prefix\src\retdec-project\</GhidraDecRetdecSourceDir>
+    <GhidraDecWhereamiSourceDir Condition="'$(GhidraDecWhereamiSourceDir)'==''">$(GhidraDecRetdecSourceDir)deps\whereami\</GhidraDecWhereamiSourceDir>
+    <GhidraDecDecompileSourceDir Condition="'$(GhidraDecDecompileSourceDir)'==''">$(GhidraDecGeneratedDeps)ghidra-decompiler\decompile\</GhidraDecDecompileSourceDir>
     <OutDir>$(GhidraDecMsvcBuildRoot)bin\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(GhidraDecMsvcBuildRoot)obj\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</IntDir>
     <GhidraDecIdaSdkInclude Condition="'$(Platform)'=='Win32'">$(IDA_SDK_DIR32)\include</GhidraDecIdaSdkInclude>
     <GhidraDecIdaSdkInclude Condition="'$(Platform)'!='Win32'">$(IDA_SDK_DIR)\include</GhidraDecIdaSdkInclude>
-    <GhidraDecExternalIncludes>$(GhidraDecIdaSdkInclude);$(GhidraDecRoot)jsoncpp\include;$(GhidraDecRoot)retdec\include;$(GhidraDecRoot)decompile;$(GhidraDecRoot)decompile\zlib;$(GhidraDecRoot)whereami</GhidraDecExternalIncludes>
+    <GhidraDecExternalIncludes>$(GhidraDecIdaSdkInclude);$(GhidraDecJsoncppSourceDir)include;$(GhidraDecRetdecSourceDir)include;$(GhidraDecDecompileSourceDir);$(GhidraDecDecompileSourceDir)zlib;$(GhidraDecWhereamiSourceDir)</GhidraDecExternalIncludes>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <ExternalIncludeDirectories>$(GhidraDecExternalIncludes);%(ExternalIncludeDirectories)</ExternalIncludeDirectories>
       <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
-      <AdditionalOptions>/external:I "$(GhidraDecIdaSdkInclude)" /external:I "$(GhidraDecRoot)jsoncpp\include" /external:I "$(GhidraDecRoot)retdec\include" /external:I "$(GhidraDecRoot)decompile" /external:I "$(GhidraDecRoot)decompile\zlib" /external:I "$(GhidraDecRoot)whereami" %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/external:I "$(GhidraDecIdaSdkInclude)" /external:I "$(GhidraDecJsoncppSourceDir)include" /external:I "$(GhidraDecRetdecSourceDir)include" /external:I "$(GhidraDecDecompileSourceDir)" /external:I "$(GhidraDecDecompileSourceDir)zlib" /external:I "$(GhidraDecWhereamiSourceDir)" %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>

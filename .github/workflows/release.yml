@@ -69,6 +69,10 @@ jobs:
         shell: bash
         run: python tools/ida_sdk.py ensure --version "${{ matrix.ida }}"
 
+      - name: Prepare Ghidra decompiler sources
+        shell: bash
+        run: python tools/deps.py ensure-ghidra-sources
+
       - name: Configure
         shell: bash
         run: cmake -S . -B "build/ida-${{ matrix.ida }}" -DGHIDRADEC_IDA_VERSION="${{ matrix.ida }}" -DCMAKE_BUILD_TYPE=Release

@@ -338,9 +338,12 @@ ASALocalRun/
 !/tests/ida93/*.py
 /retdec
 /jsoncpp
+/Ghidra
+/Ghidra9
 /Release32EA
 /whereami
 /decompile
+/decompile9
 /Debug32EA
 /Debug32EA
 /Debug32EA/GhidraDec.tlog

@@ -11,7 +11,10 @@ set(GHIDRADEC_IDA_VERSION "${GHIDRADEC_DEFAULT_IDA_SDK}" CACHE STRING "IDA SDK v
 set(GHIDRA_VER "${GHIDRADEC_DEFAULT_GHIDRA_VERSION}" CACHE STRING "Ghidra version used by the plugin.")
 set(GHIDRA_INSTALL_DIR "" CACHE PATH "Optional path to a local Ghidra installation.")
 set(GHIDRA_DECOMPILER_CPP_DIR "" CACHE PATH "Optional path to Ghidra's decompiler C++ sources.")
-option(GHIDRADEC_REFRESH_GHIDRA_SOURCES "Refresh vendored decompiler sources from GHIDRA_DECOMPILER_CPP_DIR during configure." OFF)
+set(GHIDRADEC_GENERATED_DEPS_DIR "${CMAKE_SOURCE_DIR}/build/deps" CACHE PATH "Generated dependency source root.")
+set(GHIDRADEC_GHIDRA_SOURCE_DIR "${GHIDRADEC_GENERATED_DEPS_DIR}/ghidra-decompiler/Ghidra" CACHE PATH "Generated full Ghidra decompiler C++ source copy.")
+set(GHIDRADEC_GHIDRA_DECOMPILE_DIR "${GHIDRADEC_GENERATED_DEPS_DIR}/ghidra-decompiler/decompile" CACHE PATH "Generated Ghidra decompiler source subset used by this build.")
+option(GHIDRADEC_REFRESH_GHIDRA_SOURCES "Refresh generated decompiler sources from GHIDRA_DECOMPILER_CPP_DIR during configure." OFF)
 
 set(GHIDRA_DEC_DEPS
 	"address.*"
@@ -53,29 +56,29 @@ if(GHIDRADEC_REFRESH_GHIDRA_SOURCES)
 		message(FATAL_ERROR "Ghidra decompiler sources were not found under GHIDRA_DECOMPILER_CPP_DIR=${GHIDRA_DECOMPILER_CPP_DIR}")
 	endif()
 
-	file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/Ghidra")
-	file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/decompile")
+	file(MAKE_DIRECTORY "${GHIDRADEC_GHIDRA_SOURCE_DIR}")
+	file(MAKE_DIRECTORY "${GHIDRADEC_GHIDRA_DECOMPILE_DIR}")
 
 	file(GLOB GHIDRA_DEC_ALL_FILES CONFIGURE_DEPENDS "${GHIDRA_DECOMPILER_CPP_DIR}/*")
 	foreach(FNAME IN LISTS GHIDRA_DEC_ALL_FILES)
 		if(NOT IS_DIRECTORY "${FNAME}")
-			file(COPY "${FNAME}" DESTINATION "${CMAKE_SOURCE_DIR}/Ghidra")
+			file(COPY "${FNAME}" DESTINATION "${GHIDRADEC_GHIDRA_SOURCE_DIR}")
 		endif()
 	endforeach()
 
 	foreach(PATTERN IN LISTS GHIDRA_DEC_DEPS)
 		file(GLOB GHIDRA_DEC_MATCHES CONFIGURE_DEPENDS "${GHIDRA_DECOMPILER_CPP_DIR}/${PATTERN}")
 		foreach(FNAME IN LISTS GHIDRA_DEC_MATCHES)
-			file(COPY "${FNAME}" DESTINATION "${CMAKE_SOURCE_DIR}/decompile")
+			file(COPY "${FNAME}" DESTINATION "${GHIDRADEC_GHIDRA_DECOMPILE_DIR}")
 		endforeach()
 	endforeach()
 
-	file(READ "${CMAKE_SOURCE_DIR}/decompile/filemanage.cc" filedata)
+	file(READ "${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/filemanage.cc" filedata)
 	string(REGEX REPLACE "GetFileAttributes\\(" "GetFileAttributesA(" filedata "${filedata}")
-	file(WRITE "${CMAKE_SOURCE_DIR}/decompile/filemanage.cc" "${filedata}")
+	file(WRITE "${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/filemanage.cc" "${filedata}")
 
 	if(EXISTS "${GHIDRA_DECOMPILER_CPP_DIR}/../zlib/zlib.h")
-		file(COPY "${GHIDRA_DECOMPILER_CPP_DIR}/../zlib" DESTINATION "${CMAKE_SOURCE_DIR}/decompile")
+		file(COPY "${GHIDRA_DECOMPILER_CPP_DIR}/../zlib" DESTINATION "${GHIDRADEC_GHIDRA_DECOMPILE_DIR}")
 	endif()
 endif()
 
@@ -208,9 +211,8 @@ endif()
 include_directories("..") # Make our includes work.
 include_directories(".") # Make our includes work.
 include_directories("src") # Make our includes work.
-include_directories("decompile") # Make our includes work.
-include_directories("decompile/zlib") # Make Ghidra 12 .sla compression support work.
-include_directories("whereami") # Make our includes work.
+include_directories("${GHIDRADEC_GHIDRA_DECOMPILE_DIR}") # Make generated Ghidra decompiler includes work.
+include_directories("${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib") # Make Ghidra 12 .sla compression support work.
 if(IDA_SDK_DIR32)
 include_directories(SYSTEM
 	"${IDA_SDK_DIR32}/include" # Make IDA SDK includes work.
@@ -275,54 +277,62 @@ set(IDAPLUGIN_SOURCES
 #	json_writer.cpp
 #)
 
-#set(WHEREAMI_SOURCES
-#	whereami/whereami.c
-#)
-
 set(GHIDRA_SLEIGH_SOURCES
-	decompile/sleigh.cc
-	decompile/pcodeparse.cc
-	decompile/pcodecompile.cc
-	decompile/sleighbase.cc
-	decompile/slghsymbol.cc
-	decompile/slghpatexpress.cc
-	decompile/slghpattern.cc
-	decompile/semantics.cc
-	decompile/context.cc
-	decompile/slaformat.cc
-	decompile/compression.cc
-	decompile/filemanage.cc
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/sleigh.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/pcodeparse.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/pcodecompile.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/sleighbase.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/slghsymbol.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/slghpatexpress.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/slghpattern.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/semantics.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/context.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/slaformat.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/compression.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/filemanage.cc"
 )
 
 set(GHIDRA_CORE_SOURCES
-	decompile/xml.cc
-	decompile/marshal.cc
-	decompile/space.cc
-	decompile/float.cc
-	decompile/address.cc
-	decompile/pcoderaw.cc
-	decompile/translate.cc
-	decompile/opcodes.cc
-	decompile/globalcontext.cc
-	decompile/crc32.cc
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/xml.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/marshal.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/space.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/float.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/address.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/pcoderaw.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/translate.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/opcodes.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/globalcontext.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/crc32.cc"
 )
 
 set(GHIDRA_LIBSLA_NAMES
-	decompile/loadimage.cc
-	decompile/memstate.cc
-	decompile/emulate.cc
-	decompile/opbehavior.cc
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/loadimage.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/memstate.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/emulate.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/opbehavior.cc"
 )
 
 set(GHIDRA_ZLIB_SOURCES
-	decompile/zlib/adler32.c
-	decompile/zlib/deflate.c
-	decompile/zlib/inffast.c
-	decompile/zlib/inflate.c
-	decompile/zlib/inftrees.c
-	decompile/zlib/trees.c
-	decompile/zlib/zutil.c
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib/adler32.c"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib/deflate.c"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib/inffast.c"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib/inflate.c"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib/inftrees.c"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib/trees.c"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib/zutil.c"
 )
+
+set(GHIDRADEC_REQUIRED_DECOMPILER_SOURCES
+	${GHIDRA_SLEIGH_SOURCES}
+	${GHIDRA_CORE_SOURCES}
+	${GHIDRA_LIBSLA_NAMES}
+	${GHIDRA_ZLIB_SOURCES}
+)
+foreach(_ghidradec_required_source IN LISTS GHIDRADEC_REQUIRED_DECOMPILER_SOURCES)
+	if(NOT EXISTS "${_ghidradec_required_source}")
+		message(FATAL_ERROR "Missing Ghidra decompiler source ${_ghidradec_required_source}. Run `python tools/deps.py ensure-ghidra-sources` before configuring, or configure with -DGHIDRADEC_REFRESH_GHIDRA_SOURCES=ON -DGHIDRA_DECOMPILER_CPP_DIR=<path>.")
+	endif()
+endforeach()
 
 # GhidraDec idaplugin libs.
 set(GHIDRADEC_PLUGIN_TARGETS)

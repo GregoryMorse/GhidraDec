@@ -7,7 +7,7 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "GhidraDec", "GhidraDec.vcxp
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "GhidraDecIface", "GhidraDecIface.vcxproj", "{AC1BAB6D-F66A-4CD1-A743-A4883ED8830C}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Ghidra", "..\..\Ghidra\Ghidra.vcxproj", "{FBC85CDD-37C5-44EF-9085-50E616D5A1B3}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Ghidra", "Ghidra.vcxproj", "{FBC85CDD-37C5-44EF-9085-50E616D5A1B3}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "GhidraDec-x64dbg", "..\..\GhidraDec-x64dbg\GhidraDec-x64dbg.vcxproj", "{E751902D-E190-47E7-BD00-C85C3E3E831E}"
 EndProject

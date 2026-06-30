@@ -46,10 +46,14 @@ using namespace std;
 using XmlError = ghidra::DecoderError;
 
 static ElementId ELEM_COMMAND_GETBYTES = ElementId("command_getbytes", 240);
+static ElementId ELEM_COMMAND_GETCALLFIXUP = ElementId("command_getcallfixup", 241);
+static ElementId ELEM_COMMAND_GETCALLMECH = ElementId("command_getcallmech", 242);
+static ElementId ELEM_COMMAND_GETCALLOTHERFIXUP = ElementId("command_getcallotherfixup", 243);
 static ElementId ELEM_COMMAND_GETCODELABEL = ElementId("command_getcodelabel", 244);
 static ElementId ELEM_COMMAND_GETCOMMENTS = ElementId("command_getcomments", 245);
 static ElementId ELEM_COMMAND_GETMAPPEDSYMBOLS = ElementId("command_getmappedsymbols", 249);
 static ElementId ELEM_COMMAND_GETPCODE = ElementId("command_getpcode", 251);
+static ElementId ELEM_COMMAND_GETPCODEEXECUTABLE = ElementId("command_getpcodeexecutable", 252);
 static ElementId ELEM_COMMAND_GETREGISTER = ElementId("command_getregister", 253);
 static ElementId ELEM_COMMAND_GETREGISTERNAME = ElementId("command_getregistername", 254);
 static ElementId ELEM_COMMAND_GETTRACKEDREGISTERS = ElementId("command_gettrackedregisters", 256);
@@ -74,6 +78,7 @@ static ElementId ELEM_RESPONSE_VOID = ElementId("void", 10);
 static ElementId ELEM_RESPONSE_COMMENTDB = ElementId("commentdb", 87);
 static ElementId ELEM_RESPONSE_COMMENT = ElementId("comment", 86);
 static ElementId ELEM_RESPONSE_TEXT = ElementId("text", 88);
+static ElementId ELEM_RESPONSE_CONTEXT = ElementId("context", 94);
 static AttributeId ATTRIB_RESPONSE_EXTRAPOP = AttributeId("extrapop", 6);
 static AttributeId ATTRIB_RESPONSE_MODEL = AttributeId("model", 13);
 static AttributeId ATTRIB_RESPONSE_NORETURN = AttributeId("noreturn", 123);
@@ -557,6 +562,21 @@ static std::pair<std::string, std::string> getPackedUnimplementedInstruction(Add
 	std::string xml = "<unimpl offset=\"1\" at=\"" + addr.space + ":0x" +
 		to_string(addr.offset, hex) + "\"/>\n";
 	return std::pair<std::string, std::string>(packedStream.str(), xml);
+}
+
+static std::string getPackedEmptyPcodeInject(Translate& trans, AddrInfo addr)
+{
+	std::ostringstream packedStream;
+	PackedEncode encoder(packedStream);
+	AddrSpace* space = trans.getSpaceByName(addr.space);
+	if (space == nullptr)
+		throw DecompError("No address space named " + addr.space);
+	Address address(space, addr.offset);
+	encoder.openElement(ELEM_RESPONSE_INST);
+	encoder.writeSignedInteger(ATTRIB_OFFSET, 0);
+	address.encode(encoder);
+	encoder.closeElement(ELEM_RESPONSE_INST);
+	return packedStream.str();
 }
 
 
@@ -1495,6 +1515,35 @@ std::vector<uchar> DecompInterface::readResponse() {
 						writeString(res);
 						write(query_response_end, sizeof(query_response_end));
 						callback->protocolRecorder("queryresponse(command_getmappedsymbols)", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETCALLFIXUP ||
+						elemId == ELEM_COMMAND_GETCALLOTHERFIXUP ||
+						elemId == ELEM_COMMAND_GETCALLMECH ||
+						elemId == ELEM_COMMAND_GETPCODEEXECUTABLE) {
+						int injectType =
+							elemId == ELEM_COMMAND_GETCALLFIXUP ? CALLFIXUP_TYPE :
+							elemId == ELEM_COMMAND_GETCALLOTHERFIXUP ? CALLOTHERFIXUP_TYPE :
+							elemId == ELEM_COMMAND_GETCALLMECH ? CALLMECHANISM_TYPE :
+							EXECUTABLEPCODE_TYPE;
+						std::string injectName = decoder.readString(ATTRIB_NAME);
+						uint4 contextId = decoder.openElement(ELEM_RESPONSE_CONTEXT);
+						Address baseAddr = Address::decode(decoder);
+						Address callAddr = Address::decode(decoder);
+						decoder.closeElement(contextId);
+						decoder.closeElement(elemId);
+						AddrInfo base{ baseAddr.getSpace()->getName(), baseAddr.getOffset() };
+						AddrInfo call{ callAddr.getSpace()->getName(), callAddr.getOffset() };
+						callback->protocolRecorder("query(command_getpcodeinject type=\"" +
+							std::to_string(injectType) + "\" name=\"" +
+							escapeCStr(injectName) + "\" base=\"" + base.space +
+							":0x" + to_string(base.offset, hex) + "\" call=\"" +
+							call.space + ":0x" + to_string(call.offset, hex) + "\")", false);
+						std::string packed = getPackedEmptyPcodeInject(*trans, base);
+						write(query_response_start, sizeof(query_response_start));
+						writeString(packed);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getpcodeinject empty)", true);
 						goto query_response_written;
 					}
 					if (elemId == ELEM_COMMAND_GETPCODE) {

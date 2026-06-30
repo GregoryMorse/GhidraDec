@@ -1,0 +1,624 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(GhidraSourceDir)action.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)address.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)architecture.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)bfd_arch.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)block.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)blockaction.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)callgraph.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)capability.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)cast.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)codedata.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)comment.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)comment_ghidra.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)condexe.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)context.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)coreaction.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)cover.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)cpool.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)cpool_ghidra.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)crc32.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)database.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)database_ghidra.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)doccore.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)docmain.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)double.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)dynamic.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)emulate.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)emulateutil.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)error.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)filemanage.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)float.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)flow.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)fspec.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)funcdata.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)ghidra_arch.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)ghidra_context.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)ghidra_process.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)ghidra_translate.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)globalcontext.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)grammar.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)graph.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)heritage.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)ifacedecomp.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)ifaceterm.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)inject_ghidra.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)inject_sleigh.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)interface.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)jumptable.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)libdecomp.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)loadimage.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)loadimage_bfd.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)loadimage_ghidra.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)loadimage_xml.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)memstate.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)merge.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)op.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)opbehavior.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)opcodes.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)options.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)override.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)paramid.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)partmap.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)pcodecompile.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)pcodeinject.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)pcodeparse.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)pcoderaw.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)prefersplit.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)prettyprint.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)printc.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)printjava.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)printlanguage.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)rangemap.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)rangeutil.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)raw_arch.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)ruleaction.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)rulecompile.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)semantics.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)sleigh.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)sleigh_arch.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)sleighbase.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)slgh_compile.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)slghpatexpress.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)slghpattern.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)slghsymbol.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)space.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)subflow.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)translate.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)type.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)typegrp_ghidra.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)typeop.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)types.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)unify.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)userop.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)variable.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)varmap.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)varnode.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)xml.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)xml_arch.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)grammar.tab.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)pcodeparse.tab.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)ruleparse.tab.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)xml.tab.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)slghparse.tab.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)stringmanage.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)transform.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(GhidraSourceDir)string_ghidra.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(GhidraSourceDir)action.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)address.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)architecture.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)block.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)blockaction.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)callgraph.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)capability.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)cast.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)comment.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)comment_ghidra.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)condexe.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)context.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)coreaction.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)cover.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)cpool.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)cpool_ghidra.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)crc32.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)database.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)database_ghidra.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)double.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)dynamic.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)emulate.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)emulateutil.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)filemanage.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)float.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)flow.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)fspec.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)funcdata.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)funcdata_block.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)funcdata_op.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)funcdata_varnode.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)ghidra_arch.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)ghidra_context.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)ghidra_process.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)ghidra_translate.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)globalcontext.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)graph.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)heritage.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)ifacedecomp.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)ifaceterm.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)inject_ghidra.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)inject_sleigh.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)interface.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)jumptable.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)libdecomp.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)loadimage.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)loadimage_ghidra.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)loadimage_xml.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)memstate.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)merge.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)op.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)opbehavior.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)opcodes.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)options.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)override.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)paramid.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)pcodecompile.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)pcodeinject.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)pcoderaw.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)prefersplit.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)prettyprint.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)printc.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)printjava.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)printlanguage.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)rangeutil.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)raw_arch.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)ruleaction.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)rulecompile.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)semantics.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)sleigh.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)sleigh_arch.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)sleighbase.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)slghpatexpress.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)slghpattern.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)slghsymbol.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)space.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)subflow.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)translate.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)type.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)typegrp_ghidra.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)typeop.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)unify.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)userop.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)variable.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)varmap.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)varnode.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)xml_arch.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)grammar.tab.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)pcodeparse.tab.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)ruleparse.tab.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)xml.tab.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)stringmanage.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)transform.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(GhidraSourceDir)string_ghidra.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Bison Include="$(GhidraSourceDir)pcodeparse.y" />
+    <Bison Include="$(GhidraSourceDir)ruleparse.y" />
+    <Bison Include="$(GhidraSourceDir)xml.y" />
+    <Bison Include="$(GhidraSourceDir)grammar.y" />
+  </ItemGroup>
+</Project>

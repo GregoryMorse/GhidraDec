@@ -39,103 +39,103 @@
     <ClCompile Include="$(GhidraDecRoot)src\sleighinterface.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\sleigh.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)sleigh.cc">
       <Filter>Source Files\Sleigh</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\pcodeparse.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)pcodeparse.cc">
       <Filter>Source Files\Sleigh</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\pcodecompile.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)pcodecompile.cc">
       <Filter>Source Files\Sleigh</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\sleighbase.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)sleighbase.cc">
       <Filter>Source Files\Sleigh</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\slghsymbol.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)slghsymbol.cc">
       <Filter>Source Files\Sleigh</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\slghpatexpress.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)slghpatexpress.cc">
       <Filter>Source Files\Sleigh</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\slghpattern.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)slghpattern.cc">
       <Filter>Source Files\Sleigh</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\semantics.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)semantics.cc">
       <Filter>Source Files\Sleigh</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\context.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)context.cc">
       <Filter>Source Files\Sleigh</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\filemanage.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)filemanage.cc">
       <Filter>Source Files\Sleigh</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\slaformat.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)slaformat.cc">
       <Filter>Source Files\Sleigh</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\compression.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)compression.cc">
       <Filter>Source Files\Sleigh</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\xml.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)xml.cc">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\marshal.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)marshal.cc">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\crc32.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)crc32.cc">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\adler32.c">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)zlib\adler32.c">
       <Filter>Source Files\LibSLA</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\deflate.c">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)zlib\deflate.c">
       <Filter>Source Files\LibSLA</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\inffast.c">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)zlib\inffast.c">
       <Filter>Source Files\LibSLA</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\inflate.c">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)zlib\inflate.c">
       <Filter>Source Files\LibSLA</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\inftrees.c">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)zlib\inftrees.c">
       <Filter>Source Files\LibSLA</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\trees.c">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)zlib\trees.c">
       <Filter>Source Files\LibSLA</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\zlib\zutil.c">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)zlib\zutil.c">
       <Filter>Source Files\LibSLA</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\space.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)space.cc">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\float.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)float.cc">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\address.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)address.cc">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\pcoderaw.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)pcoderaw.cc">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\translate.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)translate.cc">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\opcodes.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)opcodes.cc">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\globalcontext.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)globalcontext.cc">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\loadimage.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)loadimage.cc">
       <Filter>Source Files\LibSLA</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\memstate.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)memstate.cc">
       <Filter>Source Files\LibSLA</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\opbehavior.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)opbehavior.cc">
       <Filter>Source Files\LibSLA</Filter>
     </ClCompile>
-    <ClCompile Include="$(GhidraDecRoot)decompile\emulate.cc">
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)emulate.cc">
       <Filter>Source Files\LibSLA</Filter>
     </ClCompile>
   </ItemGroup>
@@ -143,124 +143,124 @@
     <ClInclude Include="$(GhidraDecRoot)src\sleighinterface.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\sleigh.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)sleigh.hh">
       <Filter>Header Files\Sleigh</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\pcodeparse.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)pcodeparse.hh">
       <Filter>Header Files\Sleigh</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\pcodecompile.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)pcodecompile.hh">
       <Filter>Header Files\Sleigh</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\sleighbase.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)sleighbase.hh">
       <Filter>Header Files\Sleigh</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\slghsymbol.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)slghsymbol.hh">
       <Filter>Header Files\Sleigh</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\slghpatexpress.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)slghpatexpress.hh">
       <Filter>Header Files\Sleigh</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\slghpattern.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)slghpattern.hh">
       <Filter>Header Files\Sleigh</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\semantics.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)semantics.hh">
       <Filter>Header Files\Sleigh</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\context.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)context.hh">
       <Filter>Header Files\Sleigh</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\filemanage.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)filemanage.hh">
       <Filter>Header Files\Sleigh</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\address.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)address.hh">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\xml.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)xml.hh">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\marshal.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)marshal.hh">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\crc32.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)crc32.hh">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\space.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)space.hh">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\float.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)float.hh">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\pcoderaw.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)pcoderaw.hh">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\translate.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)translate.hh">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\opcodes.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)opcodes.hh">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\globalcontext.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)globalcontext.hh">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\slaformat.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)slaformat.hh">
       <Filter>Header Files\Sleigh</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\compression.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)compression.hh">
       <Filter>Header Files\Sleigh</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\loadimage.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)loadimage.hh">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\memstate.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)memstate.hh">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\opbehavior.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)opbehavior.hh">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\emulate.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)emulate.hh">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\types.h">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)types.h">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\partmap.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)partmap.hh">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\rangemap.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)rangemap.hh">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\deflate.h">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\deflate.h">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\gzguts.h">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\gzguts.h">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\inffast.h">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\inffast.h">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\inffixed.h">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\inffixed.h">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\inflate.h">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\inflate.h">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\inftrees.h">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\inftrees.h">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\trees.h">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\trees.h">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\zconf.h">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\zconf.h">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\zlib.h">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\zlib.h">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\zlib\zutil.h">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\zutil.h">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
-    <ClInclude Include="$(GhidraDecRoot)decompile\error.hh">
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)error.hh">
       <Filter>Header Files\LibSLA</Filter>
     </ClInclude>
   </ItemGroup>
