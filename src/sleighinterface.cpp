@@ -38,6 +38,7 @@
 #include <thread>
 #include <future>
 #include <stack>
+#include <cctype>
 
 #include "sleighinterface.h"
 
@@ -3304,7 +3305,10 @@ std::string DecompInterface::convertSourceDoc(Element* el,
 				std::string spc;
 				if (std::get<1>(blockGraph[idx]).size() != 0) {
 					std::string::reverse_iterator lnl = std::find(std::get<1>(blockGraph[idx]).rbegin(), std::get<1>(blockGraph[idx]).rend(), '\n');
-					std::string::iterator it = std::find_if_not(lnl.base(), std::get<1>(blockGraph[idx]).end(), isspace);
+					std::string::iterator it = std::find_if_not(
+						lnl.base(),
+						std::get<1>(blockGraph[idx]).end(),
+						[](unsigned char ch) { return std::isspace(ch) != 0; });
 					std::string st;
 					std::copy_if(lnl.base(), it, std::back_inserter(st), [](char ch) { return ch == ' '; });
 					if (!st.empty()) spc = st;
@@ -3320,7 +3324,10 @@ std::string DecompInterface::convertSourceDoc(Element* el,
 							precline = displayXml.substr(pairVec[i].first, pairVec[i + 1].first - pairVec[i].first);
 						tline += precline;
 						std::string::reverse_iterator lnl = std::find(precline.rbegin(), precline.rend(), '\n');
-						std::string::iterator it = std::find_if_not(lnl.base(), precline.end(), isspace);
+						std::string::iterator it = std::find_if_not(
+							lnl.base(),
+							precline.end(),
+							[](unsigned char ch) { return std::isspace(ch) != 0; });
 						std::string st;
 						std::copy_if(lnl.base(), it, std::back_inserter(st), [](char ch) { return ch == ' '; });
 						if (!st.empty()) spc = st;

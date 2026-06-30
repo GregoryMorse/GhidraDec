@@ -59,4 +59,8 @@ add_custom_command(OUTPUT ${RETDEC_UTILS_SOURCES} ${RETDEC_CONFIG_SOURCES} DEPEN
 add_library(retdec ${RETDEC_UTILS_SOURCES} ${RETDEC_CONFIG_SOURCES})
 add_dependencies(retdec retdec-project)
 target_include_directories(retdec PUBLIC ${source_dir}/include)
+target_compile_options(retdec PRIVATE
+	$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-include>
+	$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:cstdint>
+)
 target_link_libraries(retdec jsoncpp)

@@ -15,13 +15,41 @@
 	#include <tlhelp32.h>
 #endif
 #else
-#define _pipe(x,y,z) pipe2(x,z)
+#include <fcntl.h>
+#include <unistd.h>
+static int ghidradec_pipe(int pipefd[2], int, int flags)
+{
+	if (pipe(pipefd) < 0)
+	{
+		return -1;
+	}
+#if defined(O_CLOEXEC)
+	if ((flags & O_CLOEXEC) != 0)
+	{
+		if (fcntl(pipefd[0], F_SETFD, FD_CLOEXEC) < 0
+			|| fcntl(pipefd[1], F_SETFD, FD_CLOEXEC) < 0)
+		{
+			close(pipefd[0]);
+			close(pipefd[1]);
+			return -1;
+		}
+	}
+#else
+	(void)flags;
+#endif
+	return 0;
+}
+#define _pipe(x,y,z) ghidradec_pipe(x,y,z)
 #define _dup dup
 #define _dup2 dup2
 #define _close close
 #define STDOUT_FILENO 1
 #define STDIN_FILENO 0
+#if defined(O_CLOEXEC)
 #define _O_NOINHERIT O_CLOEXEC
+#else
+#define _O_NOINHERIT 0
+#endif
 #define _O_BINARY 0
 #endif
 

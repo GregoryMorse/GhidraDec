@@ -13,6 +13,16 @@
 #include <map>
 #include <sstream>
 
+#if !defined(_WIN32)
+#include <unistd.h>
+#ifndef _read
+#define _read read
+#endif
+#ifndef _write
+#define _write write
+#endif
+#endif
+
 //defined in project for 64 vs 32 bit addressing for ghidradec64.dll vs ghidradec.dll
 
 // IDA SDK includes.
