@@ -715,10 +715,14 @@ bool GhidraDec::canDecompileInput()
 					continue;
 				}
 
-				std::string cmt = qCmt.c_str();;
+				std::string cmt = qCmt.c_str();
 				if (cmt.find("<ghidradec_select>") != std::string::npos)
 				{
-					decompInfo->outputFile = decompInfo->inputPath + ".c";
+					qstring outputFileEnv;
+					if (qgetenv("GHIDRADEC_BATCH_OUTPUT", &outputFileEnv) && !outputFileEnv.empty())
+						decompInfo->outputFile = outputFileEnv.c_str();
+					else
+						decompInfo->outputFile = decompInfo->inputPath + ".c";
 					decompInfo->setIsUseThreads(runAsyncRegression);
 					decompInfo->skipParamIdentification = skipRegressionParamId;
 					decompInfo->suppressViewer = true;

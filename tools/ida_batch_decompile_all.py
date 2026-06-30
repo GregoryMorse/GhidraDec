@@ -5,8 +5,10 @@ import time
 import traceback
 
 import ida_auto
+import ida_funcs
 import ida_kernwin
 import ida_loader
+import ida_name
 import ida_nalt
 import ida_pro
 
@@ -51,6 +53,75 @@ def save_scanned_database(input_path):
     log("Saving analyzed database to {}".format(save_path))
     if not ida_loader.save_database(save_path, 0):
         fail("IDA could not save analyzed database for {}".format(input_path), 5)
+
+
+def function_name(function):
+    name = ida_name.get_name(function.start_ea)
+    return name or "sub_{:X}".format(function.start_ea)
+
+
+def write_function_list(path):
+    import json
+
+    functions = []
+    for index in range(ida_funcs.get_func_qty()):
+        function = ida_funcs.getn_func(index)
+        if function is None:
+            continue
+        functions.append({
+            "ea": int(function.start_ea),
+            "ea_hex": "0x{:x}".format(function.start_ea),
+            "end_ea": int(function.end_ea),
+            "name": function_name(function),
+        })
+    parent = os.path.dirname(path)
+    if parent and not os.path.isdir(parent):
+        os.makedirs(parent)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({"functions": functions}, handle, indent=2, sort_keys=True)
+    log("Wrote {} functions to {}".format(len(functions), path))
+
+
+def select_function_for_plugin():
+    select_ea_text = os.environ.get("GHIDRADEC_BATCH_SELECT_EA", "").strip()
+    select_name = os.environ.get("GHIDRADEC_BATCH_SELECT_NAME", "").strip()
+    if not select_ea_text and not select_name:
+        return
+
+    select_ea = None
+    if select_ea_text:
+        try:
+            select_ea = int(select_ea_text, 0)
+        except ValueError:
+            fail("GHIDRADEC_BATCH_SELECT_EA is not an integer: {}".format(select_ea_text), 2)
+
+    selected = None
+    for index in range(ida_funcs.get_func_qty()):
+        function = ida_funcs.getn_func(index)
+        if function is None:
+            continue
+        current_name = function_name(function)
+        comment = ida_funcs.get_func_cmt(function, False) or ""
+        cleaned = "\n".join(
+            line for line in comment.splitlines()
+            if "<ghidradec_select>" not in line
+        ).strip()
+        if cleaned != comment:
+            ida_funcs.set_func_cmt(function, cleaned, False)
+        if selected is None and (
+            (select_ea is not None and int(function.start_ea) == select_ea)
+            or (select_name and current_name == select_name)
+        ):
+            selected = function
+
+    if selected is None:
+        fail("Selected function was not found: ea={} name={}".format(select_ea_text, select_name), 8)
+
+    current = ida_funcs.get_func_cmt(selected, False) or ""
+    marker = "<ghidradec_select>"
+    updated = (current + "\n" + marker).strip() if current else marker
+    ida_funcs.set_func_cmt(selected, updated, False)
+    log("Selected function {} @ 0x{:x}".format(function_name(selected), selected.start_ea))
 
 
 def output_ready(path, start_time, min_bytes):
@@ -142,6 +213,14 @@ def main():
         log("Waiting for autoanalysis")
         ida_auto.auto_wait()
         save_scanned_database(input_path)
+
+        list_functions_path = normalize_path(os.environ.get("GHIDRADEC_BATCH_LIST_FUNCTIONS", ""))
+        if list_functions_path:
+            write_function_list(list_functions_path)
+            ida_pro.qexit(0)
+            return
+
+        select_function_for_plugin()
 
         output_path = normalize_path(os.environ.get("GHIDRADEC_BATCH_OUTPUT", "")) or (input_path + ".c")
         if os.environ.get("GHIDRADEC_BATCH_CLEAN_OUTPUT", "1") not in ("0", "false", "False"):

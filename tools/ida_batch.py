@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -167,7 +169,17 @@ def windows_dialog_automation(process_id: int, allow_global_crash_windows: bool 
 
 def run_ida(args: argparse.Namespace, ida_args: list[str], env: dict[str, str], case_dir: Path) -> int:
     deadline = time.monotonic() + args.timeout + args.launch_grace_seconds
-    process = subprocess.Popen(ida_args, env=env, cwd=str(case_dir))
+    process_args = ida_args
+    if args.debugger:
+        process_args = [str(Path(args.debugger).resolve())]
+        if args.debugger_initial_go:
+            process_args.extend(["-g", "-G"])
+        if args.debugger_symbols:
+            process_args.extend(["-y", args.debugger_symbols])
+        if args.debugger_command:
+            process_args.extend(["-c", args.debugger_command])
+        process_args.extend(ida_args)
+    process = subprocess.Popen(process_args, env=env, cwd=str(case_dir))
     try:
         while True:
             exit_code = process.poll()
@@ -216,14 +228,33 @@ def validate_output(args: argparse.Namespace, output_path: Path) -> bool:
     return True
 
 
-def run_one(args: argparse.Namespace, input_path: Path) -> int:
+def safe_name(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._") or "function"
+
+
+def run_one(
+    args: argparse.Namespace,
+    input_path: Path,
+    *,
+    extra_env: dict[str, str] | None = None,
+    output_path_override: Path | None = None,
+    protocol_log_override: Path | None = None,
+    log_name: str = "ida-batch.log",
+    plugin_arg_override: int | None = None,
+    validate_output_file: bool = True,
+    scan_log: bool = True,
+) -> int:
     work_root = Path(args.work_dir).resolve()
     case_dir = work_root / case_name(input_path)
     work_input = copy_input(input_path.resolve(), case_dir, args.refresh)
-    output_path = case_dir / (work_input.name + ".c")
+    output_path = output_path_override or (case_dir / (work_input.name + ".c"))
     idb_path = Path(args.save_idb).resolve() if args.save_idb else default_idb_path(work_input)
-    log_path = case_dir / "ida-batch.log"
+    log_path = case_dir / log_name
     remove_if_exists(log_path)
+    if output_path_override is not None:
+        remove_if_exists(output_path_override)
+    if protocol_log_override is not None:
+        remove_if_exists(protocol_log_override)
     if not args.reuse_database:
         clean_ida_database_sidecars(work_input, idb_path)
     plugin_names, ida_user_dir = stage_plugin_plugins(args.plugin, case_dir)
@@ -233,13 +264,15 @@ def run_one(args: argparse.Namespace, input_path: Path) -> int:
     env["GHIDRADEC_BATCH_OUTPUT"] = str(output_path)
     env["GHIDRADEC_BATCH_SAVE_IDB"] = str(idb_path) if args.save_database else ""
     env["GHIDRADEC_BATCH_PLUGIN"] = plugin_names
-    env["GHIDRADEC_BATCH_PLUGIN_ARG"] = str(args.plugin_arg)
+    env["GHIDRADEC_BATCH_PLUGIN_ARG"] = str(plugin_arg_override if plugin_arg_override is not None else args.plugin_arg)
     env["GHIDRADEC_BATCH_TIMEOUT"] = str(args.timeout)
     env["GHIDRADEC_BATCH_STABLE_POLLS"] = str(args.stable_polls)
     env["GHIDRADEC_BATCH_MIN_OUTPUT_BYTES"] = str(args.min_output_bytes)
     env["GHIDRADEC_BATCH_CLEAN_OUTPUT"] = "1"
     env["GHIDRADEC_TEST_SKIP_PARAMID"] = "0" if args.paramid else "1"
     env["GHIDRADEC_TEST_TIMEOUT"] = str(args.timeout)
+    if protocol_log_override is not None:
+        env["GHIDRADEC_PROTOCOL_LOG"] = str(protocol_log_override)
     if ida_user_dir is not None:
         env["IDAUSR"] = str(ida_user_dir)
         print(f"[ghidradec-batch] staged plugin(s) in IDAUSR={ida_user_dir}")
@@ -247,6 +280,8 @@ def run_one(args: argparse.Namespace, input_path: Path) -> int:
         env["GHIDRADEC_BATCH_GHIDRA"] = str(Path(args.ghidra_dir).resolve())
         env["GHIDRADEC_GHIDRA_DIR"] = env["GHIDRADEC_BATCH_GHIDRA"]
         env["GHIDRA_INSTALL_DIR"] = env["GHIDRADEC_BATCH_GHIDRA"]
+    if extra_env:
+        env.update(extra_env)
 
     ida_args = [str(Path(args.ida).resolve())]
     if args.batch:
@@ -257,9 +292,9 @@ def run_one(args: argparse.Namespace, input_path: Path) -> int:
     exit_code = 0
     try:
         exit_code = run_ida(args, ida_args, env, case_dir)
-        if exit_code == 0 and scan_failure_patterns(args, log_path):
+        if scan_log and exit_code == 0 and scan_failure_patterns(args, log_path):
             exit_code = 8
-        if exit_code == 0 and not validate_output(args, output_path):
+        if validate_output_file and exit_code == 0 and not validate_output(args, output_path):
             exit_code = 9
         return exit_code
     finally:
@@ -267,6 +302,96 @@ def run_one(args: argparse.Namespace, input_path: Path) -> int:
             lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
             for line in lines[-args.print_log_tail:]:
                 print(line)
+
+
+def function_list_path(args: argparse.Namespace, input_path: Path) -> Path:
+    return Path(args.work_dir).resolve() / case_name(input_path) / "functions.json"
+
+
+def list_functions(args: argparse.Namespace, input_path: Path) -> list[dict[str, object]]:
+    path = function_list_path(args, input_path)
+    debugger = args.debugger
+    args.debugger = None
+    try:
+        code = run_one(
+            args,
+            input_path,
+            extra_env={"GHIDRADEC_BATCH_LIST_FUNCTIONS": str(path)},
+            log_name="ida-list-functions.log",
+            validate_output_file=False,
+            scan_log=False,
+        )
+    finally:
+        args.debugger = debugger
+    if code != 0:
+        raise RuntimeError(f"IDA function listing failed with exit code {code}")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return list(data.get("functions", []))
+
+
+def run_individual_functions(args: argparse.Namespace, input_path: Path) -> int:
+    functions = list_functions(args, input_path)
+    start = max(0, args.individual_start_index)
+    selected = functions[start:]
+    if args.individual_max > 0:
+        selected = selected[:args.individual_max]
+    if not selected:
+        print(f"[ghidradec-batch] FAIL: no functions selected for {input_path}", file=sys.stderr)
+        return 1
+
+    case_dir = Path(args.work_dir).resolve() / case_name(input_path)
+    output_dir = case_dir / "individual"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    summary = []
+    failures = 0
+    for index, function in enumerate(selected, start=start):
+        ea = int(function["ea"])
+        ea_hex = f"0x{ea:x}"
+        name = str(function.get("name") or ea_hex)
+        stem = f"{index:05d}_{ea:x}_{safe_name(name)}"
+        output_path = output_dir / f"{stem}.c"
+        protocol_path = output_dir / f"{stem}.protocol.log"
+        log_name = f"individual/{stem}.log"
+        print(f"[ghidradec-batch] individual {index + 1}/{len(functions)} {name} @ {ea_hex}")
+        code = run_one(
+            args,
+            input_path,
+            extra_env={"GHIDRADEC_BATCH_SELECT_EA": ea_hex},
+            output_path_override=output_path,
+            protocol_log_override=protocol_path,
+            log_name=log_name,
+            plugin_arg_override=4,
+        )
+        size = output_path.stat().st_size if output_path.exists() else 0
+        passed = code == 0
+        if not passed:
+            failures += 1
+        summary.append({
+            "ea": ea,
+            "ea_hex": ea_hex,
+            "name": name,
+            "output": str(output_path),
+            "protocol_log": str(protocol_path),
+            "log": str(case_dir / log_name),
+            "exit_code": code,
+            "output_bytes": size,
+            "passed": passed,
+        })
+
+    summary_path = output_dir / "summary.json"
+    summary_path.write_text(json.dumps({
+        "input": str(input_path),
+        "total_functions": len(functions),
+        "selected_functions": len(selected),
+        "passed": len(selected) - failures,
+        "failed": failures,
+        "results": summary,
+    }, indent=2, sort_keys=True), encoding="utf-8")
+    print(
+        f"[ghidradec-batch] individual summary: {len(selected) - failures}/{len(selected)} passed; "
+        f"{summary_path}"
+    )
+    return 1 if failures else 0
 
 
 def expand_inputs(values: list[str]) -> list[Path]:
@@ -320,6 +445,23 @@ def main() -> int:
     parser.add_argument("--no-default-fail-log-patterns", action="store_true")
     parser.add_argument("--print-log-tail", type=int, default=80)
     parser.add_argument("--input-list", action="append", default=[], help="Newline-delimited input path list")
+    parser.add_argument(
+        "--individual-functions",
+        action="store_true",
+        help="Run one isolated plugin invocation per analyzed function and write an individual coverage summary",
+    )
+    parser.add_argument("--individual-start-index", type=int, default=0)
+    parser.add_argument("--individual-max", type=int, default=0, help="Maximum individual functions to run; 0 means all")
+    parser.add_argument("--debugger", help="Launch IDA under a debugger such as cdb.exe")
+    parser.add_argument("--debugger-command", help="Debugger command string passed with cdb/windbg -c")
+    parser.add_argument("--debugger-symbols", help="Debugger symbol path passed with cdb/windbg -y")
+    parser.add_argument(
+        "--no-debugger-initial-go",
+        dest="debugger_initial_go",
+        action="store_false",
+        help="Do not pass -g -G to cdb/windbg",
+    )
+    parser.set_defaults(debugger_initial_go=True)
     parser.add_argument("inputs", nargs="*")
     args = parser.parse_args()
 
@@ -342,7 +484,10 @@ def main() -> int:
             print(f"[ghidradec-batch] FAIL: input not found: {input_path}", file=sys.stderr)
             failures += 1
             continue
-        code = run_one(args, input_path)
+        if args.individual_functions:
+            code = run_individual_functions(args, input_path)
+        else:
+            code = run_one(args, input_path)
         if code != 0:
             failures += 1
             print(f"[ghidradec-batch] FAIL: {input_path} exited with {code}", file=sys.stderr)

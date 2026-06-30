@@ -19,7 +19,19 @@ permissions:
   contents: write
 
 jobs:
+  validate-ref:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require an official tag
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        run: |
+          echo "The release workflow publishes permanent assets only from an existing tag." >&2
+          echo "In Actions, choose Run workflow, then select the official release tag instead of a branch." >&2
+          exit 1
+
   matrix:
+    needs: validate-ref
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}

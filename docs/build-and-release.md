@@ -54,7 +54,9 @@ Normal CI and tag releases build only IDA SDK 9.3 by default. Manual workflow
 runs can set `ida_versions` to a single version, a comma-separated list such as
 `7.3,7.4,8.5`, `latest`, or `all`.
 
-The release workflow is intended for tagged refs. When manually run on an
-existing tag, it uploads only release ZIPs that are not already attached to that
-GitHub Release, so older SDK packages can be generated on demand and then remain
+The release workflow only runs on tagged refs. For an on-demand backfill, open
+Actions, choose the Release workflow, select the official release tag in the
+branch/tag picker, and set `ida_versions` to the missing SDK version or list.
+The publish step uploads only release ZIPs that are not already attached to that
+GitHub Release, so older SDK packages can be generated once and then remain
 available for everyone.

@@ -275,6 +275,24 @@ std::string escapeCStr(std::string input)
 	return str;
 }
 
+std::string bytesToHexPreview(const std::string& input, size_t maxBytes = 96)
+{
+	static const char* digits = "0123456789abcdef";
+	std::string out;
+	size_t count = input.size() < maxBytes ? input.size() : maxBytes;
+	out.reserve(count * 3 + 16);
+	for (size_t i = 0; i < count; ++i) {
+		if (i != 0)
+			out += ' ';
+		unsigned char ch = static_cast<unsigned char>(input[i]);
+		out += digits[ch >> 4];
+		out += digits[ch & 0xf];
+	}
+	if (input.size() > maxBytes)
+		out += " ...";
+	return out;
+}
+
 // This is a tiny LoadImage class which feeds the executable bytes to the translator
 class CallbackLoadImage : public LoadImage {
 	DecompileCallback* callback;
@@ -379,6 +397,31 @@ static void writePackedVarnode(PackedEncode& encoder, VarnodeData* var)
 	Address(var->space, var->offset).encode(encoder, var->size);
 }
 
+static void writePackedPcodeOp(PackedEncode& encoder, OpCode opc,
+	VarnodeData* outvar, VarnodeData* vars, int4 isize)
+{
+	encoder.openElement(ELEM_RESPONSE_OP);
+	encoder.writeOpcode(ATTRIB_CODE, opc);
+	encoder.writeSignedInteger(ATTRIB_SIZE, isize);
+	if (outvar != (VarnodeData*)0) {
+		writePackedVarnode(encoder, outvar);
+	} else {
+		encoder.openElement(ELEM_RESPONSE_VOID);
+		encoder.closeElement(ELEM_RESPONSE_VOID);
+	}
+	int4 i = 0;
+	if (opc == CPUI_LOAD || opc == CPUI_STORE) {
+		encoder.openElement(ELEM_RESPONSE_SPACEID);
+		encoder.writeSpace(ATTRIB_NAME, vars[0].getSpaceFromConst());
+		encoder.closeElement(ELEM_RESPONSE_SPACEID);
+		i = 1;
+	}
+	for (; i < isize; ++i) {
+		writePackedVarnode(encoder, &vars[i]);
+	}
+	encoder.closeElement(ELEM_RESPONSE_OP);
+}
+
 void PackedPcodeRawOut::dump(const Address& addr, OpCode opc,
 	VarnodeData* outvar, VarnodeData* vars, int4 isize)
 {
@@ -413,27 +456,7 @@ void PackedPcodeRawOut::dump(const Address& addr, OpCode opc,
 	//labelBase = oldbase;
 	if (emitOpc == CPUI_BRANCH || emitOpc == CPUI_BRANCHIND || emitOpc == CPUI_RETURN)
 		hasTerminal = true;
-	encoder.openElement(ELEM_RESPONSE_OP);
-	encoder.writeOpcode(ATTRIB_CODE, emitOpc);
-	encoder.writeSignedInteger(ATTRIB_SIZE, isize);
-	if (outvar != (VarnodeData*)0) {
-		writePackedVarnode(encoder, outvar);
-	} else {
-		encoder.openElement(ELEM_RESPONSE_VOID);
-		encoder.closeElement(ELEM_RESPONSE_VOID);
-	}
-	int4 i = 0;
-	if (emitOpc == CPUI_LOAD || emitOpc == CPUI_STORE) {
-		encoder.openElement(ELEM_RESPONSE_SPACEID);
-		encoder.writeSpace(ATTRIB_NAME, vars[0].getSpaceFromConst());
-		encoder.closeElement(ELEM_RESPONSE_SPACEID);
-		i = 1;
-	}
-	// Possibly check for a code reference or a space reference
-	for (; i < isize; ++i) {
-		writePackedVarnode(encoder, &vars[i]);
-	}
-	encoder.closeElement(ELEM_RESPONSE_OP);
+	writePackedPcodeOp(encoder, emitOpc, outvar, vars, isize);
 	std::string inpstr;
 	for (int i = emitOpc == CPUI_LOAD || emitOpc == CPUI_STORE ? 1 : 0; i < isize; i++) {
 		inpstr += "    <addr space=\"" + vars[i].space->getName() + "\" offset=\"0x" +
@@ -610,6 +633,14 @@ public:
 	virtual void dump(const Address& addr, OpCode opc,
 		VarnodeData* outvar, VarnodeData* vars, int4 isize)
 	{
+		OpGroup op;
+		op.opc = opc;
+		op.hasOut = outvar != nullptr;
+		if (op.hasOut)
+			op.out = *outvar;
+		for (int i = 0; i < isize; i++)
+			op.vars.push_back(vars[i]);
+		ops.push_back(op);
 		std::string inpstr;
 		for (int i = opc == CPUI_LOAD || opc == CPUI_STORE ? 1 : 0; i < isize; i++) {
 			inpstr += "    <addr space=\"" + vars[i].space->getName() + "\" offset=\"0x" +
@@ -624,6 +655,21 @@ public:
 				"    <spaceid name=\"" + vars[0].space->getName() + "\"/>\n" : "") +
 			inpstr + "  </op>\n" });
 	}
+	void encodePacked(PackedEncode& encoder, Translate& trans, AddrInfo addr, int4 offset)
+	{
+		AddrSpace* space = trans.getSpaceByName(addr.space);
+		if (space == nullptr)
+			throw DecompError("No address space named " + addr.space);
+		Address address(space, addr.offset);
+		encoder.openElement(ELEM_RESPONSE_INST);
+		encoder.writeSignedInteger(ATTRIB_OFFSET, offset);
+		address.encode(encoder);
+		for (std::vector<OpGroup>::iterator it = ops.begin(); it != ops.end(); ++it) {
+			writePackedPcodeOp(encoder, it->opc, it->hasOut ? &it->out : nullptr,
+				it->vars.empty() ? nullptr : it->vars.data(), (int4)it->vars.size());
+		}
+		encoder.closeElement(ELEM_RESPONSE_INST);
+	}
 	std::string build(std::string space, uintb addr)
 	{
 		std::string str;
@@ -635,7 +681,15 @@ public:
 	}
 	//std::string xmlPcodes; //XML serialized vector of PcodeOpRaw
 	struct StrGroup { std::string pre; std::string post; };
+	struct OpGroup {
+		OpCode opc;
+		bool hasOut;
+		VarnodeData out;
+		std::vector<VarnodeData> vars;
+	};
 	std::vector<StrGroup> strs;
+	std::vector<OpGroup> ops;
+	std::string body;
 	intb paramShift = 0; //only for callfixup
 	std::vector<std::pair<std::string, int>> inputs; //only for dynamic - callotherfixup, executablepcode
 	std::vector<std::pair<std::string, int>> outputs; //only for dynamic - callotherfixup, executablepcode
@@ -757,6 +811,8 @@ std::string DecompInterface::readQueryString() {
 	if (type != 15) {
 		throw DecompError("GHIDRA/decompiler alignment error");
 	}
+	if (callback != nullptr)
+		callback->protocolRecorder("readQueryString bytes=\"" + std::to_string(buf.size()) + "\"", false);
 	return std::string(buf.begin(), buf.end());
 }
 
@@ -1075,6 +1131,39 @@ void getAddrFromString(std::string addrstring, SizedAddrInfo& addr)
 	getAddrFromString(addrstring, addr.addr, &addr.size);
 }
 
+void parsePcodeElement(Element* pcode,
+	std::string& body,
+	std::vector<std::pair<std::string, int>>& inputs,
+	std::vector<std::pair<std::string, int>>& outputs)
+{
+	List::const_iterator iter;
+	const List& children(pcode->getChildren());
+	for (iter = children.begin(); iter != children.end(); ++iter) {
+		Element* child = *iter;
+		if (child->getName() == "input") {
+			inputs.push_back(std::pair<std::string, int>(child->getAttributeValue("name"),
+				strtoull(child->getAttributeValue("size").c_str(), nullptr, 10)));
+		} else if (child->getName() == "output") {
+			outputs.push_back(std::pair<std::string, int>(child->getAttributeValue("name"),
+				strtoull(child->getAttributeValue("size").c_str(), nullptr, 10)));
+		} else if (child->getName() == "body") {
+			body = child->getContent();
+		}
+	}
+}
+
+void decodeVarnodeList(Decoder& decoder, const ElementId& elemId, std::vector<VarnodeData>& out)
+{
+	uint4 id = decoder.openElement(elemId);
+	while (decoder.peekElement() != 0) {
+		VarnodeData vd;
+		vd.decode(decoder);
+		if (vd.space != nullptr)
+			out.push_back(vd);
+	}
+	decoder.closeElement(id);
+}
+
 void DecompInterface::processPcodeInject(int type, std::map<std::string, XmlPcodeEmit*> &fixupmap)
 {
 	std::string name = readQueryString(); //inject_sleigh.cc
@@ -1344,13 +1433,28 @@ std::vector<uchar> DecompInterface::readResponse() {
 	while (type != 7) {
 		switch (type) {
 		case 4:
+		{
+			callback->protocolRecorder("query read begin", false);
 			name = readQueryString();
+			callback->protocolRecorder("query read complete bytes=\"" + std::to_string(name.size()) + "\"", false);
+			std::string queryContext = "query bytes=" + std::to_string(name.size());
 			try {
 				if (!name.empty() && (static_cast<uchar>(name[0]) & PackedFormat::HEADER_MASK) == PackedFormat::ELEMENT_START) {
+					callback->protocolRecorder("packed query stream begin bytes=\"" + std::to_string(name.size()) +
+						"\" first=\"0x" + to_string(static_cast<uint4>(static_cast<uchar>(name[0])), hex) + "\"", false);
 					std::istringstream packedStream(name);
+					callback->protocolRecorder("packed query stream ready", false);
 					PackedDecode decoder(trans);
+					callback->protocolRecorder("packed query ingest begin", false);
 					decoder.ingestStream(packedStream);
+					callback->protocolRecorder("packed query ingest complete", false);
+					callback->protocolRecorder("packed query open element begin", false);
 					uint4 elemId = decoder.openElement();
+					callback->protocolRecorder("packed query open element id=\"" + std::to_string(elemId) + "\"", false);
+					queryContext = "packed query element " + std::to_string(elemId);
+					if (elemId == ELEM_COMMAND_GETPCODEEXECUTABLE)
+						callback->protocolRecorder("packed query element 252 bytes=\"" +
+							bytesToHexPreview(name) + "\"", false);
 					if (elemId == ELEM_COMMAND_GETBYTES) {
 						int4 size = 0;
 						Address queryAddr = Address::decode(decoder, size);
@@ -1398,10 +1502,14 @@ std::vector<uchar> DecompInterface::readResponse() {
 						goto query_response_written;
 					}
 					if (elemId == ELEM_COMMAND_GETCOMMENTS) {
+						callback->protocolRecorder("query(command_getcomments decode begin)", false);
 						uint4 flags = decoder.readUnsignedInteger(ATTRIB_TYPE);
 						Address funcAddr = Address::decode(decoder);
 						decoder.closeElement(elemId);
 						AddrInfo addr{ funcAddr.getSpace()->getName(), funcAddr.getOffset() };
+						callback->protocolRecorder("query(command_getcomments addr=\"" + addr.space +
+							":0x" + to_string(addr.offset, hex) + "\" flags=\"" +
+							std::to_string(flags) + "\")", false);
 						std::vector<CommentInfo> comments;
 						callback->getComments(addr, comments);
 						std::ostringstream packedResponse;
@@ -1527,24 +1635,142 @@ std::vector<uchar> DecompInterface::readResponse() {
 							elemId == ELEM_COMMAND_GETCALLOTHERFIXUP ? CALLOTHERFIXUP_TYPE :
 							elemId == ELEM_COMMAND_GETCALLMECH ? CALLMECHANISM_TYPE :
 							EXECUTABLEPCODE_TYPE;
-						std::string injectName = decoder.readString(ATTRIB_NAME);
-						uint4 contextId = decoder.openElement(ELEM_RESPONSE_CONTEXT);
-						Address baseAddr = Address::decode(decoder);
-						Address callAddr = Address::decode(decoder);
-						decoder.closeElement(contextId);
-						decoder.closeElement(elemId);
-						AddrInfo base{ baseAddr.getSpace()->getName(), baseAddr.getOffset() };
-						AddrInfo call{ callAddr.getSpace()->getName(), callAddr.getOffset() };
-						callback->protocolRecorder("query(command_getpcodeinject type=\"" +
-							std::to_string(injectType) + "\" name=\"" +
-							escapeCStr(injectName) + "\" base=\"" + base.space +
-							":0x" + to_string(base.offset, hex) + "\" call=\"" +
-							call.space + ":0x" + to_string(call.offset, hex) + "\")", false);
-						std::string packed = getPackedEmptyPcodeInject(*trans, base);
+						std::string injectName;
+						AddrInfo base = startOffs;
+						AddrInfo call = startOffs;
+						std::vector<VarnodeData> contextInputs;
+						std::vector<VarnodeData> contextOutputs;
+						try {
+							callback->protocolRecorder("query(command_getpcodeinject decode name begin)", false);
+							injectName = decoder.readString(ATTRIB_NAME);
+							callback->protocolRecorder("query(command_getpcodeinject decode name=\"" +
+								escapeCStr(injectName) + "\")", false);
+							callback->protocolRecorder("query(command_getpcodeinject decode context open begin)", false);
+							uint4 contextId = decoder.openElement(ELEM_RESPONSE_CONTEXT);
+							callback->protocolRecorder("query(command_getpcodeinject decode context id=\"" +
+								std::to_string(contextId) + "\")", false);
+							callback->protocolRecorder("query(command_getpcodeinject decode base begin)", false);
+							Address baseAddr = Address::decode(decoder);
+							callback->protocolRecorder("query(command_getpcodeinject decode call begin)", false);
+							Address callAddr = Address::decode(decoder);
+							while (decoder.peekElement() != 0) {
+								uint4 subId = decoder.peekElement();
+								if (subId == ELEM_INPUT) {
+									decodeVarnodeList(decoder, ELEM_INPUT, contextInputs);
+								} else if (subId == ELEM_OUTPUT) {
+									decodeVarnodeList(decoder, ELEM_OUTPUT, contextOutputs);
+								} else {
+									uint4 skipId = decoder.openElement();
+									decoder.closeElementSkipping(skipId);
+								}
+							}
+							callback->protocolRecorder("query(command_getpcodeinject decode context close begin)", false);
+							decoder.closeElement(contextId);
+							callback->protocolRecorder("query(command_getpcodeinject decode element close begin)", false);
+							decoder.closeElement(elemId);
+							AddrSpace* baseSpace = baseAddr.getSpace();
+							if (baseSpace != nullptr) {
+								base = AddrInfo{ baseSpace->getName(), baseAddr.getOffset() };
+							} else {
+								callback->protocolRecorder("query(command_getpcodeinject null base fallback)", false);
+								base = startOffs;
+							}
+							AddrSpace* callSpace = callAddr.getSpace();
+							if (callSpace != nullptr) {
+								call = AddrInfo{ callSpace->getName(), callAddr.getOffset() };
+							} else {
+								callback->protocolRecorder("query(command_getpcodeinject null call fallback)", false);
+								call = base;
+							}
+							callback->protocolRecorder("query(command_getpcodeinject type=\"" +
+								std::to_string(injectType) + "\" name=\"" +
+								escapeCStr(injectName) + "\" base=\"" + base.space +
+								":0x" + to_string(base.offset, hex) + "\" call=\"" +
+								call.space + ":0x" + to_string(call.offset, hex) +
+								"\" inputs=\"" + std::to_string(contextInputs.size()) +
+								"\" outputs=\"" + std::to_string(contextOutputs.size()) + "\")", false);
+						} catch (...) {
+							callback->protocolRecorder("query(command_getpcodeinject decode failed type=\"" +
+								std::to_string(injectType) + "\" name=\"" +
+								escapeCStr(injectName) + "\")", true);
+							throw DecompError("Could not decode packed pcode injection context");
+						}
+						std::map<std::string, XmlPcodeEmit*>* injectMap =
+							injectType == CALLFIXUP_TYPE ? &callFixupMap :
+							injectType == CALLOTHERFIXUP_TYPE ? &callFixupOtherMap :
+							injectType == CALLMECHANISM_TYPE ? &callMechMap :
+							&callExecPcodeMap;
+						std::map<std::string, XmlPcodeEmit*>::iterator injectIt = injectMap->find(injectName);
+						if (injectIt == injectMap->end() || injectIt->second == nullptr)
+							throw DecompError("Missing pcode injection '" + injectName + "'");
+						XmlPcodeEmit* emitter = injectIt->second;
+						if (injectType == EXECUTABLEPCODE_TYPE && injectName == "segment_pcode" &&
+							contextInputs.size() >= 2 && contextOutputs.size() >= 1) {
+							AddrSpace* uniqueSpace = trans->getUniqueSpace();
+							AddrSpace* constSpace = trans->getConstantSpace();
+							if (uniqueSpace == nullptr || constSpace == nullptr)
+								throw DecompError("Cannot build segment_pcode without unique/const spaces");
+							uint4 outSize = contextOutputs[0].size;
+							if (outSize == 0)
+								outSize = 4;
+							VarnodeData tmpBase{ uniqueSpace, uniqueBase, outSize };
+							uniqueBase += 16;
+							VarnodeData tmpShift{ uniqueSpace, uniqueBase, outSize };
+							uniqueBase += 16;
+							VarnodeData tmpInner{ uniqueSpace, uniqueBase, outSize };
+							uniqueBase += 16;
+							VarnodeData shiftInputs[] = {
+								tmpBase,
+								VarnodeData{ constSpace, 4, outSize }
+							};
+							VarnodeData addInputs[] = { tmpShift, tmpInner };
+							std::ostringstream packedResponse;
+							PackedEncode encoder(packedResponse);
+							encoder.openElement(ELEM_RESPONSE_INST);
+							encoder.writeSignedInteger(ATTRIB_OFFSET, 0);
+							AddrSpace* baseSpace = trans->getSpaceByName(base.space);
+							Address(baseSpace != nullptr ? baseSpace : trans->getDefaultCodeSpace(), base.offset).encode(encoder);
+							writePackedPcodeOp(encoder, CPUI_INT_ZEXT, &tmpBase, &contextInputs[0], 1);
+							writePackedPcodeOp(encoder, CPUI_INT_LEFT, &tmpShift, shiftInputs, 2);
+							writePackedPcodeOp(encoder, CPUI_INT_ZEXT, &tmpInner, &contextInputs[1], 1);
+							writePackedPcodeOp(encoder, CPUI_INT_ADD, &contextOutputs[0], addInputs, 2);
+							encoder.closeElement(ELEM_RESPONSE_INST);
+							std::string packed = packedResponse.str();
+							write(query_response_start, sizeof(query_response_start));
+							writeString(packed);
+							write(query_response_end, sizeof(query_response_end));
+							callback->protocolRecorder("queryresponse(command_getpcodeinject segment_pcode packed bytes=\"" +
+								std::to_string(packed.size()) + "\")", true);
+							goto query_response_written;
+						}
+						bool deleteEmitter = false;
+						if (emitter->ops.empty()) {
+							std::string dynamicBody = callback->getPcodeInject(injectType, injectName,
+								base, call.space, call.offset);
+							if (!dynamicBody.empty()) {
+								emitter = getPcodeSnippet(dynamicBody, injectIt->second->inputs, injectIt->second->outputs);
+								deleteEmitter = true;
+							}
+						}
+						int4 injectOffset = 0;
+						try {
+							AddrSpace* baseSpace = trans->getSpaceByName(base.space);
+							if (baseSpace != nullptr)
+								injectOffset = trans->instructionLength(Address(baseSpace, base.offset));
+						} catch (...) {
+							injectOffset = 0;
+						}
+						std::ostringstream packedResponse;
+						PackedEncode encoder(packedResponse);
+						emitter->encodePacked(encoder, *trans, base, injectOffset);
+						std::string packed = packedResponse.str();
+						if (deleteEmitter)
+							delete emitter;
 						write(query_response_start, sizeof(query_response_start));
 						writeString(packed);
 						write(query_response_end, sizeof(query_response_end));
-						callback->protocolRecorder("queryresponse(command_getpcodeinject empty)", true);
+						callback->protocolRecorder("queryresponse(command_getpcodeinject packed bytes=\"" +
+							std::to_string(packed.size()) + "\")", true);
 						goto query_response_written;
 					}
 					if (elemId == ELEM_COMMAND_GETPCODE) {
@@ -1567,6 +1793,12 @@ std::vector<uchar> DecompInterface::readResponse() {
 								callback->protocolRecorder("queryresponse(command_getpcode emptyOutsideCurrentFunction)", true);
 								goto query_response_written;
 							}
+							if (msi.kind == KIND_HOLE && addr.offset != startOffs.offset) {
+								write(query_response_start, sizeof(query_response_start));
+								write(query_response_end, sizeof(query_response_end));
+								callback->protocolRecorder("queryresponse(command_getpcode emptyUnknownCode)", true);
+								goto query_response_written;
+							}
 						}
 						std::string packed, xml;
 						try {
@@ -1586,6 +1818,10 @@ std::vector<uchar> DecompInterface::readResponse() {
 							std::tie(packed, xml) = getPackedUnimplementedInstruction(addr);
 						} catch (DecompError&) {
 							std::tie(packed, xml) = getPackedUnimplementedInstruction(addr);
+						} catch (...) {
+							callback->protocolRecorder("query(command_getpcode translate fallback addr=\"" +
+								addr.space + ":0x" + to_string(addr.offset, hex) + "\")", true);
+							std::tie(packed, xml) = getPackedUnimplementedInstruction(addr);
 						}
 						write(query_response_start, sizeof(query_response_start));
 						if (!packed.empty()) writeString(packed);
@@ -1601,13 +1837,22 @@ std::vector<uchar> DecompInterface::readResponse() {
 						PackedEncode encoder(packedResponse);
 						encoder.openElement(ELEM_RESPONSE_TRACKED_POINTSET);
 						queryAddr.getSpace()->encodeAttributes(encoder, queryAddr.getOffset());
-						TrackedSet ts = context->getTrackedSet(queryAddr);
-						for (TrackedSet::iterator it = ts.begin(); it != ts.end(); it++) {
-							if (it->loc.space == nullptr || it->loc.offset == -1) continue;
-							encoder.openElement(ELEM_RESPONSE_SET);
-							it->loc.space->encodeAttributes(encoder, it->loc.offset, it->loc.size);
-							encoder.writeUnsignedInteger(ATTRIB_VAL, it->val);
-							encoder.closeElement(ELEM_RESPONSE_SET);
+						const TrackedSet* ts = nullptr;
+						try {
+							ts = &context->getTrackedSet(queryAddr);
+						} catch (...) {
+							callback->protocolRecorder("query(command_gettrackedregisters empty fallback addr=\"" +
+								std::string(queryAddr.getSpace() != nullptr ? queryAddr.getSpace()->getName() : "<null>") +
+								":0x" + to_string(queryAddr.getOffset(), hex) + "\")", true);
+						}
+						if (ts != nullptr) {
+							for (TrackedSet::const_iterator it = ts->begin(); it != ts->end(); it++) {
+								if (it->loc.space == nullptr || it->loc.offset == -1) continue;
+								encoder.openElement(ELEM_RESPONSE_SET);
+								it->loc.space->encodeAttributes(encoder, it->loc.offset, it->loc.size);
+								encoder.writeUnsignedInteger(ATTRIB_VAL, it->val);
+								encoder.closeElement(ELEM_RESPONSE_SET);
+							}
 						}
 						encoder.closeElement(ELEM_RESPONSE_TRACKED_POINTSET);
 						std::string res = packedResponse.str();
@@ -1652,6 +1897,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 					throw DecompError("Unsupported packed decompiler query element " + std::to_string(elemId));
 				}
 				//if (name != "getUserOpName" && name != "getRegister") throw DecompError(name);
+				queryContext = "legacy query '" + escapeCStr(name) + "'";
 				if (name.length() < 4) {
 					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\")", false);
 					throw DecompError("Bad decompiler query: " + name);
@@ -2094,15 +2340,23 @@ std::vector<uchar> DecompInterface::readResponse() {
 						//"<set space=\"register\" offset=\"0x106\" size=\"2\" val=\"0x90c\"/>\n"
 						//"<set space=\"register\" offset=\"0x20a\" size=\"1\" val=\"0x0\"/>\n"
 						//only the DF direction control flag on x86 is reported by default here for string operations from the pspec
-						TrackedSet ts = context->getTrackedSet(
-							Address(trans->getSpaceByName(addr.space), addr.offset));
+						Address trackAddr(trans->getSpaceByName(addr.space), addr.offset);
+						const TrackedSet* ts = nullptr;
+						try {
+							ts = &context->getTrackedSet(trackAddr);
+						} catch (...) {
+							callback->protocolRecorder("query(command_gettrackedregisters empty fallback addr=\"" +
+								addr.space + ":0x" + to_string(addr.offset, hex) + "\")", true);
+						}
 						std::string track;
-						for (TrackedSet::iterator it = ts.begin(); it != ts.end(); it++) {
-							if (it->loc.space != nullptr && it->loc.offset != -1)
-								track += "  <set space=\"" + it->loc.space->getName() + "\" offset=\"0x" +
-									to_string(it->loc.offset, hex) +
-									"\" size=\"" + std::to_string(it->loc.size) +
-									"\" val=\"0x" + to_string(it->val, hex) + "\"/>\n";
+						if (ts != nullptr) {
+							for (TrackedSet::const_iterator it = ts->begin(); it != ts->end(); it++) {
+								if (it->loc.space != nullptr && it->loc.offset != -1)
+									track += "  <set space=\"" + it->loc.space->getName() + "\" offset=\"0x" +
+										to_string(it->loc.offset, hex) +
+										"\" size=\"" + std::to_string(it->loc.size) +
+										"\" val=\"0x" + to_string(it->val, hex) + "\"/>\n";
+							}
 						}
 						//register values upon entry
 						std::string s = std::string("<tracked_pointset space=\"" + addr.space +
@@ -2158,10 +2412,21 @@ query_response_written:
 				writeString(e.what());
 				write(exception_end, sizeof(exception_end));
 				callback->protocolRecorder("exception(\"" + escapeCStr(extype) + "\", \"" + escapeCStr(e.what()) + "\")", true);
+			} catch (...) {
+				std::string extype = "unknown";
+				std::string message = "Unknown exception while handling decompiler query (" + queryContext + ")";
+				write(exception_start, sizeof(exception_start));
+				writeString(extype.c_str());
+				writeString(message.c_str());
+				write(exception_end, sizeof(exception_end));
+				callback->protocolRecorder("exception(\"" + escapeCStr(extype) + "\", \"" + escapeCStr(message) + "\")", true);
 			}
 			//fflush(nativeOut); // Make sure decompiler receives response
+			callback->protocolRecorder("query terminator read begin", false);
 			readToBurst(); // Read query terminator
+			callback->protocolRecorder("query terminator read complete", false);
 			break;
+		}
 		case 6:
 			throw DecompError("GHIDRA/decompiler out of alignment");
 		case 10:
@@ -2223,11 +2488,16 @@ query_response_written:
 
 		}
 		if (!bufferActive) { //== nullptr...
+			callback->protocolRecorder("response next burst begin", false);
 			type = readToBurst();
+			callback->protocolRecorder("response next burst type=\"" + std::to_string(type) + "\"", false);
 		}
 		else {
 			size_t pos = buf.size();
+			callback->protocolRecorder("response buffer read begin", false);
 			type = readToBuffer(buf);
+			callback->protocolRecorder("response buffer read complete type=\"" + std::to_string(type) +
+				"\" bytes=\"" + std::to_string(buf.size() - pos) + "\"", false);
 			callback->protocolRecorder("buffereddata(\"" + escapeCStr(std::string(buf.begin() + pos, buf.end())) + "\")", false);
 		}
 	}
@@ -2640,13 +2910,38 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 				}
 			}
 			break;
+		} else if (el->getName() == "segmentop") {
+			std::string name = "segment";
+			for (int i = 0; i < el->getNumAttributes(); i++) {
+				if (el->getAttributeName(i) == "userop") {
+					name = el->getAttributeValue(i);
+					break;
+				}
+			}
+			const List& lst(el->getChildren());
+			for (List::const_iterator segIt = lst.begin(); segIt != lst.end(); ++segIt) {
+				Element* pcode = *segIt;
+				if (pcode->getName() != "pcode")
+					continue;
+				std::string body;
+				std::vector<std::pair<std::string, int>> inputs;
+				std::vector<std::pair<std::string, int>> outputs;
+				parsePcodeElement(pcode, body, inputs, outputs);
+				if (body.size() != 0) {
+					XmlPcodeEmit* emit = new XmlPcodeEmit;
+					emit->body = body;
+					emit->inputs = inputs;
+					emit->outputs = outputs;
+					callExecPcodeMap[name + "_pcode"] = emit;
+				}
+			}
 		} else if (el->getName() == "jumpassist") {
 			//EXECUTABLEPCODE_TYPE is for Dalvik/JVM
 			//pspec has optional jumpassist -> with optional case_pcode, addr_pcode, default_pcode, size_pcode each with <input name="" size=""/>...<output name="" size=""/><body>[CDATA]
 			std::string name = el->getAttributeValue("name");
 			const List& lst(el->getChildren());
-			for (iter = lst.begin(); iter != lst.end(); ++iter) {
-				el = *iter;
+			for (List::const_iterator jumpIt = lst.begin(); jumpIt != lst.end(); ++jumpIt) {
+				el = *jumpIt;
 				std::string finalname;
 				if (el->getName() == "case_pcode") {
 					finalname = name + "_index2case";
@@ -2657,22 +2952,10 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 				} else if (el->getName() == "size_pcode") {
 					finalname = name + "_calcsize";
 				}
-				List::const_iterator t;
-				const List& l(el->getChildren());
 				std::string body;
 				std::vector<std::pair<std::string, int>> inputs;
 				std::vector<std::pair<std::string, int>> outputs;
-				for (t = l.begin(); t != l.end(); ++t) {
-					if ((*t)->getName() == "input") { //name, size
-						inputs.push_back(std::pair<std::string, int>((*t)->getAttributeValue("name"),
-							strtoull((*t)->getAttributeValue("size").c_str(), nullptr, 10)));
-					} else if ((*t)->getName() == "output") { //name, size
-						outputs.push_back(std::pair<std::string, int>((*t)->getAttributeValue("name"),
-							strtoull((*t)->getAttributeValue("size").c_str(), nullptr, 10)));
-					} else if ((*t)->getName() == "body") {
-						body = (*t)->getContent();
-					}
-				}
+				parsePcodeElement(el, body, inputs, outputs);
 				if (finalname.size() != 0 && body.size() != 0)
 					callExecPcodeMap[finalname] = getPcodeSnippet(body, inputs, outputs);
 			}
@@ -2989,6 +3272,14 @@ std::vector<uchar> DecompInterface::sendCommand1ParamTimeout(std::string command
 			return std::vector<uchar>();
 		} catch (DecompError& e) {
 			*err = e.explain;
+			statusGood = false;
+			return std::vector<uchar>();
+		} catch (std::exception& e) {
+			*err = e.what();
+			statusGood = false;
+			return std::vector<uchar>();
+		} catch (...) {
+			*err = "Unknown decompiler worker exception";
 			statusGood = false;
 			return std::vector<uchar>();
 		}
@@ -3527,14 +3818,13 @@ void parseFuncProto(Element* el, FuncProtoInfo& fpi)
 				else if (el->getAttributeName(i) == "dotdotdot" && el->getAttributeValue(i) == "true") fpi.dotdotdot = true;
 			}
 			const List& lst(el->getChildren());
-			for (iter = lst.begin(); iter != lst.end(); ++iter) {
-				el = *iter;
+			for (List::const_iterator protoIt = lst.begin(); protoIt != lst.end(); ++protoIt) {
+				el = *protoIt;
 				if (el->getName() == "returnsym") {
 					fpi.retType.argIndex = -1;
 					const List& lt(el->getChildren());
-					List::const_iterator it;
-					for (it = lt.begin(); it != lt.end(); ++it) {
-						if ((*it)->getName() == "addr") {							
+					for (List::const_iterator it = lt.begin(); it != lt.end(); ++it) {
+						if ((*it)->getName() == "addr") {
 							fpi.retType.addr.addr.space = getHasAttributeValue(*it, "space");
 							if (fpi.retType.addr.addr.space == "join") {
 								for (int i = 0; i < (*it)->getNumAttributes(); i++) {
@@ -3560,8 +3850,7 @@ void parseFuncProto(Element* el, FuncProtoInfo& fpi)
 					parseTypeInfo(el, fpi.retType.pi.ti);
 				} else if (el->getName() == "killedbycall") {
 					const List& lt(el->getChildren());
-					List::const_iterator it;
-					for (it = lt.begin(); it != lt.end(); ++it) {
+					for (List::const_iterator it = lt.begin(); it != lt.end(); ++it) {
 						if ((*it)->getName() == "addr") {
 							SizedAddrInfo sai;
 							sai.addr.space = (*it)->getAttributeValue("space");
@@ -3572,8 +3861,7 @@ void parseFuncProto(Element* el, FuncProtoInfo& fpi)
 					}
 				} else if (el->getName() == "internallist") {
 					const List& lt(el->getChildren());
-					List::const_iterator it;
-					for (it = lt.begin(); it != lt.end(); ++it) {
+					for (List::const_iterator it = lt.begin(); it != lt.end(); ++it) {
 						if ((*it)->getName() == "param") {
 							SymInfo sym;
 							sym.pi.name = (*it)->getAttributeValue("name");
@@ -3918,10 +4206,14 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 	lastdm = dm;
 	startOffs = addr;
 	buf = sendCommand1ParamTimeout("decompileAt", getPackedAddress(addr), toutSecs);
+	callback->protocolRecorder("doDecompile response bytes=\"" + std::to_string(buf.size()) + "\"", false);
 	std::string decompXml = std::string(buf.begin(), buf.end());
 	if (decompXml.size() == 0) throw DecompError("Empty decompiler response due to error");
-	if (((uint1)decompXml[0] & PackedFormat::HEADER_MASK) == PackedFormat::ELEMENT_START)
+	if (((uint1)decompXml[0] & PackedFormat::HEADER_MASK) == PackedFormat::ELEMENT_START) {
+		callback->protocolRecorder("doDecompile unpack packed XML", false);
 		decompXml = packedXmlToXml(decompXml, trans);
+	}
+	callback->protocolRecorder("doDecompile XML bytes=\"" + std::to_string(decompXml.size()) + "\"", false);
 	istringstream str(decompXml);
 	//doc -> function ->
 	//<ast>
@@ -3942,21 +4234,28 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 			decompXml.substr(0, std::min(previewSize, decompXml.size())) +
 			(decompXml.size() > previewSize ? "...[truncated]" : ""));
 	}
+	callback->protocolRecorder("doDecompile XML parsed", false);
 	Element* el = doc->getRoot();
 	const List& list(el->getChildren());
 	List::const_iterator iter;
 	bool bFirst = true;
 	for (iter = list.begin(); iter != list.end(); ++iter) {
 		if ((*iter)->getName() == "function") { //first function contains prototype, AST, other info, next one is C code
+			callback->protocolRecorder(std::string("doDecompile function element first=\"") +
+				(bFirst ? "true" : "false") + "\"", false);
 			if (!bFirst) {
+				callback->protocolRecorder("doDecompile convert source begin", false);
 				reduceShortCircuits(blockGraph);
 				decompXml = convertSourceDoc(*iter, displayXml, funcProto, funcColorProto, blockGraph);
 				removeUnusedNodes(blockGraph);
+				callback->protocolRecorder("doDecompile convert source complete", false);
 				break;
 			}
 			bFirst = !bFirst;
 			el = *iter;
+			callback->protocolRecorder("doDecompile parse prototype begin", false);
 			parseFuncProto(el, symInf);
+			callback->protocolRecorder("doDecompile parse prototype complete", false);
 			const List& lst(el->getChildren());
 			List::const_iterator itert;
 			for (itert = lst.begin(); itert != lst.end(); ++itert) {
@@ -3964,21 +4263,21 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 					//return decompXml;
 				} else if ((*itert)->getName() == "addr") {
 				} else if ((*itert)->getName() == "localdb") {
+					callback->protocolRecorder("doDecompile localdb begin", false);
 					el = *itert;
 					const List& lt(el->getChildren());
-					List::const_iterator itr;
-					for (itr = lt.begin(); itr != lt.end(); ++itr) {
-						if ((*itr)->getName() == "scope") {
-							el = *itr;
+					for (List::const_iterator scopeIt = lt.begin(); scopeIt != lt.end(); ++scopeIt) {
+						if ((*scopeIt)->getName() == "scope") {
+							el = *scopeIt;
 							const List& ls(el->getChildren());
-							for (itr = ls.begin(); itr != ls.end(); ++itr) {
-								if ((*itr)->getName() == "symbollist") {
-									el = *itr;
+							for (List::const_iterator symbolListIt = ls.begin(); symbolListIt != ls.end(); ++symbolListIt) {
+								if ((*symbolListIt)->getName() == "symbollist") {
+									el = *symbolListIt;
 									const List& l(el->getChildren());
-									for (itr = l.begin(); itr != l.end(); ++itr) {
-										if ((*itr)->getName() == "mapsym") {
+									for (List::const_iterator mapSymIt = l.begin(); mapSymIt != l.end(); ++mapSymIt) {
+										if ((*mapSymIt)->getName() == "mapsym") {
 											SymInfo sym = {};
-											el = *itr;
+											el = *mapSymIt;
 											const List& li(el->getChildren());
 											List::const_iterator it;
 											for (it = li.begin(); it != li.end(); ++it) {
@@ -4011,12 +4310,11 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 														sym.addr.addr.offset = strtoull(el->getAttributeValue("offset").c_str(), nullptr, 16);
 												} else if (el->getName() == "rangelist") {
 													const List& lii(el->getChildren());
-													List::const_iterator itr;
-													for (itr = lii.begin(); itr != lii.end(); ++itr) {
-														if ((*itr)->getName() == "range") {
-															sym.range.space = (*itr)->getAttributeValue("space");
-															sym.range.beginoffset = strtoull((*itr)->getAttributeValue("first").c_str(), nullptr, 16);
-															sym.range.endoffset = strtoull((*itr)->getAttributeValue("last").c_str(), nullptr, 16);
+													for (List::const_iterator rangeIt = lii.begin(); rangeIt != lii.end(); ++rangeIt) {
+														if ((*rangeIt)->getName() == "range") {
+															sym.range.space = (*rangeIt)->getAttributeValue("space");
+															sym.range.beginoffset = strtoull((*rangeIt)->getAttributeValue("first").c_str(), nullptr, 16);
+															sym.range.endoffset = strtoull((*rangeIt)->getAttributeValue("last").c_str(), nullptr, 16);
 															break;
 														}
 													}
@@ -4035,7 +4333,9 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 							break;
 						}
 					}
+					callback->protocolRecorder("doDecompile localdb complete", false);
 				} else if ((*itert)->getName() == "ast") {
+					callback->protocolRecorder("doDecompile ast begin", false);
 					const List& lt((*itert)->getChildren());
 					List::const_iterator itr;
 					blockGraph.resize(1); //first node has no in edges and is not included
@@ -4057,10 +4357,12 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 							}
 						}
 					}
+					callback->protocolRecorder("doDecompile ast complete", false);
 				}
 			}
 		}
 	}
+	callback->protocolRecorder("doDecompile parsed document complete", false);
 	delete doc;
 	/**
 	* Tell the decompiler to clear any function and symbol

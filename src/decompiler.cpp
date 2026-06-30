@@ -368,11 +368,22 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	void IdaCallback::launchDecompiler()
 	{
 		if (PRINT_DEBUG || di->skipParamIdentification) {
-			std::string traceDir = di->workDir;
-			if (!traceDir.empty() && traceDir.back() != '/' && traceDir.back() != '\\')
-				traceDir += "/";
-			recfp = qfopen((traceDir + "ghidradec-protocol.log").c_str(), "wb");
+			qstring protocolLogEnv;
+			std::string protocolLog;
+			if (qgetenv("GHIDRADEC_PROTOCOL_LOG", &protocolLogEnv) && !protocolLogEnv.empty()) {
+				protocolLog = protocolLogEnv.c_str();
+			}
+			else {
+				std::string traceDir = di->workDir;
+				if (!traceDir.empty() && traceDir.back() != '/' && traceDir.back() != '\\')
+					traceDir += "/";
+				protocolLog = traceDir + "ghidradec-protocol.log";
+			}
+			recfp = qfopen(protocolLog.c_str(), "wb");
 			if (PRINT_DEBUG) {
+				std::string traceDir = di->workDir;
+				if (!traceDir.empty() && traceDir.back() != '/' && traceDir.back() != '\\')
+					traceDir += "/";
 				sendfp = qfopen((traceDir + "ghidradec-written.bin").c_str(), "wb");
 				recvfp = qfopen((traceDir + "ghidradec-received.bin").c_str(), "wb");
 			}
@@ -1470,6 +1481,9 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	void IdaCallback::getComments(AddrInfo addr, std::vector<CommentInfo>& comments)
 	{
 		if (addr.space != "ram") return;
+		qstring batchOutputEnv;
+		if (qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty())
+			return;
 		executeOnMainThread([&comments, addr]() {
 			//default options only allow warning, warningheader and user2
 			func_t* f = get_func((ea_t)addr.offset);
@@ -1483,13 +1497,17 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			rangeset_t rangeset;
 			get_func_ranges(&rangeset, f);
 			for (rangeset_t::iterator it = rangeset.begin(); it != rangeset.end(); it++) { //there should be a better way to do this besides going through individual instructions?
-				for (ea_t offs = it->start_ea; offs < it->end_ea; offs += get_item_size(offs)) { //is_code(offs) should always be true
+				for (ea_t offs = it->start_ea; offs < it->end_ea;) { //is_code(offs) should always be true
 					//color_t clr; //get_any_indented_cmt is missing from library
 					qstring qs;
 					if (get_cmt(&qs, offs, false) != -1)
 						comments.push_back(CommentInfo{ AddrInfo{addr.space, offs}, "user1", qs.c_str() });
 					if (get_cmt(&qs, offs, true) != -1)
 						comments.push_back(CommentInfo{ AddrInfo{addr.space, offs}, "user1", qs.c_str() });
+					asize_t itemSize = get_item_size(offs);
+					if (itemSize == 0)
+						break;
+					offs += itemSize;
 				}
 			}
 		});
@@ -1498,6 +1516,10 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	{
 		std::string name;
 		if (addr.space == "ram") {
+			qstring batchOutputEnv;
+			if (qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty()) {
+				return "ram0x" + to_string(addr.offset, std::hex);
+			}
 			executeOnMainThread([&name, addr]() {
 				name = getSymbolName(addr.offset);
 			});
@@ -4084,16 +4106,23 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 		return;
 	}
 
-	std::string definitions, defdisplay, idaInfo;
-	di->idacb->analysisDump(definitions, defdisplay, idaInfo);
-	code = definitions + code + "\n";
-	display = defdisplay + display + "\n";
-	if (!idaInfo.empty()) {
-		code += "/*\n" + idaInfo + "\n*/\n";
-		std::string str;
-		idaInfo = "/*\n" + idaInfo + "\n*/";
-		std::for_each(idaInfo.begin(), idaInfo.end(), [&str](char c) { if (c == '\n') str += std::string({ COLOR_OFF, COLOR_AUTOCMT }) + c + std::string({ COLOR_ON, COLOR_AUTOCMT }); else str += c; });
-		display += std::string({ COLOR_ON, COLOR_AUTOCMT }) + str + std::string({ COLOR_OFF, COLOR_AUTOCMT }) + "\n";
+	qstring batchOutputEnv;
+	const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
+	if (batchOutput) {
+		code += "\n";
+		display += "\n";
+	} else {
+		std::string definitions, defdisplay, idaInfo;
+		di->idacb->analysisDump(definitions, defdisplay, idaInfo);
+		code = definitions + code + "\n";
+		display = defdisplay + display + "\n";
+		if (!idaInfo.empty()) {
+			code += "/*\n" + idaInfo + "\n*/\n";
+			std::string str;
+			idaInfo = "/*\n" + idaInfo + "\n*/";
+			std::for_each(idaInfo.begin(), idaInfo.end(), [&str](char c) { if (c == '\n') str += std::string({ COLOR_OFF, COLOR_AUTOCMT }) + c + std::string({ COLOR_ON, COLOR_AUTOCMT }); else str += c; });
+			display += std::string({ COLOR_ON, COLOR_AUTOCMT }) + str + std::string({ COLOR_OFF, COLOR_AUTOCMT }) + "\n";
+		}
 	}
 
 	//should save to a .c file?
