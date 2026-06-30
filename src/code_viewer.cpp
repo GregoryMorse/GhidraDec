@@ -878,14 +878,24 @@ ssize_t idaapi GhidraDec::ui_callback(void* ud, int notification_code, va_list v
 
 void GhidraDec::registerPermanentActions()
 {
-	register_action(jump_to_asm_ah_desc);
-	register_action(change_fnc_global_name_ah_desc);
-	register_action(open_xrefs_ah_desc);
-	register_action(open_calls_ah_desc);
-	register_action(change_fnc_type_ah_desc);
-	register_action(change_fnc_comment_ah_desc);
-	register_action(move_forward_ah_desc);
-	register_action(move_backward_ah_desc);
+	auto registerPluginAction = [this](const action_desc_t& desc)
+	{
+		action_desc_t iconDesc = desc;
+		if (decompInfo != nullptr && decompInfo->pluginIconId >= 0)
+		{
+			iconDesc.icon = decompInfo->pluginIconId;
+		}
+		return register_action(iconDesc);
+	};
+
+	registerPluginAction(jump_to_asm_ah_desc);
+	registerPluginAction(change_fnc_global_name_ah_desc);
+	registerPluginAction(open_xrefs_ah_desc);
+	registerPluginAction(open_calls_ah_desc);
+	registerPluginAction(change_fnc_type_ah_desc);
+	registerPluginAction(change_fnc_comment_ah_desc);
+	registerPluginAction(move_forward_ah_desc);
+	registerPluginAction(move_backward_ah_desc);
 }
 
 //

@@ -28,6 +28,7 @@
 #include "config_generator.h"
 #include "decompiler.h"
 #include "defs.h"
+#include "ghidradec_icon.h"
 #include "plugin_config.h"
 #include "sleighinterface.h"
 #include "idaplugin.h"
@@ -819,12 +820,26 @@ int idaapi GhidraDec::init()
 		return PLUGIN_KEEP;
 	}
 	decompInfo = new RdGlobalInfo(this);
+	if (is_idaq())
+	{
+		decompInfo->pluginIconId = load_custom_icon(
+			ghidradec_icon_png,
+			sizeof(ghidradec_icon_png),
+			"png");
+	}
 	decompInfo->pluginRegNumber = register_addon(&decompInfo->pluginInfo);
 	if (decompInfo->pluginRegNumber < 0)
 	{
+		const std::string pluginName = decompInfo->pluginName;
+		const std::string pluginVersion = decompInfo->pluginVersion;
+		if (decompInfo->pluginIconId >= 0)
+		{
+			free_custom_icon(decompInfo->pluginIconId);
+			decompInfo->pluginIconId = -1;
+		}
 		delete decompInfo;
-		WARNING_GUI(decompInfo->pluginName << " version " << decompInfo->pluginVersion
-			<< " failed to register.\n");
+		decompInfo = nullptr;
+		WARNING_GUI(pluginName << " version " << pluginVersion << " failed to register.\n");
 		return PLUGIN_SKIP;
 	}
 	else
@@ -864,6 +879,10 @@ int idaapi GhidraDec::init()
  */
 void idaapi GhidraDec::term()
 {
+	if (decompInfo == nullptr)
+	{
+		return;
+	}
 	killDecompilation(true);
 	if (decompInfo->idacb != nullptr) {
 		delete decompInfo->idacb;
@@ -903,6 +922,11 @@ void idaapi GhidraDec::term()
 		const char optionsActionName[] = "ghidradec:ShowOptions";
 		unregister_action(optionsActionName);
 	}
+	if (decompInfo->pluginIconId >= 0)
+	{
+		free_custom_icon(decompInfo->pluginIconId);
+		decompInfo->pluginIconId = -1;
+	}
 #if IDA_SDK_VERSION >= 750
 	unhook_event_listener(HT_VIEW, this);
 	unhook_event_listener(HT_UI, this);
@@ -913,6 +937,7 @@ void idaapi GhidraDec::term()
 	qsem_free(decompInfo->termSem);
 	qmutex_free(decompInfo->qm);
 	delete decompInfo;
+	decompInfo = nullptr;
 }
 
 } // namespace idaplugin

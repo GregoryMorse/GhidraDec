@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/GhidraDec-light-logo.png" alt="GhidraDec" width="720">
+</p>
+
 # GhidraDec: Ghidra Decompiler Plugin for IDA Pro
 
 GhidraDec: Ghidra decompiler plugin for Hex-Rays IDA (Interactive DisAssembler) Pro

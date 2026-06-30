@@ -1120,6 +1120,7 @@ class RdGlobalInfo
 		std::string pluginBuildDate        = retdec::utils::getCurrentDate();
 		addon_info_t pluginInfo; ///< Plugin (addon) information showed in the About box.
 		int pluginRegNumber         = -1;
+		int pluginIconId            = -1;
 
 	// General information common for all decompilations or viewers.
 	//

@@ -456,12 +456,12 @@ bool pluginConfigurationMenu(RdGlobalInfo& rdgi)
  */
 bool addConfigurationMenuOption(RdGlobalInfo& rdgi)
 {
-	char optionsActionName[] = "ghidradec:ShowOptions";
-	char optionsActionLabel[] = "GhidraDec plugin options...";
+	static const char optionsActionName[] = "ghidradec:ShowOptions";
+	static const char optionsActionLabel[] = "GhidraDec plugin options...";
 
 	static show_options_ah_t show_options_ah(&rdgi);
 
-	static const action_desc_t desc = ACTION_DESC_LITERAL_PLUGMOD(
+	action_desc_t desc = ACTION_DESC_LITERAL_PLUGMOD(
 			optionsActionName,
 			optionsActionLabel,
 			&show_options_ah,
@@ -469,6 +469,10 @@ bool addConfigurationMenuOption(RdGlobalInfo& rdgi)
 			nullptr,
 			NULL,
 			-1);
+	if (rdgi.pluginIconId >= 0)
+	{
+		desc.icon = rdgi.pluginIconId;
+	}
 
 	if (!register_action(desc)
 			|| !attach_action_to_menu(

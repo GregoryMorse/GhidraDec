@@ -23,7 +23,7 @@ namespace idaplugin {
 		/**
 		 * General info used by plugin.
 		 */
-		RdGlobalInfo* decompInfo;
+		RdGlobalInfo* decompInfo = nullptr;
 		ea_t globalAddress = 0;
 
 		void killDecompilation(bool bTerminate);
