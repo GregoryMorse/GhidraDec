@@ -33,6 +33,11 @@ const std::string JSON_numChars = "numChars";
 const std::string JSON_comStyle = "comStyle";
 const std::string JSON_intFormat = "intFormat";
 
+Json::Value jsonSval(sval_t value)
+{
+	return Json::Value(static_cast<Json::LargestInt>(value));
+}
+
 void applyEnvironmentConfig(idaplugin::RdGlobalInfo& rdgi)
 {
 	if (rdgi.ghidraPath.empty())
@@ -193,14 +198,14 @@ void saveConfigTofile(RdGlobalInfo& rdgi)
 
 	root[JSON_ghidraPath] = rdgi.ghidraPath;
 	root[JSON_viewFeatures] = rdgi.viewFeatures;
-	root[JSON_cacheSize] = rdgi.cacheSize;
-	root[JSON_maxPayload] = rdgi.maxPayload;
-	root[JSON_timeout] = rdgi.timeout;
-	root[JSON_cmtLevel] = rdgi.cmtLevel;
+	root[JSON_cacheSize] = jsonSval(rdgi.cacheSize);
+	root[JSON_maxPayload] = jsonSval(rdgi.maxPayload);
+	root[JSON_timeout] = jsonSval(rdgi.timeout);
+	root[JSON_cmtLevel] = jsonSval(rdgi.cmtLevel);
 	root[JSON_alysChecks] = rdgi.alysChecks;
 	root[JSON_dispChecks] = rdgi.dispChecks;
-	root[JSON_maxChars] = rdgi.maxChars;
-	root[JSON_numChars] = rdgi.numChars;
+	root[JSON_maxChars] = jsonSval(rdgi.maxChars);
+	root[JSON_numChars] = jsonSval(rdgi.numChars);
 	root[JSON_comStyle] = rdgi.comStyle;
 	root[JSON_intFormat] = rdgi.intFormat;
 
