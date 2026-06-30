@@ -723,6 +723,13 @@ bool GhidraDec::canDecompileInput()
 						decompInfo->outputFile = outputFileEnv.c_str();
 					else
 						decompInfo->outputFile = decompInfo->inputPath + ".c";
+					qstring timeoutEnv;
+					if (qgetenv("GHIDRADEC_TEST_TIMEOUT", &timeoutEnv)) {
+						char* end = nullptr;
+						long requestedTimeout = std::strtol(timeoutEnv.c_str(), &end, 10);
+						if (end != timeoutEnv.c_str() && requestedTimeout > 0)
+							decompInfo->timeout = (sval_t)requestedTimeout;
+					}
 					decompInfo->setIsUseThreads(runAsyncRegression);
 					decompInfo->skipParamIdentification = skipRegressionParamId;
 					decompInfo->suppressViewer = true;

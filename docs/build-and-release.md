@@ -11,9 +11,9 @@ those encrypted files.
 
 ## Local Build
 
-```powershell
-pwsh tools/build.ps1 -IdaVersion 9.3
-pwsh tools/build.ps1 -IdaVersion latest
+```bash
+python tools/build.py --ida-version 9.3
+python tools/build.py --ida-version latest
 ```
 
 The helper downloads/extracts public SDKs into `.idasdks` and then configures

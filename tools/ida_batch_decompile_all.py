@@ -171,7 +171,7 @@ def wait_for_output(output_path, start_time, timeout_seconds, stable_polls, min_
                 stable_count = 1
                 last_size = size
             if stable_count >= stable_polls:
-                log("PASS: decompile-all output is {} bytes".format(size))
+                log("Output ready: decompile output is {} bytes".format(size))
                 ida_pro.qexit(0)
                 return
 
@@ -236,7 +236,7 @@ def main():
         run_plugin(plugin_argument)
         ready, size = output_ready(output_path, start_time, min_bytes)
         if ready and stable_polls <= 1:
-            log("PASS: decompile-all output is {} bytes".format(size))
+            log("Output ready: decompile output is {} bytes".format(size))
             ida_pro.qexit(0)
             return
 

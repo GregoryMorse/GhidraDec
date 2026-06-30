@@ -43,7 +43,19 @@ DEFAULT_FAILURE_PATTERNS = (
     "[GhidraDec error]",
     "Low-level Error:",
     "Unhandled exception:",
+    "Caught decompilation error:",
     "[ghidradec-batch] FAIL:",
+)
+GRACEFUL_FAILURE_PATTERNS = (
+    "Caught decompilation error:",
+    "Low-level Error:",
+    "[GhidraDec error]",
+)
+DANGEROUS_FAILURE_PATTERNS = (
+    "Unhandled exception:",
+    "access violation",
+    "crash",
+    "minidump",
 )
 
 
@@ -197,21 +209,57 @@ def run_ida(args: argparse.Namespace, ida_args: list[str], env: dict[str, str], 
         raise
 
 
-def scan_failure_patterns(args: argparse.Namespace, log_path: Path) -> bool:
+def find_failure_pattern(args: argparse.Namespace, log_path: Path) -> str | None:
     if not log_path.exists():
-        return False
+        return None
     patterns = []
     if not args.no_default_fail_log_patterns:
         patterns.extend(DEFAULT_FAILURE_PATTERNS)
     patterns.extend(args.fail_log_pattern or [])
     if not patterns:
-        return False
+        return None
     text = log_path.read_text(encoding="utf-8", errors="replace")
     for pattern in patterns:
         if pattern in text:
-            print(f"[ghidradec-batch] FAIL: log contains failure pattern: {pattern}", file=sys.stderr)
-            return True
+            return pattern
+    return None
+
+
+def scan_failure_patterns(args: argparse.Namespace, log_path: Path) -> bool:
+    pattern = find_failure_pattern(args, log_path)
+    if pattern is not None:
+        print(f"[ghidradec-batch] FAIL: log contains failure pattern: {pattern}", file=sys.stderr)
+        return True
     return False
+
+
+def read_text_if_exists(path: Path, max_bytes: int = 256 * 1024) -> str:
+    if not path.exists():
+        return ""
+    with path.open("rb") as handle:
+        data = handle.read(max_bytes)
+    return data.decode("utf-8", errors="replace")
+
+
+def classify_run_result(exit_code: int, log_path: Path, output_path: Path) -> tuple[str, str]:
+    if exit_code == 0:
+        return "success", ""
+
+    log_text = read_text_if_exists(log_path)
+    output_text = read_text_if_exists(output_path)
+    combined = log_text + "\n" + output_text
+    for pattern in GRACEFUL_FAILURE_PATTERNS:
+        if pattern in combined:
+            return "graceful_fail", pattern
+    lowered = combined.lower()
+    for pattern in DANGEROUS_FAILURE_PATTERNS:
+        if pattern.lower() in lowered:
+            return "dangerous_fail", pattern
+    if exit_code == 124:
+        return "dangerous_fail", "IDA process timeout"
+    if not output_path.exists():
+        return "dangerous_fail", "output was not created"
+    return "dangerous_fail", f"exit code {exit_code}"
 
 
 def validate_output(args: argparse.Namespace, output_path: Path) -> bool:
@@ -343,7 +391,7 @@ def run_individual_functions(args: argparse.Namespace, input_path: Path) -> int:
     output_dir = case_dir / "individual"
     output_dir.mkdir(parents=True, exist_ok=True)
     summary = []
-    failures = 0
+    counts = {"success": 0, "graceful_fail": 0, "dangerous_fail": 0}
     for index, function in enumerate(selected, start=start):
         ea = int(function["ea"])
         ea_hex = f"0x{ea:x}"
@@ -353,19 +401,26 @@ def run_individual_functions(args: argparse.Namespace, input_path: Path) -> int:
         protocol_path = output_dir / f"{stem}.protocol.log"
         log_name = f"individual/{stem}.log"
         print(f"[ghidradec-batch] individual {index + 1}/{len(functions)} {name} @ {ea_hex}")
-        code = run_one(
-            args,
-            input_path,
-            extra_env={"GHIDRADEC_BATCH_SELECT_EA": ea_hex},
-            output_path_override=output_path,
-            protocol_log_override=protocol_path,
-            log_name=log_name,
-            plugin_arg_override=4,
-        )
+        original_min_output_bytes = args.min_output_bytes
+        args.min_output_bytes = args.individual_min_output_bytes
+        try:
+            code = run_one(
+                args,
+                input_path,
+                extra_env={"GHIDRADEC_BATCH_SELECT_EA": ea_hex},
+                output_path_override=output_path,
+                protocol_log_override=protocol_path,
+                log_name=log_name,
+                plugin_arg_override=4,
+            )
+        finally:
+            args.min_output_bytes = original_min_output_bytes
         size = output_path.stat().st_size if output_path.exists() else 0
-        passed = code == 0
+        outcome, reason = classify_run_result(code, case_dir / log_name, output_path)
+        counts[outcome] += 1
+        passed = outcome == "success"
         if not passed:
-            failures += 1
+            print(f"[ghidradec-batch] {outcome}: {name} @ {ea_hex}: {reason}", file=sys.stderr)
         summary.append({
             "ea": ea,
             "ea_hex": ea_hex,
@@ -374,6 +429,8 @@ def run_individual_functions(args: argparse.Namespace, input_path: Path) -> int:
             "protocol_log": str(protocol_path),
             "log": str(case_dir / log_name),
             "exit_code": code,
+            "outcome": outcome,
+            "reason": reason,
             "output_bytes": size,
             "passed": passed,
         })
@@ -383,15 +440,19 @@ def run_individual_functions(args: argparse.Namespace, input_path: Path) -> int:
         "input": str(input_path),
         "total_functions": len(functions),
         "selected_functions": len(selected),
-        "passed": len(selected) - failures,
-        "failed": failures,
+        "passed": counts["success"],
+        "failed": counts["graceful_fail"] + counts["dangerous_fail"],
+        "success": counts["success"],
+        "graceful_fail": counts["graceful_fail"],
+        "dangerous_fail": counts["dangerous_fail"],
         "results": summary,
     }, indent=2, sort_keys=True), encoding="utf-8")
     print(
-        f"[ghidradec-batch] individual summary: {len(selected) - failures}/{len(selected)} passed; "
+        f"[ghidradec-batch] individual summary: {counts['success']}/{len(selected)} success, "
+        f"{counts['graceful_fail']} graceful_fail, {counts['dangerous_fail']} dangerous_fail; "
         f"{summary_path}"
     )
-    return 1 if failures else 0
+    return 1 if counts["graceful_fail"] or counts["dangerous_fail"] else 0
 
 
 def expand_inputs(values: list[str]) -> list[Path]:
@@ -435,6 +496,7 @@ def main() -> int:
     parser.add_argument("--launch-grace-seconds", type=int, default=30)
     parser.add_argument("--stable-polls", type=int, default=3)
     parser.add_argument("--min-output-bytes", type=int, default=64)
+    parser.add_argument("--individual-min-output-bytes", type=int, default=1)
     parser.add_argument("--save-database", action="store_true", help="Save the analyzed IDB/I64 before decompiling")
     parser.add_argument("--save-idb", help="Explicit save path for a single input database")
     parser.add_argument("--refresh", action="store_true", help="Refresh copied inputs in the work directory")

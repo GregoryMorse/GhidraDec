@@ -515,10 +515,15 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 			//paging strategy for easy lookup - just like the processor utilizes
 			bool bFetch = false;
+			qstring batchOutputEnv;
+			const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
 			unsigned long long page = addr.offset & (~(CACHEPAGESIZE - 1)),
+				firstPage = page,
 				pgoffs = addr.offset & (CACHEPAGESIZE - 1);
 			do {
 				if (byteCache.find((ea_t)page) == byteCache.end()) {
+					if (batchOutput && page != firstPage)
+						break;
 					bFetch = true;
 					break;
 				}
@@ -4092,8 +4097,17 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 		}
 		if (!bSucc) {
 			di->decompSuccess = false;
-			if (!di->outputFile.empty())
+			qstring batchOutputEnv;
+			const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
+			if (batchOutput && !code.empty() && !di->outputFile.empty()) {
+				code += "\n";
+				FILE* fp = qfopen(di->outputFile.c_str(), "wb");
+				qfwrite(fp, code.c_str(), code.size());
+				qfclose(fp);
 				di->outputFile.clear();
+			} else if (!di->outputFile.empty()) {
+				di->outputFile.clear();
+			}
 			return;
 		}
 		INFO_MSG("Decompilation completed: " << di->idacb->allFuncNames[di->decompiledFunction->start_ea] << " in " << std::dec << (time(NULL) - startTime) << " seconds\n");

@@ -71,8 +71,8 @@ Do not commit machine-specific paths. Use environment variables, MSBuild propert
   * `git clone https://github.com/GregoryMorse/GhidraDec.git`
 * Local manifest-driven build:
   * `cd ghidradec`
-  * `pwsh tools/build.ps1 -IdaVersion 9.3`
-  * Use `-IdaVersion latest` to build against the moving Hex-Rays `ida-sdk` master branch.
+  * `python tools/build.py --ida-version 9.3`
+  * Use `--ida-version latest` to build against the moving Hex-Rays `ida-sdk` master branch.
 * Manual CMake:
   * `python tools/ida_sdk.py ensure --version 9.3`
   * `python tools/deps.py ensure-ghidra-sources`
