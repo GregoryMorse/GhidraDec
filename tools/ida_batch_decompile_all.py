@@ -10,8 +10,10 @@ import ida_loader
 import ida_nalt
 import ida_pro
 
-
-STATE = None
+try:
+    from PySide6 import QtCore
+except Exception:
+    QtCore = None
 
 
 def log(message):
@@ -78,42 +80,41 @@ def run_plugin(argument):
     fail("Could not load/run plugin candidates: {}".format(", ".join(plugin_names())), 6)
 
 
-def start_output_poll(output_path, start_time, timeout_seconds, stable_polls, min_bytes):
-    global STATE
-    STATE = {
-        "output_path": output_path,
-        "start_time": start_time,
-        "timeout_seconds": timeout_seconds,
-        "stable_polls": stable_polls,
-        "min_bytes": min_bytes,
-        "last_size": -1,
-        "stable_count": 0,
-    }
+def pump_ui_events():
+    if QtCore is not None:
+        QtCore.QCoreApplication.processEvents(QtCore.QEventLoop.AllEvents, 100)
+    time.sleep(0.05)
 
-    def poll():
-        state = STATE
-        ready, size = output_ready(state["output_path"], state["start_time"], state["min_bytes"])
+
+def wait_for_output(output_path, start_time, timeout_seconds, stable_polls, min_bytes):
+    last_size = -1
+    stable_count = 0
+    last_log_second = -1
+    while True:
+        pump_ui_events()
+        ready, size = output_ready(output_path, start_time, min_bytes)
         if ready:
-            if size == state["last_size"]:
-                state["stable_count"] += 1
+            if size == last_size:
+                stable_count += 1
             else:
-                state["stable_count"] = 1
-                state["last_size"] = size
-            if state["stable_count"] >= state["stable_polls"]:
+                stable_count = 1
+                last_size = size
+            if stable_count >= stable_polls:
                 log("PASS: decompile-all output is {} bytes".format(size))
                 ida_pro.qexit(0)
-                return -1
+                return
 
-        elapsed = time.time() - state["start_time"]
-        if elapsed > state["timeout_seconds"]:
+        elapsed = time.time() - start_time
+        elapsed_second = int(elapsed)
+        if elapsed_second != last_log_second and elapsed_second > 0 and elapsed_second % 30 == 0:
+            last_log_second = elapsed_second
+            log("Waiting for stable output {} ({}s elapsed)".format(output_path, elapsed_second))
+        if elapsed > timeout_seconds:
             fail(
                 "Plugin did not create stable output {} within {} seconds".format(
-                    state["output_path"], state["timeout_seconds"]),
+                    output_path, timeout_seconds),
                 7,
             )
-        return 1000
-
-    ida_kernwin.register_timer(1000, poll)
 
 
 def main():
@@ -150,7 +151,7 @@ def main():
         timeout_seconds = max(10, env_int("GHIDRADEC_BATCH_TIMEOUT", 600))
         stable_polls = max(1, env_int("GHIDRADEC_BATCH_STABLE_POLLS", 3))
         min_bytes = max(1, env_int("GHIDRADEC_BATCH_MIN_OUTPUT_BYTES", 64))
-        plugin_argument = env_int("GHIDRADEC_BATCH_PLUGIN_ARG", 1)
+        plugin_argument = env_int("GHIDRADEC_BATCH_PLUGIN_ARG", 5)
 
         start_time = time.time()
         run_plugin(plugin_argument)
@@ -160,7 +161,7 @@ def main():
             ida_pro.qexit(0)
             return
 
-        start_output_poll(output_path, start_time, timeout_seconds, stable_polls, min_bytes)
+        wait_for_output(output_path, start_time, timeout_seconds, stable_polls, min_bytes)
     except SystemExit:
         raise
     except Exception as exc:

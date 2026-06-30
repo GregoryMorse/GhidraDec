@@ -47,7 +47,9 @@ python tools/corpus.py stage \
 2. Launch IDA in batch mode with `tools/ida_batch_decompile_all.py`.
 3. Wait for IDA autoanalysis to finish.
 4. Optionally save the scanned database before plugin execution.
-5. Run the plugin with argument `1`, matching the full decompile-all command.
+5. Run the plugin with argument `5`, the unattended full decompile-all
+   regression command. This keeps the decompiler worker thread enabled for
+   IDA callback dispatch and skips parameter identification by default.
 6. Wait for a stable C output file and fail if it is missing, tiny, or late.
 
 `tools/ida_batch.py` drives this flow from the host:
@@ -65,6 +67,11 @@ The default work directory is `build/ida-regression`. Each input gets its own
 subdirectory containing the copied binary, IDA log, optional analyzed database,
 and GhidraDec output.
 
+By default the runner removes stale IDA sidecar databases for raw binary inputs
+before each run. Pass `--reuse-database` only when deliberately debugging a
+previously scanned database. Pass `--paramid` to include Ghidra parameter
+identification in a deeper release-certification run.
+
 On Windows, `tools/ida_batch.py` also watches IDA-owned dialogs and sends the
 default confirmation action for common startup, warning, crash, and recovery
 dialogs. This keeps IDA Pro 9.3 batch runs non-interactive while still logging
@@ -72,12 +79,18 @@ which dialogs were handled.
 
 ## CI Shape
 
-Default CI should keep using a very small smoke set. Larger corpus runs should
-be manual or scheduled:
+Public GitHub-hosted CI is compile/package-only. It can stage public corpora and
+eventually run standalone Ghidra interface tests, but it must not launch IDA Pro
+because IDA requires a licensed install, user-specific configuration, and GUI
+dialog handling on some platforms.
 
-* default: one or two tiny binaries for the latest official IDA SDK.
-* manual corpus run: `.github/workflows/ida-regression.yml` on a self-hosted
-  runner with IDA Pro 9.3 installed.
+IDA-backed corpus runs should be manual or scheduled on a private licensed
+machine outside GitHub-hosted CI:
+
+* default public CI: build and package the latest official IDA SDK target,
+  currently 9.3.
+* manual corpus run: execute `tools/ida_batch.py` locally or from private CI
+  with IDA Pro 9.3 installed and licensed.
 * scheduled corpus run: broader public corpus sweep with artifacts retained for
   failing cases only.
 

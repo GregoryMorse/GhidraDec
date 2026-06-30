@@ -109,35 +109,14 @@ At runtime, set `GHIDRA_INSTALL_DIR` before launching x64dbg.
 
 ### IDA 9.3 smoke test
 
-The old `tests/ida93` harness is kept for local reference. New corpus-scale
-testing should use the batch runner described in
-`docs/ida-regression-testing.md`.
-The first supported corpus lane stages pinned `angr/binaries` samples in
-x86_64, x86_32, then x86_16 order and runs IDA Pro 9.3 decompile-all in batch
-mode with dialog automation.
+The old `tests/ida93` harness is kept only as local historical reference. New
+corpus-scale testing should use the batch runner described in
+`docs/ida-regression-testing.md`. The first supported corpus lane stages pinned
+`angr/binaries` samples in x86_64, x86_32, then x86_16 order and runs IDA Pro
+9.3 decompile-all in batch mode with dialog automation.
 
-The IDA smoke test runs IDA in batch mode, marks one or more functions with the plugin's internal `<ghidradec_select>` regression marker, invokes the plugin with argument `4`, and verifies that a C output file was produced. It uses IDC by default, so IDAPython is not required.
-
-```
-powershell -ExecutionPolicy Bypass -File tests\ida93\run_ida93_smoke.ps1 `
-  -IdaDir "C:\Program Files\IDA Professional 9.3" `
-  -Database "" `
-  -GhidraDir "C:\Users\Gregory\Desktop\Apps\ghidra_12.1.2_PUBLIC" `
-  -MaxFunctions 1
-```
-
-The runner copies the IDA database and input binary into `tests\ida93\work`, invokes the installed plugin by name, and writes the generated C output next to the copied input. Use `-RefreshWorkDatabase` to refresh the work copy. IDA must have its license accepted for batch mode before this can run; otherwise `idat.exe` exits before the IDC script starts.
-
-By default the smoke test invokes the installed plugin by name (`ghidradec64`) to avoid loading two copies of the DLL into one IDA process. Use `-InstallUserPlugin` to copy the current `x64\Release\ghidradec64.dll` to `%APPDATA%\Hex-Rays\IDA Pro\plugins`, or `-UseAbsolutePluginPath` only when deliberately testing absolute-path plugin loading.
-
-For crash diagnosis, enable local dumps and optionally run the same smoke script through GUI IDA:
-
-```
-powershell -ExecutionPolicy Bypass -File Tests\ida93\run_ida93_smoke.ps1 `
-  -EnableCrashDumps -Gui -GuiSendEnterSeconds 10
-```
-
-Crash dumps are written to `Tests\ida93\work\dumps`. GUI automation is intentionally limited to sending Enter for startup dialogs; the actual decompilation is still driven by IDC so the test remains reproducible.
+Public GitHub-hosted CI is compile/package-only. IDA-backed regression runs
+belong on a licensed self-hosted runner or local release-certification machine.
 
 ### IDA Installation and Configuration for Windows
 The Windows version of the plugin requires Windows 7 or later, with the MSVC 2015 runtime installed.

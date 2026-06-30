@@ -12,6 +12,7 @@
 
 #define _CRT_SECURE_NO_WARNINGS
 #include <algorithm>
+#include <cstring>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -64,6 +65,90 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		std::ostringstream oss;
 		oss << f << t;
 		return oss.str();
+	}
+
+	bool startsWith(const std::string& value, const char* prefix)
+	{
+		const size_t len = std::strlen(prefix);
+		return value.size() >= len && value.compare(0, len, prefix) == 0;
+	}
+
+	bool isRuntimeOrLoaderFunctionName(const std::string& name)
+	{
+		if (name.empty()) return false;
+		if (name[0] == '.') return true;
+		static const char* const prefixes[] = {
+			"__libc_csu_",
+			"__do_global_",
+			"__x86.get_pc_thunk",
+			"__x86_",
+			"j_",
+			"nullsub_",
+		};
+		for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+			if (startsWith(name, prefixes[i])) return true;
+		}
+		static const char* const exact[] = {
+			"_start",
+			"_init",
+			"_fini",
+			"call_gmon_start",
+			"frame_dummy",
+			"deregister_tm_clones",
+			"register_tm_clones",
+			"__do_global_dtors_aux",
+			"__do_global_ctors_aux",
+			"__libc_start_main",
+			"__stack_chk_fail",
+		};
+		for (size_t i = 0; i < sizeof(exact) / sizeof(exact[0]); i++) {
+			if (name == exact[i]) return true;
+		}
+		return false;
+	}
+
+	bool shouldSkipAllDecompilationFunction(IdaCallback* cb, func_t* f, const std::string& name, std::string& reason)
+	{
+		if (f == nullptr) {
+			reason = "missing function metadata";
+			return true;
+		}
+		if (cb->imports.find(f->start_ea) != cb->imports.end()) {
+			reason = "import";
+			return true;
+		}
+		if ((f->flags & FUNC_LIB) != 0) {
+			reason = "library function";
+			return true;
+		}
+		if ((f->flags & FUNC_THUNK) != 0) {
+			reason = "thunk";
+			return true;
+		}
+		if (f->end_ea <= f->start_ea) {
+			reason = "empty range";
+			return true;
+		}
+		if (isRuntimeOrLoaderFunctionName(name)) {
+			reason = "runtime or loader helper";
+			return true;
+		}
+		return false;
+	}
+
+	std::vector<RangeInfo> getFunctionRanges(func_t* f, const std::string& space)
+	{
+		std::vector<RangeInfo> ranges;
+		if (f == nullptr) return ranges;
+		rangeset_t rangeset;
+		if (get_func_ranges(&rangeset, f) != BADADDR) {
+			for (rangeset_t::iterator it = rangeset.begin(); it != rangeset.end(); it++) {
+				if (it->end_ea > it->start_ea) {
+					ranges.push_back(RangeInfo{ space, it->start_ea, it->end_ea - 1 });
+				}
+			}
+		}
+		return ranges;
 	}
 
 	struct FrameMemberInfo
@@ -370,6 +455,42 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 #define CACHEPAGESIZE 4096ull
 #define CACHELIMIT 128
 #define CACHECLEANUPAFTER 256
+	void preloadByteCachePage(IdaCallback* cb, ea_t page)
+	{
+		if (cb->byteCache.find(page) != cb->byteCache.end() &&
+			cb->byteCache[page].second.size() >= CACHEPAGESIZE)
+			return;
+		std::vector<unsigned short>& bytes = cb->byteCache[page].second;
+		bytes.clear();
+		bytes.reserve(CACHEPAGESIZE);
+		for (int i = 0; i < CACHEPAGESIZE; i++)
+			bytes.push_back(is_loaded(page + i) ? get_byte(page + i) : 256);
+		cb->byteCache[page].first = cb->cacheCount++;
+	}
+	void preloadByteCacheRange(IdaCallback* cb, ea_t begin, ea_t end)
+	{
+		if (end <= begin)
+			return;
+		ea_t page = begin & (~(CACHEPAGESIZE - 1));
+		ea_t lastPage = (end - 1) & (~(CACHEPAGESIZE - 1));
+		while (page <= lastPage) {
+			preloadByteCachePage(cb, page);
+			if (lastPage - page < CACHEPAGESIZE)
+				break;
+			page += CACHEPAGESIZE;
+		}
+	}
+	void preloadFunctionByteCache(IdaCallback* cb)
+	{
+		for (std::map<ea_t, std::vector<RangeInfo>>::iterator it = cb->allFuncRanges.begin();
+			it != cb->allFuncRanges.end(); ++it) {
+			for (std::vector<RangeInfo>::iterator range = it->second.begin();
+				range != it->second.end(); ++range) {
+				if (range->space == "ram")
+					preloadByteCacheRange(cb, (ea_t)range->beginoffset, (ea_t)(range->endoffset + 1));
+			}
+		}
+	}
 	int IdaCallback::getBytes(unsigned char* ptr, int size, AddrInfo addr)
 	{
 		int i = 0;
@@ -402,14 +523,26 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				});
 			page = addr.offset & (~(CACHEPAGESIZE - 1));
 			pgoffs = addr.offset & (CACHEPAGESIZE - 1);
-			byteCache[(ea_t)page].first = cacheCount++;
+			std::map<ea_t, std::pair<unsigned long long, std::vector<unsigned short>>>::iterator cacheIt =
+				byteCache.find((ea_t)page);
+			if (cacheIt == byteCache.end() || cacheIt->second.second.size() < CACHEPAGESIZE) {
+				protocolRecorder("getBytes cacheMissAfterFetch addr=\"ram:0x" +
+					to_string(addr.offset, std::hex) + "\" size=\"" +
+					std::to_string(size) + "\"", true);
+				memset(ptr, 0, size);
+				return 0;
+			}
+			cacheIt->second.first = cacheCount++;
 			for (i = 0; i < size; i++) {
 				if (pgoffs == CACHEPAGESIZE) {
 					page += CACHEPAGESIZE;
 					pgoffs = 0;
-					byteCache[(ea_t)page].first = cacheCount++;
+					cacheIt = byteCache.find((ea_t)page);
+					if (cacheIt == byteCache.end() || cacheIt->second.second.size() < CACHEPAGESIZE)
+						break;
+					cacheIt->second.first = cacheCount++;
 				}
-				if ((byteCache[(ea_t)page].second[(size_t)pgoffs] & 256) == 0) ptr[i] = (unsigned char)byteCache[(ea_t)page].second[(size_t)pgoffs];
+				if ((cacheIt->second.second[(size_t)pgoffs] & 256) == 0) ptr[i] = (unsigned char)cacheIt->second.second[(size_t)pgoffs];
 				else break; //could do something like 0x90 for NOP on x86 - but could be data request
 				pgoffs++;
 			}
@@ -712,10 +845,53 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	}
 	void IdaCallback::getMappedSymbol(AddrInfo addr, MappedSymbolInfo& msi)
 	{
+		msi.kind = KIND_HOLE;
+		msi.ranges.clear();
+		if (addr.space != "ram")
+			return;
+		for (std::map<ea_t, std::vector<RangeInfo>>::iterator it = allFuncRanges.begin();
+			it != allFuncRanges.end(); ++it) {
+			for (std::vector<RangeInfo>::iterator range = it->second.begin();
+				range != it->second.end(); ++range) {
+				if (range->space == addr.space &&
+					addr.offset >= range->beginoffset &&
+					addr.offset <= range->endoffset) {
+					msi.kind = KIND_FUNCTION;
+					msi.entryPoint = it->first;
+					msi.ranges = it->second;
+					msi.size = range->endoffset - range->beginoffset + 1;
+					std::map<ea_t, std::string>::iterator knownName = allFuncNames.find(it->first);
+					if (knownName != allFuncNames.end())
+						msi.name = knownName->second;
+					else
+						msi.name = "sub_" + to_string((unsigned long long)it->first, std::hex);
+					return;
+				}
+			}
+		}
+		if (di->skipParamIdentification && !di->outputFile.empty()) {
+			std::map<ea_t, ImportInfo>::iterator imp = imports.find((ea_t)addr.offset);
+			if (imp != imports.end()) {
+				usedImports[(ea_t)addr.offset] = true;
+				msi.kind = KIND_EXTERNALREFERENCE;
+				msi.entryPoint = addr.offset;
+				msi.name = imp->second.name.empty() ?
+					("imp_" + to_string(addr.offset, std::hex)) : imp->second.name;
+			} else {
+				msi.kind = KIND_HOLE;
+				msi.readonly = false;
+				msi.volatil = false;
+			}
+			return;
+		}
 		executeOnMainThread([this, &msi, addr]() {
 			msi.kind = KIND_HOLE;
 			msi.ranges.clear();
 			if (addr.space == "register") {} else if (addr.space == "ram") {
+				const ea_t ea = (ea_t)addr.offset;
+				const bool knownFunctionEntry =
+					definedFuncs.find(ea) != definedFuncs.end() ||
+					allFuncNames.find(ea) != allFuncNames.end();
 				if (imports.find((ea_t)addr.offset) != imports.end()) {
 					usedImports[(ea_t)addr.offset] = true;
 					//Ghidra currently has 2 bugs one with restoring CS register if not simulating same segment fixups and the other calling back for external ref function info
@@ -724,7 +900,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					else
 						msi.kind = KIND_EXTERNALREFERENCE;
 				} else {
-					if (get_func((ea_t)addr.offset) != nullptr) {
+					if (knownFunctionEntry || get_func((ea_t)addr.offset) != nullptr) {
 						msi.kind = KIND_FUNCTION;
 					} else {
 						auto fl = get_flags((ea_t)addr.offset);
@@ -786,14 +962,11 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				func_t* f = get_func((ea_t)addr.offset);
 				msi.entryPoint = (f != nullptr) ? f->start_ea : addr.offset;
 				if (f != nullptr) {
-					rangeset_t rangeset;
-					if (get_func_ranges(&rangeset, f) != BADADDR) {
-						for (rangeset_t::iterator it = rangeset.begin(); it != rangeset.end(); it++) {
-							if (it->end_ea > it->start_ea) {
-								msi.ranges.push_back(RangeInfo{ addr.space, it->start_ea, it->end_ea - 1 });
-							}
-						}
-					}
+					msi.ranges = getFunctionRanges(f, addr.space);
+				} else {
+					std::map<ea_t, std::vector<RangeInfo>>::iterator ranges = allFuncRanges.find((ea_t)msi.entryPoint);
+					if (ranges != allFuncRanges.end())
+						msi.ranges = ranges->second;
 				}
 				if (msi.entryPoint == addr.offset) {
 					if (f != nullptr) {
@@ -803,17 +976,49 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 						//*size = f->size();
 						msi.size = msi.ranges.empty() ? f->size() :
 							msi.ranges.begin()->endoffset - msi.ranges.begin()->beginoffset + 1;
-					} else msi.size = 1; //Ghidra uses 1 always despite its commentary
+					} else {
+						msi.size = msi.ranges.empty() ? 1 :
+							msi.ranges.begin()->endoffset - msi.ranges.begin()->beginoffset + 1;
+					}
 					if (funcProtoInfos.find((ea_t)msi.entryPoint) != funcProtoInfos.end()) {
 						msi.name = funcProtoInfos[(ea_t)msi.entryPoint].name;
 						msi.func = funcProtoInfos[(ea_t)msi.entryPoint].fpi;
 					} else {
+						std::map<ea_t, std::string>::iterator knownName = allFuncNames.find((ea_t)msi.entryPoint);
+						if (knownName != allFuncNames.end())
+							msi.name = knownName->second;
 						getFuncInfo(addr, f, msi.name, msi.func);
 						funcProtoInfos[(ea_t)msi.entryPoint] = FuncInfo{ msi.name.c_str(), false, msi.func };
 					}
 				}
 			}
 		});
+		if (msi.kind == KIND_HOLE && addr.space == "ram") {
+			std::map<ea_t, std::string>::iterator knownName = allFuncNames.find((ea_t)addr.offset);
+			if (knownName != allFuncNames.end()) {
+				msi.kind = KIND_FUNCTION;
+				msi.entryPoint = addr.offset;
+				msi.name = knownName->second;
+				std::map<ea_t, std::vector<RangeInfo>>::iterator ranges = allFuncRanges.find((ea_t)addr.offset);
+				if (ranges != allFuncRanges.end())
+					msi.ranges = ranges->second;
+				msi.size = msi.ranges.empty() ? 1 :
+					msi.ranges.begin()->endoffset - msi.ranges.begin()->beginoffset + 1;
+			}
+		}
+		if (addr.space == "ram" && addr.offset >= 0x400000 && addr.offset < 0x401000) {
+			std::string keys;
+			for (std::map<ea_t, std::string>::iterator it = allFuncNames.begin();
+				it != allFuncNames.end(); ++it) {
+				if (!keys.empty()) keys += ",";
+				keys += "0x" + to_string((unsigned long long)it->first, std::hex);
+			}
+			protocolRecorder("mappedSymbolState addr=\"ram:0x" + to_string(addr.offset, std::hex) +
+				"\" kind=\"" + std::to_string(msi.kind) +
+				"\" definedFuncs=\"" + std::to_string(definedFuncs.size()) +
+				"\" allFuncNames=\"" + std::to_string(allFuncNames.size()) +
+				"\" keys=\"" + keys + "\"", true);
+		}
 	}
 	void IdaCallback::getFuncTypeInfo(const tinfo_t & ti, bool paramOnly, FuncProtoInfo& func)
 	{
@@ -2713,28 +2918,29 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	};
 	void IdaCallback::executeOnMainThread(std::function<void()> fun)
 	{
-		//qsemaphore_t finishSem = qsem_create(nullptr, 0);
-		execFunctor* ef = new execFunctor(fun, di->termSem, &di->uiExecutingTask);
+		qsemaphore_t finishSem = qsem_create(nullptr, 0);
+		execFunctor* ef = new execFunctor(fun, finishSem, &di->uiExecutingTask);
 		//int id = execute_sync(a, MFF_READ);
 		{ //must be a locked unit otherwise race condition can occur
 			qmutex_locker_t lock(di->qm);
-			if (di->exiting) return;
-			di->uiExecutingTask = static_cast<int>(execute_sync(*ef, MFF_NOWAIT));// | MFF_READ);
+			if (di->exiting) {
+				qsem_free(finishSem);
+				delete ef;
+				return;
+			}
+			di->uiExecutingTask = static_cast<int>(execute_sync(*ef, MFF_NOWAIT | MFF_READ));
 		}
-		//int idx = -1;
-		//qhandle_t handles[2] = { finishSem, di->termSem };
-		//while (qwait_for_handles(&idx, handles, 2, 0, -1), idx == -1) {
-		/*while (!qsem_wait(finishSem, 50)) {
+		while (!qsem_wait(finishSem, 50)) {
 			if (di->exiting) {
 				di->uiExecutingTask = -1;
 				qsem_free(finishSem);
+				delete ef;
 				return;
 			}
-		}*/
-		qsem_wait(di->termSem, -1);
-		if (di->uiExecutingTask == -1) delete ef;
-		//qsem_free(finishSem);
-		//if (idx == 0) delete ef;
+		}
+		di->uiExecutingTask = -1;
+		qsem_free(finishSem);
+		delete ef;
 	}
 	void IdaCallback::init(std::string s, std::string p, std::string c)
 	{
@@ -2745,6 +2951,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		byteCache.clear();
 		allFuncs.clear();
 		allFuncNames.clear();
+		allFuncRanges.clear();
 		sregRanges.clear();
 		typeDatabase.clear();
 		exportData.clear();
@@ -2859,10 +3066,24 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				ea_t ea = get_entry(get_entry_ordinal(i)); //qstring qs; get_entry_name(&qs, i);
 				if (is_func(get_flags(ea))) {
 					entries[ea] = i;
-					allFuncs.push_back(ea);
 					qstring qs;
 					get_entry_name(&qs, get_entry_ordinal(i)); //get_func_name(&qs, ea);
-					allFuncNames[ea] = qs.c_str();
+					func_t* f = get_func(ea);
+					std::string name = qs.c_str();
+					if (name.empty()) {
+						get_func_name(&qs, ea);
+						name = qs.c_str();
+					}
+					std::string reason;
+					if (shouldSkipAllDecompilationFunction(this, f, name, reason)) {
+						allFuncNames[ea] = name;
+						allFuncRanges[ea] = getFunctionRanges(f, "ram");
+						INFO_MSG("Skipping all-decompile entry function " << name.c_str() << " @ " << std::hex << ea << ": " << reason.c_str() << "\n");
+					} else {
+						allFuncs.push_back(ea);
+						allFuncNames[ea] = name;
+						allFuncRanges[ea] = getFunctionRanges(f, "ram");
+					}
 				} else { //exported data
 					exportData[ea] = true;
 				}
@@ -2872,14 +3093,27 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				std::string disp;
 				func_t* f = getn_func(i);
 				if (entries.find(f->start_ea) != entries.end()) continue;
-				if (di->idacb->imports.find(f->start_ea) != di->idacb->imports.end()) continue;
-				allFuncs.push_back(f->start_ea);
 				qstring qs;
 				get_func_name(&qs, f->start_ea);
-				allFuncNames[f->start_ea] = qs.c_str();
+				std::string name = qs.c_str();
+				std::string reason;
+				if (shouldSkipAllDecompilationFunction(this, f, name, reason)) {
+					allFuncNames[f->start_ea] = name;
+					allFuncRanges[f->start_ea] = getFunctionRanges(f, "ram");
+					INFO_MSG("Skipping all-decompile function " << name.c_str() << " @ " << std::hex << f->start_ea << ": " << reason.c_str() << "\n");
+					continue;
+				}
+				allFuncs.push_back(f->start_ea);
+				allFuncNames[f->start_ea] = name;
+				allFuncRanges[f->start_ea] = getFunctionRanges(f, "ram");
 			}
+			preloadFunctionByteCache(this);
+			INFO_MSG("Preloaded byte cache for " << std::dec << allFuncRanges.size()
+				<< " all-decompile functions\n");
 		} else {
 			allFuncNames[di->decompiledFunction->start_ea] = get_name(di->decompiledFunction->start_ea).c_str();
+			allFuncRanges[di->decompiledFunction->start_ea] = getFunctionRanges(di->decompiledFunction, "ram");
+			preloadFunctionByteCache(this);
 		}
 	}
 	void IdaCallback::addrToArgLoc(SizedAddrInfo addr, argloc_t & al)

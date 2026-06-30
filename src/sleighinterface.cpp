@@ -283,8 +283,15 @@ public:
 // depending on the address range requested
 void CallbackLoadImage::loadFill(uint1* ptr, int4 size, const Address& addr)
 {
-	if (callback->getBytes(ptr, size,
-		AddrInfo{ addr.getSpace()->getName(), addr.getOffset() }) == 0)
+	AddrInfo request{ addr.getSpace()->getName(), addr.getOffset() };
+	callback->protocolRecorder("loadFill begin addr=\"" + request.space +
+		":0x" + to_string(request.offset, hex) + "\" size=\"" +
+		std::to_string(size) + "\"", false);
+	int loaded = callback->getBytes(ptr, size, request);
+	callback->protocolRecorder("loadFill end addr=\"" + request.space +
+		":0x" + to_string(request.offset, hex) + "\" size=\"" +
+		std::to_string(size) + "\" loaded=\"" + std::to_string(loaded) + "\"", true);
+	if (loaded == 0)
 		throw DecompError("No bytes could be loaded");
 }
 
@@ -501,6 +508,8 @@ static std::pair<std::string, std::string> getPackedPcode(Translate& trans, Addr
 	//labeldefs.clear();
 	Address address(trans.getSpaceByName(addr.space), addr.offset); // First address to translate
 
+	if (address.getSpace() == nullptr)
+		throw DecompError("No address space named " + addr.space);
 	length = trans.instructionLength(address);
 	encoder.openElement(ELEM_RESPONSE_INST);
 	encoder.writeSignedInteger(ATTRIB_OFFSET, length);
@@ -1511,12 +1520,22 @@ std::vector<uchar> DecompInterface::readResponse() {
 						}
 						std::string packed, xml;
 						try {
+							callback->protocolRecorder("query(command_getpcode translate begin addr=\"" +
+								addr.space + ":0x" + to_string(addr.offset, hex) + "\")", false);
 							std::tie(packed, xml) = getPackedPcode(*trans, addr);
+							callback->protocolRecorder("query(command_getpcode translate end addr=\"" +
+								addr.space + ":0x" + to_string(addr.offset, hex) + "\" bytes=\"" +
+								std::to_string(packed.size()) + "\")", true);
 						} catch (SleighError&) {
+							std::tie(packed, xml) = getPackedUnimplementedInstruction(addr);
 						} catch (BadDataError&) {
+							std::tie(packed, xml) = getPackedUnimplementedInstruction(addr);
 						} catch (UnimplError&) {
+							std::tie(packed, xml) = getPackedUnimplementedInstruction(addr);
 						} catch (LowlevelError&) {
+							std::tie(packed, xml) = getPackedUnimplementedInstruction(addr);
 						} catch (DecompError&) {
+							std::tie(packed, xml) = getPackedUnimplementedInstruction(addr);
 						}
 						write(query_response_start, sizeof(query_response_start));
 						if (!packed.empty()) writeString(packed);

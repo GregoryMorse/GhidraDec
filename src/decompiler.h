@@ -57,6 +57,7 @@ namespace idaplugin {
 		std::string cspec;
 		std::vector<ea_t> allFuncs;
 		std::map<ea_t, std::string> allFuncNames;
+		std::map<ea_t, std::vector<RangeInfo>> allFuncRanges;
 		std::vector<std::vector<sreg_range_t>> sregRanges;
 		std::map<ea_t, bool> exportData;
 		std::map<std::string, std::vector<TypeInfo>> typeDatabase;

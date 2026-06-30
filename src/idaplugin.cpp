@@ -728,11 +728,27 @@ bool GhidraDec::canDecompileInput()
 			}
 		}
 		// full decompilation used in plugin's regression tests
-		// forced local decompilation + disabled threads
+		// forced regression settings; keep worker thread for callback main-thread dispatch
 		//
 		else if (arg == 5)
 		{
-			decompInfo->setIsUseThreads(false);
+			qstring skipParamIdEnv;
+			const bool skipRegressionParamId =
+				!qgetenv("GHIDRADEC_TEST_SKIP_PARAMID", &skipParamIdEnv) ||
+				std::string(skipParamIdEnv.c_str()) != "0";
+			qstring timeoutEnv;
+			decompInfo->timeout = std::max<sval_t>(decompInfo->timeout, 120);
+			if (qgetenv("GHIDRADEC_TEST_TIMEOUT", &timeoutEnv)) {
+				char* end = nullptr;
+				long requestedTimeout = std::strtol(timeoutEnv.c_str(), &end, 10);
+				if (end != timeoutEnv.c_str() && requestedTimeout > 0)
+					decompInfo->timeout = (sval_t)requestedTimeout;
+			}
+			INFO_MSG("Running unattended regression decompile-all; skip parameter identification: "
+				<< (skipRegressionParamId ? "yes" : "no")
+				<< ", timeout: " << std::dec << decompInfo->timeout << "s\n");
+			decompInfo->setIsUseThreads(true);
+			decompInfo->skipParamIdentification = skipRegressionParamId;
 			decompInfo->pm->runAllDecompilation();
 		}
 		else
