@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "corpora": [
+    {
+      "name": "angr-binaries",
+      "kind": "github-raw",
+      "repository": "angr/binaries",
+      "ref": "c113ca72dc54c2164abb1c724f0a4a075536519a",
+      "baseUrl": "https://raw.githubusercontent.com/angr/binaries/c113ca72dc54c2164abb1c724f0a4a075536519a",
+      "licenseNote": "Public upstream regression corpus. Keep only selected staged copies in build artifacts.",
+      "targets": [
+        {
+          "id": "angr-x86_64-fauxware",
+          "arch": "x86_64",
+          "tier": "smoke",
+          "path": "tests/x86_64/fauxware",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_64-test_arrays",
+          "arch": "x86_64",
+          "tier": "smoke",
+          "path": "tests/x86_64/test_arrays",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_64-test_loops",
+          "arch": "x86_64",
+          "tier": "extended",
+          "path": "tests/x86_64/test_loops",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_64-test_division",
+          "arch": "x86_64",
+          "tier": "extended",
+          "path": "tests/x86_64/test_division",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_32-fauxware",
+          "arch": "x86_32",
+          "tier": "smoke",
+          "path": "tests/i386/fauxware",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_32-test_arrays",
+          "arch": "x86_32",
+          "tier": "smoke",
+          "path": "tests/i386/test_arrays",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_32-test_loops",
+          "arch": "x86_32",
+          "tier": "extended",
+          "path": "tests/i386/test_loops",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_32-test_division",
+          "arch": "x86_32",
+          "tier": "extended",
+          "path": "tests/i386/test_division",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_16-bios-bin-elf",
+          "arch": "x86_16",
+          "tier": "smoke",
+          "path": "tests/i386/bios.bin.elf",
+          "enabled": true,
+          "notes": "BIOS-oriented x86 sample from angr. Use as the initial 16-bit lane until real-mode .COM/.BIN samples are curated."
+        },
+        {
+          "id": "angr-x86_16-hello-syscalls",
+          "arch": "x86_16",
+          "tier": "extended",
+          "path": "tests/x86/hello_syscalls",
+          "enabled": true,
+          "notes": "x86 baseline sample kept in the 16-bit expansion lane for loader/processor smoke coverage."
+        }
+      ]
+    }
+  ],
+  "orders": {
+    "x86-first": ["x86_64", "x86_32", "x86_16"]
+  }
+}

@@ -24,6 +24,23 @@ Use small, pinned, legally redistributable binaries first:
 Do not commit bulky databases or decompiler outputs. Keep corpus manifests in
 the repo and fetch/extract binaries into the build tree.
 
+`ghidradec.corpus.json` pins the initial angr corpus to commit
+`c113ca72dc54c2164abb1c724f0a4a075536519a`. The first order is:
+
+1. `x86_64`
+2. `x86_32`
+3. `x86_16`
+
+Stage the smoke tier with:
+
+```bash
+python tools/corpus.py stage \
+  --corpus angr-binaries \
+  --arch x86_64,x86_32,x86_16 \
+  --tier smoke \
+  --output-list build/corpus/angr-x86.txt
+```
+
 ## Test Flow
 
 1. Copy the target binary into an isolated work directory.
@@ -37,16 +54,21 @@ the repo and fetch/extract binaries into the build tree.
 
 ```bash
 python tools/ida_batch.py \
-  --ida /path/to/idat64 \
+  --ida-dir "/path/to/IDA Professional 9.3" \
   --ghidra-dir /path/to/ghidra \
   --save-database \
   --timeout 900 \
-  /path/to/corpus/sample
+  --input-list build/corpus/angr-x86.txt
 ```
 
 The default work directory is `build/ida-regression`. Each input gets its own
 subdirectory containing the copied binary, IDA log, optional analyzed database,
 and GhidraDec output.
+
+On Windows, `tools/ida_batch.py` also watches IDA-owned dialogs and sends the
+default confirmation action for common startup, warning, crash, and recovery
+dialogs. This keeps IDA Pro 9.3 batch runs non-interactive while still logging
+which dialogs were handled.
 
 ## CI Shape
 
@@ -54,7 +76,8 @@ Default CI should keep using a very small smoke set. Larger corpus runs should
 be manual or scheduled:
 
 * default: one or two tiny binaries for the latest official IDA SDK.
-* manual corpus run: selected architectures or corpus families.
+* manual corpus run: `.github/workflows/ida-regression.yml` on a self-hosted
+  runner with IDA Pro 9.3 installed.
 * scheduled corpus run: broader public corpus sweep with artifacts retained for
   failing cases only.
 

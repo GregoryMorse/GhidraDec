@@ -4,15 +4,45 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
+import platform
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 IDA_SCRIPT = ROOT / "tools" / "ida_batch_decompile_all.py"
+DEFAULT_IDA_93_DIRS = [
+    Path(r"C:\Program Files\IDA Professional 9.3"),
+    Path(r"C:\Program Files\IDA Pro 9.3"),
+    Path(r"C:\Program Files\IDA Free 9.3"),
+]
+WINDOW_DIALOG_PATTERNS = (
+    "license",
+    "not yet accepted",
+    "python 3 is not configured",
+    "unpacked version",
+    "restore packed",
+    "did not close properly",
+    "warning",
+    "hex-rays",
+    "ida has encountered a problem",
+    "encountered a problem",
+    "minidump",
+    "crash",
+    "access violation",
+    "application error",
+)
+DEFAULT_FAILURE_PATTERNS = (
+    "[GhidraDec error]",
+    "Low-level Error:",
+    "Unhandled exception:",
+    "[ghidradec-batch] FAIL:",
+)
 
 
 def copy_input(input_path: Path, work_dir: Path, refresh: bool) -> Path:
@@ -29,9 +59,114 @@ def default_idb_path(work_input: Path) -> Path:
     return work_input.with_suffix(work_input.suffix + ".i64")
 
 
+def case_name(input_path: Path) -> str:
+    digest = hashlib.sha1(str(input_path.resolve()).encode("utf-8")).hexdigest()[:12]
+    return f"{input_path.stem}-{digest}"
+
+
+def find_ida_executable(args: argparse.Namespace) -> Path:
+    if args.ida:
+        return Path(args.ida).resolve()
+
+    candidate_dirs = []
+    if args.ida_dir:
+        candidate_dirs.append(Path(args.ida_dir))
+    if platform.system().lower() == "windows":
+        candidate_dirs.extend(DEFAULT_IDA_93_DIRS)
+
+    names = ["idat.exe", "ida.exe"] if platform.system().lower() == "windows" else ["idat", "ida"]
+    for directory in candidate_dirs:
+        for name in names:
+            candidate = directory / name
+            if candidate.exists():
+                return candidate.resolve()
+    raise SystemExit("IDA executable was not found. Pass --ida or --ida-dir.")
+
+
+def windows_dialog_automation(process_id: int, allow_global_crash_windows: bool = True) -> None:
+    if platform.system().lower() != "windows":
+        return
+
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    enum_windows_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def get_text(hwnd, fn, size=512):
+        buffer = ctypes.create_unicode_buffer(size)
+        fn(hwnd, buffer, size)
+        return buffer.value
+
+    def callback(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+
+        hwnd_value = int(hwnd)
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        title = get_text(hwnd, user32.GetWindowTextW)
+        class_name = get_text(hwnd, user32.GetClassNameW, 256)
+        haystack = f"{title} {class_name}".lower()
+        is_dialog = class_name == "#32770"
+        matched = any(pattern in haystack for pattern in WINDOW_DIALOG_PATTERNS)
+        owned_by_ida = pid.value == process_id
+        crash_window = allow_global_crash_windows and "werfault" in haystack
+        if not ((owned_by_ida and (is_dialog or matched)) or crash_window):
+            return True
+
+        print(
+            f"[ghidradec-batch] accepting dialog hwnd=0x{hwnd_value:08x} pid={pid.value} "
+            f"class='{class_name}' title='{title}'")
+        user32.SetForegroundWindow(hwnd)
+        user32.SendMessageW(hwnd, 0x0111, 1, 0)
+        user32.PostMessageW(hwnd, 0x0100, 0x0D, 0)
+        user32.PostMessageW(hwnd, 0x0101, 0x0D, 0)
+        return True
+
+    user32.EnumWindows(enum_windows_proc(callback), 0)
+
+
+def run_ida(args: argparse.Namespace, ida_args: list[str], env: dict[str, str], case_dir: Path) -> int:
+    deadline = time.monotonic() + args.timeout + args.launch_grace_seconds
+    process = subprocess.Popen(ida_args, env=env, cwd=str(case_dir))
+    try:
+        while True:
+            exit_code = process.poll()
+            if exit_code is not None:
+                return exit_code
+            if time.monotonic() > deadline:
+                print(f"[ghidradec-batch] FAIL: IDA timed out; stopping pid {process.pid}", file=sys.stderr)
+                process.kill()
+                return 124
+            if args.dialog_automation != "off":
+                windows_dialog_automation(process.pid)
+            time.sleep(1)
+    except KeyboardInterrupt:
+        process.terminate()
+        raise
+
+
+def scan_failure_patterns(args: argparse.Namespace, log_path: Path) -> bool:
+    if not log_path.exists():
+        return False
+    patterns = []
+    if not args.no_default_fail_log_patterns:
+        patterns.extend(DEFAULT_FAILURE_PATTERNS)
+    patterns.extend(args.fail_log_pattern or [])
+    if not patterns:
+        return False
+    text = log_path.read_text(encoding="utf-8", errors="replace")
+    for pattern in patterns:
+        if pattern in text:
+            print(f"[ghidradec-batch] FAIL: log contains failure pattern: {pattern}", file=sys.stderr)
+            return True
+    return False
+
+
 def run_one(args: argparse.Namespace, input_path: Path) -> int:
     work_root = Path(args.work_dir).resolve()
-    case_dir = work_root / input_path.stem
+    case_dir = work_root / case_name(input_path)
     work_input = copy_input(input_path.resolve(), case_dir, args.refresh)
     output_path = case_dir / (work_input.name + ".c")
     idb_path = Path(args.save_idb).resolve() if args.save_idb else default_idb_path(work_input)
@@ -58,18 +193,12 @@ def run_one(args: argparse.Namespace, input_path: Path) -> int:
     ida_args.extend([f"-L{log_path}", f"-S{IDA_SCRIPT}", str(work_input)])
 
     print(f"[ghidradec-batch] {input_path} -> {case_dir}")
+    exit_code = 0
     try:
-        completed = subprocess.run(
-            ida_args,
-            env=env,
-            cwd=str(case_dir),
-            timeout=args.timeout + args.launch_grace_seconds,
-            check=False,
-        )
-        return completed.returncode
-    except subprocess.TimeoutExpired:
-        print(f"[ghidradec-batch] FAIL: IDA timed out for {input_path}", file=sys.stderr)
-        return 124
+        exit_code = run_ida(args, ida_args, env, case_dir)
+        if exit_code == 0 and scan_failure_patterns(args, log_path):
+            exit_code = 8
+        return exit_code
     finally:
         if log_path.exists() and args.print_log_tail > 0:
             lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -90,9 +219,21 @@ def expand_inputs(values: list[str]) -> list[Path]:
     return result
 
 
+def read_input_lists(paths: list[str]) -> list[str]:
+    values = []
+    for path_text in paths:
+        path = Path(path_text)
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                values.append(line)
+    return values
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ida", required=True, help="Path to idat/idat64/ida/ida64")
+    parser.add_argument("--ida", help="Path to idat/idat64/ida/ida64")
+    parser.add_argument("--ida-dir", help="IDA 9.3 installation directory; used when --ida is omitted")
     parser.add_argument("--ghidra-dir", help="Ghidra installation used by the plugin")
     parser.add_argument("--work-dir", default=str(ROOT / "build" / "ida-regression"))
     parser.add_argument("--plugin", default="ghidradec64,ghidradec")
@@ -105,11 +246,20 @@ def main() -> int:
     parser.add_argument("--save-idb", help="Explicit save path for a single input database")
     parser.add_argument("--refresh", action="store_true", help="Refresh copied inputs in the work directory")
     parser.add_argument("--no-batch", dest="batch", action="store_false")
+    parser.add_argument("--dialog-automation", choices=["auto", "off"], default="auto")
+    parser.add_argument("--fail-log-pattern", action="append", default=[], help="Additional log substring that fails a run")
+    parser.add_argument("--no-default-fail-log-patterns", action="store_true")
     parser.add_argument("--print-log-tail", type=int, default=80)
-    parser.add_argument("inputs", nargs="+")
+    parser.add_argument("--input-list", action="append", default=[], help="Newline-delimited input path list")
+    parser.add_argument("inputs", nargs="*")
     args = parser.parse_args()
 
-    ida = Path(args.ida)
+    args.inputs = read_input_lists(args.input_list) + args.inputs
+    if not args.inputs:
+        raise SystemExit("No inputs were provided.")
+
+    ida = find_ida_executable(args)
+    args.ida = str(ida)
     if not ida.exists():
         raise SystemExit(f"IDA executable was not found: {ida}")
     if not IDA_SCRIPT.exists():

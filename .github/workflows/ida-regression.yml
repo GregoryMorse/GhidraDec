@@ -1,0 +1,86 @@
+name: IDA Regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: "Self-hosted runner label with IDA Pro 9.3 installed"
+        type: string
+        default: "self-hosted"
+      corpus_arch:
+        description: "Corpus architectures in order, for example x86_64,x86_32,x86_16"
+        type: string
+        default: "x86_64,x86_32,x86_16"
+      corpus_tier:
+        description: "Corpus tier: smoke, extended, or smoke,extended"
+        type: string
+        default: "smoke"
+      ida_exe:
+        description: "Path to idat/ida. If empty, tools/ida_batch.py searches IDA 9.3 defaults."
+        type: string
+        default: ""
+      ida_dir:
+        description: "IDA 9.3 install dir, used when ida_exe is empty"
+        type: string
+        default: "C:\\Program Files\\IDA Professional 9.3"
+      ghidra_dir:
+        description: "Ghidra install dir for the plugin"
+        type: string
+        default: ""
+      plugin:
+        description: "Plugin name or absolute plugin path"
+        type: string
+        default: "ghidradec64,ghidradec"
+      save_database:
+        description: "Save scanned IDB/I64 artifacts before decompile-all"
+        type: boolean
+        default: true
+      timeout_seconds:
+        description: "Per-sample timeout"
+        type: number
+        default: 900
+
+jobs:
+  angr-x86:
+    runs-on: ${{ inputs.runner_label }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage angr corpus
+        shell: bash
+        run: |
+          python tools/corpus.py stage \
+            --corpus angr-binaries \
+            --arch "${{ inputs.corpus_arch }}" \
+            --tier "${{ inputs.corpus_tier }}" \
+            --output-list build/corpus/angr-x86.txt
+
+      - name: Run IDA decompile-all regression
+        shell: bash
+        run: |
+          args=()
+          if [[ -n "${{ inputs.ida_exe }}" ]]; then
+            args+=(--ida "${{ inputs.ida_exe }}")
+          else
+            args+=(--ida-dir "${{ inputs.ida_dir }}")
+          fi
+          if [[ -n "${{ inputs.ghidra_dir }}" ]]; then
+            args+=(--ghidra-dir "${{ inputs.ghidra_dir }}")
+          fi
+          if [[ "${{ inputs.save_database }}" == "true" ]]; then
+            args+=(--save-database)
+          fi
+          python tools/ida_batch.py \
+            "${args[@]}" \
+            --plugin "${{ inputs.plugin }}" \
+            --timeout "${{ inputs.timeout_seconds }}" \
+            --input-list build/corpus/angr-x86.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ida-regression-angr-x86
+          path: |
+            build/corpus/angr-x86.txt
+            build/ida-regression/**
+          if-no-files-found: ignore
