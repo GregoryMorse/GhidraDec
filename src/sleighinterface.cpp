@@ -241,7 +241,7 @@ uint8 hashName(const std::string& nm)
 }
 
 template <class T>
-string to_string(T t, ios_base& (__cdecl* f)(ios_base&))
+string to_string(T t, ios_base& (*f)(ios_base&))
 {
 	ostringstream oss;
 	oss << f << t;

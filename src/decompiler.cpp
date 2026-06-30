@@ -61,7 +61,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 -1, 16, sizeof(char),   -1,              -1,              -1,              -1, ph.segreg_size,
 4,                      ph.use_tbyte() ? ph.tbyte_size : 2, -1,                                 -1, -1, -1,            -1, -1 };*/
 	template <class T>
-	std::string to_string(T t, std::ios_base& (__cdecl* f)(std::ios_base&))
+	std::string to_string(T t, std::ios_base& (*f)(std::ios_base&))
 	{
 		std::ostringstream oss;
 		oss << f << t;
