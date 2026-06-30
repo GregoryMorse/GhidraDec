@@ -8,6 +8,7 @@
 #define IDAPLUGIN_DEFS_H
 
 #define _CRT_SECURE_NO_WARNINGS
+#include <cstdint>
 #include <iostream>
 #include <list>
 #include <map>

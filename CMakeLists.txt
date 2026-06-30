@@ -343,6 +343,15 @@ function(ghidradec_add_idaplugin TARGET_NAME EA_MODE IDA_LIBRARY OUTPUT_NAME)
 		$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-include>
 		$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:cstdint>
 	)
+	if(UNIX AND NOT APPLE)
+		target_compile_options(${TARGET_NAME} PRIVATE
+			$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wno-error>
+			$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wno-sign-compare>
+			$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wno-unused-function>
+			$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wno-comment>
+		)
+		set_source_files_properties(src/decompiler.cpp src/sleighinterface.cpp PROPERTIES COMPILE_OPTIONS "-O1")
+	endif()
 	if(EA_MODE EQUAL 64)
 		target_compile_definitions(${TARGET_NAME} PUBLIC __EA64__)
 	endif()

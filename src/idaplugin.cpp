@@ -15,6 +15,7 @@
  //Plugin copied to IDA Pro 7.2 plugins folder
 //conversion.h in x86 needs a fix for adding __cdecl to the ios_base return pointer format as in std::ios_base &(__cdecl* format)(std::ios_base &) = std::dec
 
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 

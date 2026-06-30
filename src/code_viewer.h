@@ -7,6 +7,7 @@
 #ifndef IDAPLUGIN_CODE_VIEWER_H
 #define IDAPLUGIN_CODE_VIEWER_H
 
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <regex>
