@@ -339,6 +339,10 @@ set(GHIDRADEC_PLUGIN_TARGETS)
 
 function(ghidradec_add_idaplugin TARGET_NAME EA_MODE IDA_LIBRARY OUTPUT_NAME)
 	add_library(${TARGET_NAME} SHARED ${IDAPLUGIN_SOURCES} ${GHIDRA_SLEIGH_SOURCES} ${GHIDRA_CORE_SOURCES} ${GHIDRA_LIBSLA_NAMES} ${GHIDRA_ZLIB_SOURCES})
+	target_compile_options(${TARGET_NAME} PRIVATE
+		$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-include>
+		$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:cstdint>
+	)
 	if(EA_MODE EQUAL 64)
 		target_compile_definitions(${TARGET_NAME} PUBLIC __EA64__)
 	endif()
