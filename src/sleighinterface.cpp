@@ -776,7 +776,7 @@ static void writeJvmSwitchOp(PackedEncode& encoder, std::string& xml, OpCode opc
 }
 
 static std::pair<std::string, std::string> getPackedJvmSwitchPcode(Translate& trans,
-	AddrInfo addr, const JvmSwitchInfo& info, uintb& uniqueBase)
+	AddrInfo addr, const JvmSwitchInfo& info, unsigned long long& uniqueBase)
 {
 	AddrSpace* ramSpace = trans.getSpaceByName(addr.space);
 	AddrSpace* registerSpace = trans.getSpaceByName("register");
@@ -4649,6 +4649,70 @@ std::string DecompInterface::getRegisterFromIndex(unsigned long long offs, int s
 }
 
 void parseTypeInfo(Element* el, std::vector<TypeInfo>& ti);
+
+static void parseSizedAddress(Element* el, SizedAddrInfo& addr)
+{
+	addr.addr.space = getHasAttributeValue(el, "space");
+	if (addr.addr.space == "join") {
+		for (int i = 0; i < el->getNumAttributes(); i++) {
+			if (el->getAttributeName(i).substr(0, 5) == "piece") {
+				int idx = strtoull(el->getAttributeName(i).substr(5).c_str(), nullptr, 10) - 1;
+				SizedAddrInfo inf;
+				size_t off = el->getAttributeValue(i).find(':');
+				inf.addr.space = el->getAttributeValue(i).substr(0, off);
+				std::string rest = el->getAttributeValue(i).substr(off + 1);
+				off = rest.find(':');
+				inf.addr.offset = strtoull(rest.substr(0, off).c_str(), nullptr, 16);
+				inf.size = strtoull(rest.substr(off + 1).c_str(), nullptr, 10);
+				if (addr.addr.joins.size() <= idx) addr.addr.joins.resize(idx + 1);
+				addr.addr.joins[idx] = inf;
+			}
+		}
+	} else if (addr.addr.space.size() != 0) {
+		addr.addr.offset = strtoull(el->getAttributeValue("offset").c_str(), nullptr, 16);
+		addr.size = strtoull(el->getAttributeValue("size").c_str(), nullptr, 10);
+	}
+}
+
+static void parseParamMeasures(Element* el, FuncProtoInfo& fpi)
+{
+	fpi = {};
+	fpi.extraPop = -1;
+	int inputIndex = 0;
+	bool sawOutput = false;
+	const List& list(el->getChildren());
+	for (List::const_iterator iter = list.begin(); iter != list.end(); ++iter) {
+		Element* child = *iter;
+		if (child->getName() == "proto") {
+			fpi.model = child->getAttributeValue("model");
+			std::string extrapop = child->getAttributeValue("extrapop");
+			fpi.extraPop = extrapop == "unknown" ? -1 : strtoull(extrapop.c_str(), nullptr, 0);
+		} else if (child->getName() == "input" || child->getName() == "output") {
+			SymInfo sym = {};
+			sym.argIndex = child->getName() == "input" ? inputIndex++ : -1;
+			if (sym.argIndex >= 0)
+				sym.pi.name = "param_" + std::to_string(sym.argIndex);
+			const List& params = child->getChildren();
+			for (List::const_iterator paramIt = params.begin(); paramIt != params.end(); ++paramIt) {
+				if ((*paramIt)->getName() == "addr")
+					parseSizedAddress(*paramIt, sym.addr);
+				else if ((*paramIt)->getName() == "type" ||
+					(*paramIt)->getName() == "typeref" ||
+					(*paramIt)->getName() == "void")
+					parseTypeInfo(child, sym.pi.ti);
+			}
+			if (child->getName() == "input") {
+				fpi.syminfo.push_back(sym);
+			} else {
+				fpi.retType = sym;
+				sawOutput = true;
+			}
+		}
+	}
+	if (!sawOutput || fpi.retType.pi.ti.empty())
+		fpi.retType.pi.ti.push_back(TypeInfo{ "void", 0, "void" });
+}
+
 void parseFuncProto(Element* el, FuncProtoInfo& fpi)
 {
 	const List& list(el->getChildren());
@@ -4812,6 +4876,7 @@ static const std::map<uint4, std::string>& packedElementNames()
 		{86,"comment"},{87,"commentdb"},{88,"text"},{98,"inst"},{102,"bhead"},{103,"block"},{104,"blockedge"},{105,"edge"},
 		{113,"iop"},{114,"unimpl"},{115,"ast"},{116,"function"},{117,"highlist"},{118,"jumptablelist"},{119,"varnodes"},
 		{120,"context_data"},{121,"context_points"},{122,"context_pointset"},{123,"context_set"},{124,"set"},{125,"tracked_pointset"},{126,"tracked_set"},
+		{106,"parammeasures"},{107,"proto"},{108,"rank"},
 		{160,"group"},{161,"internallist"},{162,"killedbycall"},{163,"likelytrash"},{164,"localrange"},{165,"model"},{166,"param"},{167,"paramrange"},{168,"pentry"},{169,"prototype"},{170,"resolveprototype"},{171,"retparam"},{172,"returnsym"},{173,"unaffected"},
 		{228,"localdb"},{229,"doc"}
 	};
@@ -5090,7 +5155,13 @@ std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string 
 	List::const_iterator iter;
 	bool bFirst = true;
 	for (iter = list.begin(); iter != list.end(); ++iter) {
-		if ((*iter)->getName() == "function") { //first function contains prototype, AST, other info, next one is C code
+		if ((*iter)->getName() == "parammeasures") {
+			callback->protocolRecorder("doDecompile parammeasures begin", false);
+			parseParamMeasures(*iter, symInf);
+			callback->protocolRecorder("doDecompile parammeasures complete model=\"" +
+				escapeCStr(symInf.model) + "\" inputs=\"" +
+				std::to_string(symInf.syminfo.size()) + "\"", false);
+		} else if ((*iter)->getName() == "function") { //first function contains prototype, AST, other info, next one is C code
 			callback->protocolRecorder(std::string("doDecompile function element first=\"") +
 				(bFirst ? "true" : "false") + "\"", false);
 			if (!bFirst) {

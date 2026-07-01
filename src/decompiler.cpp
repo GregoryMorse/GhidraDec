@@ -393,13 +393,13 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	}
 	void IdaCallback::launchDecompiler()
 	{
-		if (PRINT_DEBUG || di->skipParamIdentification) {
-			qstring protocolLogEnv;
+		qstring protocolLogEnv;
+		const bool explicitProtocolLog = qgetenv("GHIDRADEC_PROTOCOL_LOG", &protocolLogEnv) && !protocolLogEnv.empty();
+		if (PRINT_DEBUG || di->skipParamIdentification || explicitProtocolLog) {
 			std::string protocolLog;
-			if (qgetenv("GHIDRADEC_PROTOCOL_LOG", &protocolLogEnv) && !protocolLogEnv.empty()) {
+			if (explicitProtocolLog) {
 				protocolLog = protocolLogEnv.c_str();
-			}
-			else {
+			} else {
 				std::string traceDir = di->workDir;
 				if (!traceDir.empty() && traceDir.back() != '/' && traceDir.back() != '\\')
 					traceDir += "/";
@@ -978,7 +978,19 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				}
 			}
 		}
-		if (di->skipParamIdentification && !di->outputFile.empty()) {
+		std::map<ea_t, std::string>::iterator knownEntry = allFuncNames.find((ea_t)addr.offset);
+		if (knownEntry != allFuncNames.end()) {
+			msi.kind = KIND_FUNCTION;
+			msi.entryPoint = (ea_t)addr.offset;
+			msi.name = knownEntry->second;
+			std::map<ea_t, std::vector<RangeInfo>>::iterator ranges = allFuncRanges.find((ea_t)addr.offset);
+			if (ranges != allFuncRanges.end())
+				msi.ranges = ranges->second;
+			msi.size = msi.ranges.empty() ? 1 :
+				msi.ranges.begin()->endoffset - msi.ranges.begin()->beginoffset + 1;
+			return;
+		}
+		if (!di->outputFile.empty()) {
 			std::map<ea_t, MappedSymbolInfo>::iterator cached = batchMappedSymbols.find((ea_t)addr.offset);
 			if (cached != batchMappedSymbols.end()) {
 				msi = cached->second;
@@ -3089,7 +3101,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	}
 	void IdaCallback::preloadBatchMappedSymbols()
 	{
-		if (!di->skipParamIdentification || di->outputFile.empty())
+		if (di->outputFile.empty())
 			return;
 
 		for (std::map<ea_t, ImportInfo>::iterator it = imports.begin(); it != imports.end(); ++it) {
@@ -3865,17 +3877,23 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		//however sometimes specifically IDA will choose a wrong data model for libraries - far instead of near, and the frame and type both have bad information
 		//perhaps this peculiar case should be solved by a simple database script which correlates the stack frame pointers to its specific usages
 		//as largely it is just working around and fixing a bug in this particular area
-		executeOnMainThread([ea]() { checkNearFarFuncModelInfo(ea); });
+		if (di->outputFile.empty()) {
+			executeOnMainThread([ea]() { checkNearFarFuncModelInfo(ea); });
+		} else {
+			TRACE_MSG("skipping near/far model preflight during unattended paramid\n");
+		}
 		DecMode dm = defaultDecMode;
 		dm.actionname = "paramid";
+		dm.sendParamMeasures = true;
 		std::string display, funcProto, funcColorProto;
 		FuncProtoInfo paramInfo = {};
 		std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>> blockGraph;
 		//should turn off eliminate unreachable option switch
 		Options opt = getOpts();
 		bool bChangeOpt = false;
-		if (!opt.decompileUnreachable) {
+		if (di->outputFile.empty() && !opt.decompileUnreachable) {
 			opt.decompileUnreachable = true;
+			TRACE_MSG("paramid enabling decompile-unreachable option\n");
 			decInt->setOptions(opt);
 			bChangeOpt = true;
 		}
@@ -3883,9 +3901,14 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		//decInt->toggleSyntaxTree(false);
 		dm.printCCode = false;
 		dm.printSyntaxTree = false;
+		TRACE_MSG("paramid doDecompile begin @ " << std::hex << ea << "\n");
 		decInt->doDecompile(dm, AddrInfo{ "ram", ea }, display, funcProto,
 			funcColorProto, paramInfo, blockGraph); //let outer try handle errors
-		if (bChangeOpt) decInt->setOptions(getOpts());
+		TRACE_MSG("paramid doDecompile complete @ " << std::hex << ea << "\n");
+		if (bChangeOpt) {
+			TRACE_MSG("paramid restoring decompile options\n");
+			decInt->setOptions(getOpts());
+		}
 		//perhaps better way to detect graceful error than empty model - return XML has comment field - perhaps empty string if success for paramid
 		if (paramInfo.model.size() == 0) return; //error occurred such as most likely overlapping input varnodes
 		funcProtoInfos[ea] = FuncInfo{ funcProtoInfos[ea].name, true, paramInfo, funcProtoInfos[ea].fpi };
@@ -4264,16 +4287,21 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 			TRACE_MSG("all-decompile registerProgram complete, pid=" << std::dec << di->decompPid << "\n");
 		}
 		std::vector<ea_t> notIded;
-		for (size_t i = 0; i < num; i++) {
-			if (di->idacb->imports.find(di->idacb->allFuncs[i]) != di->idacb->imports.end()) continue;
-			bool bSucc = false;
-			std::string disp;
-			tryDecomp(di, defaultDecMode, di->idacb->allFuncs[i], disp, bSucc, blockGraph, true);
-			notIded.push_back(di->idacb->allFuncs[i]);
+		if (!di->skipParamIdentification) {
+			for (size_t i = 0; i < num; i++) {
+				if (di->idacb->imports.find(di->idacb->allFuncs[i]) != di->idacb->imports.end()) continue;
+				bool bSucc = false;
+				std::string disp;
+				tryDecomp(di, defaultDecMode, di->idacb->allFuncs[i], disp, bSucc, blockGraph, true);
+				if (di->exiting) {
+					di->decompSuccess = false; return;
+				}
+				notIded.push_back(di->idacb->allFuncs[i]);
+			}
+			TRACE_MSG("all-decompile updateDatabaseFromParams begin, count=" << std::dec << notIded.size() << "\n");
+			di->idacb->updateDatabaseFromParams(notIded);
+			TRACE_MSG("all-decompile updateDatabaseFromParams complete\n");
 		}
-		TRACE_MSG("all-decompile updateDatabaseFromParams begin, count=" << std::dec << notIded.size() << "\n");
-		di->idacb->updateDatabaseFromParams(notIded);
-		TRACE_MSG("all-decompile updateDatabaseFromParams complete\n");
 		int successes = 0, total = 0;
 		for (size_t i = 0; i < num; i++) {
 			if (di->idacb->imports.find(di->idacb->allFuncs[i]) != di->idacb->imports.end()) continue;
