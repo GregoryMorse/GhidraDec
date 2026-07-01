@@ -3250,7 +3250,32 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 				callStyles[el->getAttributeValue("name")] =
 					strtoull(el->getAttributeValue("extrapop").c_str(), nullptr, 10);
 				//<pcode inject="uponentry"/"uponreturn" dynamic="true"/"false"><body></pcode>
-				//break;
+				const List& protoChildren(el->getChildren());
+				List::const_iterator childIt;
+				for (childIt = protoChildren.begin(); childIt != protoChildren.end(); ++childIt) {
+					Element* e = *childIt;
+					if (e->getName() == "pcode") {
+						for (size_t i = 0; i < e->getNumAttributes(); i++) {
+							if (e->getAttributeName(i) == "dynamic") {
+								if (e->getAttributeValue(i) == "true")
+									callMechMap[el->getAttributeValue("name") +
+										"@@inject_" + e->getAttributeValue("inject")] = new XmlPcodeEmit;
+								break;
+							}
+						}
+						List::const_iterator bodyIt;
+						const List& pcodeChildren(e->getChildren());
+						for (bodyIt = pcodeChildren.begin(); bodyIt != pcodeChildren.end(); ++bodyIt) {
+							if ((*bodyIt)->getName() == "body") {
+								callMechMap[el->getAttributeValue("name") +
+									"@@inject_" + e->getAttributeValue("inject")] =
+									getPcodeSnippet((*bodyIt)->getContent(),
+										std::vector<std::pair<std::string, int>>(),
+										std::vector<std::pair<std::string, int>>());
+							}
+						}
+					}
+				}
 			}
 			//break;
 		} else if (elemName == "prototype") {

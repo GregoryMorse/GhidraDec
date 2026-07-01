@@ -272,6 +272,14 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			model += (callMethod == FTI_FARCALL || callMethod == FTI_DEFCALL && is_code_far(c)) ? "far" : "near"; //|| (c & (CM_MASK | CM_M_MASK)) == (CM_UNKNOWN | CM_M_NN)
 			return model;
 		}
+		if (!isX86()) {
+			switch (c & CM_CC_MASK) {
+			case CM_CC_UNKNOWN:
+				return "unknown";
+			default:
+				return "default";
+			}
+		}
 		//if (!bInit && (c & CM_CC_MASK) == (inf_cc_cm & CM_CC_MASK)) return "default";
 		switch (c & CM_CC_MASK) {
 		case CM_CC_FASTCALL: return !inf_is_32bit() && !inf_is_64bit() ? "__regcall" : "__fastcall"; //return "__vectorcall"; - extension to fastcall
@@ -689,7 +697,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				if (f->argsize == 0) { //|| !f->does_return()
 					func.model = ccToStr((f->flags & FUNC_PURGED_OK) != 0 ? CM_CC_CDECL : CM_CC_UNKNOWN, f->is_far() || (f->flags & FUNC_USERFAR) != 0 ? FTI_FARCALL : FTI_NEARCALL, false);
 				} else { //CM_CC_UNKNOWN is likely better...
-					func.model = ccToStr(CM_CC_STDCALL, f->is_far() || (f->flags & FUNC_USERFAR) != 0 ? FTI_FARCALL : FTI_NEARCALL, false);
+					func.model = ccToStr(isX86() ? CM_CC_STDCALL : CM_CC_UNKNOWN, f->is_far() || (f->flags & FUNC_USERFAR) != 0 ? FTI_FARCALL : FTI_NEARCALL, false);
 				}
 			}
 			if (func.extraPop == -1 && (f->flags & FUNC_PURGED_OK) != 0) func.extraPop = (unsigned long long)f->argsize; //type unknown but have frame so now can calculate

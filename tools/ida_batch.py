@@ -252,25 +252,26 @@ def classify_run_result(exit_code: int, log_path: Path, output_path: Path) -> tu
     log_text = read_text_if_exists(log_path)
     output_text = read_text_if_exists(output_path)
     combined = log_text + "\n" + output_text
-    for pattern in GRACEFUL_FAILURE_PATTERNS:
-        if pattern in combined:
-            return "graceful_fail", pattern
     lowered = combined.lower()
-    for pattern in DANGEROUS_FAILURE_PATTERNS:
-        if pattern.lower() in lowered:
-            return "dangerous_fail", pattern
     if exit_code == 124:
         return "dangerous_fail", "IDA process timeout"
     if platform.system().lower() == "windows":
         crash_codes = {
             0xC0000005: "Windows access violation",
             0xC00000FD: "Windows stack overflow",
+            0xC0000374: "Windows heap corruption",
             0xC0000409: "Windows stack buffer overrun",
         }
         if exit_code in crash_codes:
             return "dangerous_fail", crash_codes[exit_code]
     if not output_path.exists():
         return "dangerous_fail", "output was not created"
+    for pattern in DANGEROUS_FAILURE_PATTERNS:
+        if pattern.lower() in lowered:
+            return "dangerous_fail", pattern
+    for pattern in GRACEFUL_FAILURE_PATTERNS:
+        if pattern in combined:
+            return "graceful_fail", pattern
     return "dangerous_fail", f"exit code {exit_code}"
 
 

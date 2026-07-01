@@ -223,6 +223,118 @@
           "notes": "Little-endian MIPS."
         },
         {
+          "id": "angr-ppc-fauxware",
+          "arch": "ppc",
+          "tier": "smoke",
+          "path": "tests/ppc/fauxware",
+          "enabled": true,
+          "notes": "PowerPC big-endian smoke target."
+        },
+        {
+          "id": "angr-ppc-test_arrays",
+          "arch": "ppc",
+          "tier": "smoke",
+          "path": "tests/ppc/test_arrays",
+          "enabled": true,
+          "notes": "PowerPC big-endian smoke target."
+        },
+        {
+          "id": "angr-ppc-test_loops",
+          "arch": "ppc",
+          "tier": "extended",
+          "path": "tests/ppc/test_loops",
+          "enabled": true,
+          "notes": "PowerPC big-endian extended target."
+        },
+        {
+          "id": "angr-ppc-test_division",
+          "arch": "ppc",
+          "tier": "extended",
+          "path": "tests/ppc/test_division",
+          "enabled": true,
+          "notes": "PowerPC big-endian extended target."
+        },
+        {
+          "id": "angr-ppc64-fauxware",
+          "arch": "ppc64",
+          "tier": "smoke",
+          "path": "tests/ppc64/fauxware",
+          "enabled": true,
+          "notes": "PowerPC 64 big-endian smoke target. Validates default-prototype pcode injection handling in PPC64 cspecs."
+        },
+        {
+          "id": "angr-ppc64-test_arrays",
+          "arch": "ppc64",
+          "tier": "smoke",
+          "path": "tests/ppc64/test_arrays",
+          "enabled": true,
+          "notes": "PowerPC 64 big-endian smoke target. Validates default-prototype pcode injection handling in PPC64 cspecs."
+        },
+        {
+          "id": "angr-ppc64-test_loops",
+          "arch": "ppc64",
+          "tier": "extended",
+          "path": "tests/ppc64/test_loops",
+          "enabled": false,
+          "notes": "PowerPC 64 big-endian target is present, but held out of the stable grid while the non-x86 calling-convention bridge is validated."
+        },
+        {
+          "id": "angr-ppc64-test_division",
+          "arch": "ppc64",
+          "tier": "extended",
+          "path": "tests/ppc64/test_division",
+          "enabled": false,
+          "notes": "PowerPC 64 big-endian target is present, but held out of the stable grid while the non-x86 calling-convention bridge is validated."
+        },
+        {
+          "id": "angr-ppc64el-fauxware",
+          "arch": "ppc64el",
+          "tier": "smoke",
+          "path": "tests/ppc64el/fauxware",
+          "enabled": true,
+          "notes": "PowerPC 64 little-endian smoke target. Validates default-prototype pcode injection handling in PPC64 cspecs."
+        },
+        {
+          "id": "angr-ppc64el-fauxware-static",
+          "arch": "ppc64el",
+          "tier": "extended",
+          "path": "tests/ppc64el/fauxware_static",
+          "enabled": false,
+          "notes": "PowerPC 64 little-endian static target is present, but held out of the stable grid while the non-x86 calling-convention bridge is validated."
+        },
+        {
+          "id": "angr-m68k-mul-add-sub-xor",
+          "arch": "m68k",
+          "tier": "smoke",
+          "path": "tests/m68k/mul_add_sub_xor_m68k_be",
+          "enabled": false,
+          "notes": "Motorola 68000 big-endian target is present, but this angr binary currently expands into a large static analysis case and is not stable enough for the default smoke grid."
+        },
+        {
+          "id": "angr-hppa-test-instr",
+          "arch": "hppa",
+          "tier": "smoke",
+          "path": "tests/hppa/test-instr_hppa",
+          "enabled": false,
+          "notes": "PA-RISC target is present, but the current binary hits repeated bad-branch decompiler diagnostics and timed out during the broad smoke run."
+        },
+        {
+          "id": "angr-sh4-test-instr",
+          "arch": "sh4",
+          "tier": "smoke",
+          "path": "tests/sh4/test-instr_sh4",
+          "enabled": false,
+          "notes": "SuperH4 target is present, but disabled until local Ghidra/IDA processor binding is confirmed by a successful batch run."
+        },
+        {
+          "id": "angr-riscv64-test-return-type",
+          "arch": "riscv64",
+          "tier": "smoke",
+          "path": "tests/riscv64/test_return_type_riscv64.elf",
+          "enabled": false,
+          "notes": "RISC-V 64 target is present in angr, but disabled until Ghidra's RISCV ldefs advertise an IDA-PRO external name."
+        },
+        {
           "id": "angr-mips64-test_arrays",
           "arch": "mips64",
           "tier": "smoke",
@@ -251,6 +363,6 @@
   ],
   "orders": {
     "x86-first": ["x86_64", "x86_32", "x86_16"],
-    "baseline-expansion": ["x86_64", "x86_32", "x86_16", "armel", "armhf", "aarch64", "mipsel"]
+    "baseline-expansion": ["x86_64", "x86_32", "x86_16", "armel", "armhf", "aarch64", "mipsel", "ppc", "ppc64", "ppc64el", "m68k", "hppa", "sh4", "riscv64"]
   }
 }

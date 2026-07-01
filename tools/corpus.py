@@ -20,7 +20,8 @@ def load_manifest(path: Path = MANIFEST) -> dict:
 
 
 def selected_targets(manifest: dict, corpus_name: str, architectures: set[str], tiers: set[str]) -> list[tuple[dict, dict]]:
-    order_names = manifest.get("orders", {}).get("x86-first", [])
+    orders = manifest.get("orders", {})
+    order_names = orders.get("baseline-expansion") or orders.get("x86-first", [])
     order = {name: index for index, name in enumerate(order_names)}
     selected: list[tuple[dict, dict]] = []
     for corpus in manifest["corpora"]:

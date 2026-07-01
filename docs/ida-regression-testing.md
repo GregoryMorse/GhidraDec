@@ -153,6 +153,24 @@ Current ARM/AArch64/MIPS smoke status from the pinned angr smoke set:
   closes. Treat this as the next focused backend/protocol bug, not as a harness
   instability.
 
+Current PowerPC smoke status from the pinned angr smoke set:
+
+* `ppc`, `ppc64`, and `ppc64el` smoke targets pass and remain enabled.
+* PPC64 depends on compiler-spec pcode injection declared inside
+  `<default_proto>`. This is covered by `angr-ppc64-fauxware`,
+  `angr-ppc64-test_arrays`, and `angr-ppc64el-fauxware`.
+* PPC64 extended/static targets are listed but still disabled until they are
+  run separately and promoted deliberately.
+
+Additional processor candidates from angr are listed but not enabled by default:
+
+* `m68k` and `hppa` currently use large/static-style binaries that timed out or
+  destabilized IDA during the broad smoke sweep.
+* `sh4` loads in IDA but still needs a confirmed Ghidra/IDA language binding
+  path before it can join the stable smoke grid.
+* `riscv64` is waiting on an `IDA-PRO` external-name binding in Ghidra's RISCV
+  ldefs.
+
 On Windows, `tools/ida_batch.py` also watches IDA-owned dialogs and sends the
 default confirmation action for common startup, warning, crash, and recovery
 dialogs. This keeps IDA Pro 9.3 batch runs non-interactive while still logging
