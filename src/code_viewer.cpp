@@ -33,6 +33,13 @@ static const retdec::config::Object* getGlobalByNameOrRealName(
 	return nullptr;
 }
 
+static bool hasValidNavigationPosition(const RdGlobalInfo* decompInfo)
+{
+	return decompInfo != nullptr
+			&& !decompInfo->navigationList.empty()
+			&& decompInfo->navigationActual != decompInfo->navigationList.end();
+}
+
 //
 //==============================================================================
 //
@@ -376,6 +383,11 @@ const char* GhidraDec::jump_to_asm_ah_t::actionHotkey = "A";
 
 bool idaapi GhidraDec::moveToPrevious()
 {
+	if (!canMoveToPrevious())
+	{
+		return false;
+	}
+
 	DBG_MSG("\t ESC : [");
 	for (auto& fnc : decompInfo->navigationList)
 	{
@@ -385,34 +397,28 @@ bool idaapi GhidraDec::moveToPrevious()
 			<< ") : from " << std::hex << (*decompInfo->navigationActual)->start_ea
 			<< " => BACK\n");
 
-	if (decompInfo->navigationList.size() <= 1)
+	decompInfo->navigationActual--;
+
+	DBG_MSG("\t\t=> " << std::hex
+			<< (*decompInfo->navigationActual)->start_ea << "\n");
+
+	auto fit = decompInfo->fnc2code.find(*decompInfo->navigationActual);
+	if (fit == decompInfo->fnc2code.end())
 	{
 		return false;
 	}
 
-	if (decompInfo->navigationActual != decompInfo->navigationList.begin())
-	{
-		decompInfo->navigationActual--;
-
-		DBG_MSG("\t\t=> " << std::hex
-				<< (*decompInfo->navigationActual)->start_ea << "\n");
-
-		auto fit = decompInfo->fnc2code.find(*decompInfo->navigationActual);
-		if (fit == decompInfo->fnc2code.end())
-		{
-			return false;
-		}
-
-		decompInfo->decompiledFunction = fit->first;
-		ShowOutput show(decompInfo);
-		show.execute();
-	}
-	else
-	{
-		DBG_MSG("\t\t=> FIRST : cannot move to the previous\n");
-	}
+	decompInfo->decompiledFunction = fit->first;
+	ShowOutput show(decompInfo);
+	show.execute();
 
 	return false;
+}
+
+bool GhidraDec::canMoveToPrevious() const
+{
+	return hasValidNavigationPosition(decompInfo)
+			&& decompInfo->navigationActual != decompInfo->navigationList.begin();
 }
 
 //
@@ -421,6 +427,11 @@ bool idaapi GhidraDec::moveToPrevious()
 
 bool idaapi GhidraDec::moveToNext()
 {
+	if (!canMoveToNext())
+	{
+		return false;
+	}
+
 	DBG_MSG("\t CTRL + F : [");
 	for (auto& fnc : decompInfo->navigationList)
 	{
@@ -430,36 +441,32 @@ bool idaapi GhidraDec::moveToNext()
 			<< ") : from " << std::hex << (*decompInfo->navigationActual)->start_ea
 			<< " => FORWARD\n");
 
-	if (decompInfo->navigationList.size() <= 1)
+	decompInfo->navigationActual++;
+
+	DBG_MSG("\t\t=> " << std::hex
+			<< (*decompInfo->navigationActual)->start_ea << "\n");
+
+	auto fit = decompInfo->fnc2code.find(*decompInfo->navigationActual);
+	if (fit != decompInfo->fnc2code.end())
+	{
+		decompInfo->decompiledFunction = fit->first;
+		ShowOutput show(decompInfo);
+		show.execute();
+	}
+
+	return false;
+}
+
+bool GhidraDec::canMoveToNext() const
+{
+	if (!hasValidNavigationPosition(decompInfo))
 	{
 		return false;
 	}
 
 	auto last = decompInfo->navigationList.end();
-	last--;
-	if (decompInfo->navigationActual != last)
-	{
-		decompInfo->navigationActual++;
-
-		DBG_MSG("\t\t=> " << std::hex
-				<< (*decompInfo->navigationActual)->start_ea << "\n");
-
-		auto fit = decompInfo->fnc2code.find(*decompInfo->navigationActual);
-		if (fit != decompInfo->fnc2code.end())
-		{
-			decompInfo->decompiledFunction = fit->first;
-			ShowOutput show(decompInfo);
-			show.execute();
-
-			return false;
-		}
-	}
-	else
-	{
-		DBG_MSG("\t\t=> LAST : cannot move to the next\n");
-	}
-
-	return false;
+	--last;
+	return decompInfo->navigationActual != last;
 }
 
 //

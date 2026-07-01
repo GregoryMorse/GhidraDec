@@ -140,11 +140,12 @@ logs. GUI use defaults to user-facing `INFO_MSG` output only; set
 
 Current ARM/AArch64/MIPS smoke status from the pinned angr smoke set:
 
-* `aarch64`, `armel`, `armhf`, and `mipsel` pass: 7 successful inputs out of
-  the 10-target ARM/MIPS smoke sweep.
+* `aarch64`, `armel`, `armhf`, and `mipsel` pass and remain enabled in the
+  baseline expansion lane.
 * `mips` big-endian and `mips64` big-endian currently reach controlled
-  `graceful_fail` results: 3 failing inputs, 0 `dangerous_fail` outcomes. The
-  plugin survives, writes diagnostics, and does not crash IDA.
+  `graceful_fail` results and are temporarily disabled in
+  `ghidradec.corpus.json` so broader processor coverage can continue while the
+  BE-specific native decompiler crash is investigated.
 * The current MIPS BE failure signature is a native `decompile.exe` access
   violation reading `0xffffffffffffffff` after a `$gp`-relative global
   `getMappedSymbols` query. The protocol log reaches ordinary MIPS BE

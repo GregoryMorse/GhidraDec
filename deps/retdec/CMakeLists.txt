@@ -80,11 +80,8 @@ target_include_directories(retdec PUBLIC ${source_dir}/include)
 target_include_directories(retdec SYSTEM PUBLIC ${source_dir}/deps/rapidjson/include)
 target_compile_features(retdec PUBLIC cxx_std_17)
 target_compile_options(retdec PRIVATE
-	$<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/FIstring>
-	$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-include>
-	$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:cstdint>
-	$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-include>
-	$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:string>
+	$<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/FI${CMAKE_CURRENT_LIST_DIR}/retdec_prefix.h>
+	$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:SHELL:-include ${CMAKE_CURRENT_LIST_DIR}/retdec_prefix.h>
 )
 target_compile_definitions(retdec PUBLIC RAPIDJSON_HAS_STDSTRING=1)
 target_compile_definitions(retdec PRIVATE

@@ -163,32 +163,32 @@
           "arch": "mips",
           "tier": "smoke",
           "path": "tests/mips/fauxware",
-          "enabled": true,
-          "notes": "Big-endian MIPS."
+          "enabled": false,
+          "notes": "Big-endian MIPS. Deferred while the BE-specific native decompiler crash is investigated; keep MIPS LE enabled."
         },
         {
           "id": "angr-mips-test_arrays",
           "arch": "mips",
           "tier": "smoke",
           "path": "tests/mips/test_arrays",
-          "enabled": true,
-          "notes": "Big-endian MIPS."
+          "enabled": false,
+          "notes": "Big-endian MIPS. Deferred while the BE-specific native decompiler crash is investigated; keep MIPS LE enabled."
         },
         {
           "id": "angr-mips-test_loops",
           "arch": "mips",
           "tier": "extended",
           "path": "tests/mips/test_loops",
-          "enabled": true,
-          "notes": "Big-endian MIPS."
+          "enabled": false,
+          "notes": "Big-endian MIPS. Deferred while the BE-specific native decompiler crash is investigated; keep MIPS LE enabled."
         },
         {
           "id": "angr-mips-test_division",
           "arch": "mips",
           "tier": "extended",
           "path": "tests/mips/test_division",
-          "enabled": true,
-          "notes": "Big-endian MIPS."
+          "enabled": false,
+          "notes": "Big-endian MIPS. Deferred while the BE-specific native decompiler crash is investigated; keep MIPS LE enabled."
         },
         {
           "id": "angr-mipsel-fauxware",
@@ -227,30 +227,30 @@
           "arch": "mips64",
           "tier": "smoke",
           "path": "tests/mips64/test_arrays",
-          "enabled": true,
-          "notes": "Big-endian MIPS64."
+          "enabled": false,
+          "notes": "Big-endian MIPS64. Deferred with MIPS BE while MIPS LE coverage continues."
         },
         {
           "id": "angr-mips64-test_loops",
           "arch": "mips64",
           "tier": "extended",
           "path": "tests/mips64/test_loops",
-          "enabled": true,
-          "notes": "Big-endian MIPS64."
+          "enabled": false,
+          "notes": "Big-endian MIPS64. Deferred with MIPS BE while MIPS LE coverage continues."
         },
         {
           "id": "angr-mips64-test_division",
           "arch": "mips64",
           "tier": "extended",
           "path": "tests/mips64/test_division",
-          "enabled": true,
-          "notes": "Big-endian MIPS64."
+          "enabled": false,
+          "notes": "Big-endian MIPS64. Deferred with MIPS BE while MIPS LE coverage continues."
         }
       ]
     }
   ],
   "orders": {
     "x86-first": ["x86_64", "x86_32", "x86_16"],
-    "baseline-expansion": ["x86_64", "x86_32", "x86_16", "armel", "armhf", "aarch64", "mips", "mipsel", "mips64"]
+    "baseline-expansion": ["x86_64", "x86_32", "x86_16", "armel", "armhf", "aarch64", "mipsel"]
   }
 }

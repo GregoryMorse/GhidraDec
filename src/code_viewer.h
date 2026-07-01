@@ -60,8 +60,8 @@ static const custom_viewer_handlers_t handlers(
  *
  * It uses current 'decompiledFunction' to get associated code from 'fnc2code'.
  *
- * @note For some unknown reason, it works only from threads,
- *       if it is called from main thread, it crashes IDA.
+ * The viewer keeps one stable line buffer so navigation can refresh in-place
+ * without closing the widget that is currently dispatching an action.
  */
 struct ShowOutput : public exec_request_t
 {
@@ -72,31 +72,33 @@ struct ShowOutput : public exec_request_t
 
 	virtual GHIDRADEC_EXEC_RETURN idaapi execute() override
 	{
-		if (di->custViewer) {
-			close_widget(di->custViewer, 0);
-			di->custViewer = nullptr;
-		}
-		if (di->codeViewer)
+		if (!loadFunctionCode())
 		{
-			close_widget(di->codeViewer, 0);
-			di->codeViewer = nullptr;
-		}
-
-		addCommentToFunctionCode();
-		func_t* fnc = di->decompiledFunction;
-		auto& contents = di->fnc2code[fnc].idaCode;
-		auto& code = di->fnc2code[fnc].code;
-		std::istringstream f(code);
-		std::string line;
-		contents.clear();
-		while (std::getline(f, line))
-		{
-			contents.push_back( simpleline_t(line.c_str()) );
+			return 0;
 		}
 
 		simpleline_place_t minPlace;
 		simpleline_place_t curPlace = minPlace;
-		simpleline_place_t maxPlace((int)contents.size()-1);
+		simpleline_place_t maxPlace((int)di->viewerLines.size()-1);
+
+		if (di->custViewer != nullptr && di->codeViewer != nullptr)
+		{
+			set_custom_viewer_range(di->custViewer, &minPlace, &maxPlace);
+			refresh_custom_viewer(di->custViewer);
+			repaint_custom_viewer(di->custViewer);
+			return 0;
+		}
+
+		if (di->custViewer != nullptr)
+		{
+			close_widget(di->custViewer, 0);
+			di->custViewer = nullptr;
+		}
+		if (di->codeViewer != nullptr)
+		{
+			close_widget(di->codeViewer, 0);
+			di->codeViewer = nullptr;
+		}
 
 		di->custViewer = create_custom_viewer(
 				di->viewerName.c_str(), // name of viewer
@@ -104,7 +106,7 @@ struct ShowOutput : public exec_request_t
 				&maxPlace,              // last location of the viewer
 				&curPlace,              // set current location
 				nullptr,                // renderer information (can be NULL)
-				&contents,              // contents of viewer
+				&di->viewerLines,       // contents of viewer
 				&handlers,              // handlers for the viewer (can be NULL)
 				di,                     // handlers' user data
 				nullptr                 // widget to hold viewer
@@ -125,6 +127,31 @@ struct ShowOutput : public exec_request_t
 		);
 
 		return 0;
+	}
+
+	bool idaapi loadFunctionCode()
+	{
+		addCommentToFunctionCode();
+		func_t* fnc = di->decompiledFunction;
+		auto fit = di->fnc2code.find(fnc);
+		if (fit == di->fnc2code.end())
+		{
+			return false;
+		}
+
+		std::istringstream f(fit->second.code);
+		std::string line;
+		di->viewerLines.clear();
+		while (std::getline(f, line))
+		{
+			di->viewerLines.push_back(simpleline_t(line.c_str()));
+		}
+		if (di->viewerLines.empty())
+		{
+			di->viewerLines.push_back(simpleline_t(""));
+		}
+
+		return true;
 	}
 
 	void idaapi addCommentToFunctionCode()

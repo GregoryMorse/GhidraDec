@@ -62,6 +62,8 @@ namespace idaplugin {
 			const std::string& calledFnc,
 			bool force = false,
 			bool forceDec = false);
+		bool canMoveToPrevious() const;
+		bool canMoveToNext() const;
 		bool idaapi moveToPrevious();
 
 		struct move_backward_ah_t : public action_handler_t
@@ -76,13 +78,19 @@ namespace idaplugin {
 
 			virtual int idaapi activate(action_activation_ctx_t*)
 			{
+				if (pm == nullptr)
+				{
+					return false;
+				}
 				pm->moveToPrevious();
 				return false;
 			}
 
 			virtual action_state_t idaapi update(action_update_ctx_t*)
 			{
-				return AST_ENABLE_ALWAYS;
+				return pm != nullptr && pm->canMoveToPrevious()
+						? AST_ENABLE_ALWAYS
+						: AST_DISABLE;
 			}
 		};
 		move_backward_ah_t move_backward_ah = move_backward_ah_t(this);
@@ -107,18 +115,24 @@ namespace idaplugin {
 
 			virtual int idaapi activate(action_activation_ctx_t*)
 			{
+				if (pm == nullptr)
+				{
+					return false;
+				}
 				pm->moveToNext();
 				return false;
 			}
 
 			virtual action_state_t idaapi update(action_update_ctx_t*)
 			{
-				return AST_ENABLE_ALWAYS;
+				return pm != nullptr && pm->canMoveToNext()
+						? AST_ENABLE_ALWAYS
+						: AST_DISABLE;
 			}
 		};
 
 
-		move_forward_ah_t move_forward_ah;
+		move_forward_ah_t move_forward_ah = move_forward_ah_t(this);
 		const action_desc_t move_forward_ah_desc = ACTION_DESC_LITERAL_PLUGMOD(
 			move_forward_ah_t::actionName,
 			move_forward_ah_t::actionLabel,
@@ -140,6 +154,10 @@ namespace idaplugin {
 
 			virtual int idaapi activate(action_activation_ctx_t*)
 			{
+				if (pm == nullptr)
+				{
+					return false;
+				}
 				pm->insertCurrentFunctionComment();
 				return false;
 			}
@@ -150,7 +168,7 @@ namespace idaplugin {
 			}
 		};
 
-		change_fnc_comment_ah_t change_fnc_comment_ah;
+		change_fnc_comment_ah_t change_fnc_comment_ah = change_fnc_comment_ah_t(this);
 		const action_desc_t change_fnc_comment_ah_desc = ACTION_DESC_LITERAL_PLUGMOD(
 			change_fnc_comment_ah_t::actionName,
 			change_fnc_comment_ah_t::actionLabel,
@@ -173,6 +191,10 @@ namespace idaplugin {
 
 			virtual int idaapi activate(action_activation_ctx_t*)
 			{
+				if (pm == nullptr || view == nullptr)
+				{
+					return false;
+				}
 				pm->changeFunctionGlobalName(view);
 				return false;
 			}
@@ -188,7 +210,7 @@ namespace idaplugin {
 			}
 		};
 		bool idaapi openXrefsWindow(func_t* fnc);
-		change_fnc_global_name_ah_t change_fnc_global_name_ah;
+		change_fnc_global_name_ah_t change_fnc_global_name_ah = change_fnc_global_name_ah_t(this);
 		const action_desc_t change_fnc_global_name_ah_desc = ACTION_DESC_LITERAL_PLUGMOD(
 			change_fnc_global_name_ah_t::actionName,
 			change_fnc_global_name_ah_t::actionLabel,
@@ -210,6 +232,10 @@ namespace idaplugin {
 
 			virtual int idaapi activate(action_activation_ctx_t*)
 			{
+				if (pm == nullptr || fnc == nullptr)
+				{
+					return false;
+				}
 				pm->openXrefsWindow(fnc);
 				return false;
 			}
@@ -226,7 +252,7 @@ namespace idaplugin {
 		};
 
 		bool idaapi openCallsWindow(func_t* fnc);
-		open_xrefs_ah_t open_xrefs_ah;
+		open_xrefs_ah_t open_xrefs_ah = open_xrefs_ah_t(this);
 		const action_desc_t open_xrefs_ah_desc = ACTION_DESC_LITERAL_PLUGMOD(
 			open_xrefs_ah_t::actionName,
 			open_xrefs_ah_t::actionLabel,
@@ -248,6 +274,10 @@ namespace idaplugin {
 
 			virtual int idaapi activate(action_activation_ctx_t*)
 			{
+				if (pm == nullptr || fnc == nullptr)
+				{
+					return false;
+				}
 				pm->openCallsWindow(fnc);
 				return false;
 			}
@@ -263,7 +293,7 @@ namespace idaplugin {
 			}
 		};
 
-		open_calls_ah_t open_calls_ah;
+		open_calls_ah_t open_calls_ah = open_calls_ah_t(this);
 		const action_desc_t open_calls_ah_desc = ACTION_DESC_LITERAL_PLUGMOD(
 			open_calls_ah_t::actionName,
 			open_calls_ah_t::actionLabel,
@@ -286,6 +316,10 @@ namespace idaplugin {
 
 			virtual int idaapi activate(action_activation_ctx_t*)
 			{
+				if (pm == nullptr || view == nullptr)
+				{
+					return false;
+				}
 				pm->changeTypeDeclaration(view);
 				return false;
 			}
@@ -302,7 +336,7 @@ namespace idaplugin {
 		};
 
 		bool idaapi jumpToASM(ea_t ea);
-		change_fnc_type_ah_t change_fnc_type_ah;
+		change_fnc_type_ah_t change_fnc_type_ah = change_fnc_type_ah_t(this);
 		const action_desc_t change_fnc_type_ah_desc = ACTION_DESC_LITERAL_PLUGMOD(
 			change_fnc_type_ah_t::actionName,
 			change_fnc_type_ah_t::actionLabel,
@@ -317,13 +351,17 @@ namespace idaplugin {
 				this->pm = pm;
 			}
 			GhidraDec* pm;
-			ea_t addr;
+			ea_t addr = BADADDR;
 			static const char* actionName;
 			static const char* actionLabel;
 			static const char* actionHotkey;
 
 			virtual int idaapi activate(action_activation_ctx_t*)
 			{
+				if (pm == nullptr || addr == BADADDR)
+				{
+					return false;
+				}
 				pm->jumpToASM(addr);
 				return false;
 			}
@@ -339,7 +377,7 @@ namespace idaplugin {
 			}
 		};
 
-		jump_to_asm_ah_t jump_to_asm_ah;
+		jump_to_asm_ah_t jump_to_asm_ah = jump_to_asm_ah_t(this);
 		const action_desc_t jump_to_asm_ah_desc = ACTION_DESC_LITERAL_PLUGMOD(
 			jump_to_asm_ah_t::actionName,
 			jump_to_asm_ah_t::actionLabel,

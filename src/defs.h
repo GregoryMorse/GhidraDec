@@ -1187,6 +1187,7 @@ class RdGlobalInfo
 		const std::string viewerName = "GhidraDec";
 		TWidget* custViewer = nullptr;
 		TWidget* codeViewer = nullptr;
+		strvec_t viewerLines;
 		TWidget* graphWidget = nullptr;
 		graph_viewer_t* graphViewer = nullptr;
 		mutable_graph_t* mg = nullptr;

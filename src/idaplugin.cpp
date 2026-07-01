@@ -40,8 +40,24 @@ idaplugin::GhidraDec* pm;
 
 namespace idaplugin {
 
+static bool hasValidNavigationPosition(const RdGlobalInfo* decompInfo)
+{
+	return decompInfo != nullptr
+			&& !decompInfo->navigationList.empty()
+			&& decompInfo->navigationActual != decompInfo->navigationList.end();
+}
+
 GhidraDec::GhidraDec()
 {
+	move_backward_ah.pm = this;
+	move_forward_ah.pm = this;
+	change_fnc_comment_ah.pm = this;
+	change_fnc_global_name_ah.pm = this;
+	open_xrefs_ah.pm = this;
+	open_calls_ah.pm = this;
+	change_fnc_type_ah.pm = this;
+	jump_to_asm_ah.pm = this;
+
 #if IDA_SDK_VERSION >= 750
 	init();
 #endif
@@ -221,9 +237,16 @@ void GhidraDec::runSelectiveDecompilation(func_t *fnc2decomp, bool force)
 	//
 	if (fnc2decomp)
 	{
-		decompInfo->navigationList.erase(
-				++decompInfo->navigationActual,
-				decompInfo->navigationList.end());
+		if (hasValidNavigationPosition(decompInfo))
+		{
+			auto eraseFrom = decompInfo->navigationActual;
+			++eraseFrom;
+			decompInfo->navigationList.erase(eraseFrom, decompInfo->navigationList.end());
+		}
+		else
+		{
+			decompInfo->navigationList.clear();
+		}
 		decompInfo->navigationList.push_back(fnc2decomp);
 		decompInfo->navigationActual = decompInfo->navigationList.end();
 		decompInfo->navigationActual--;
@@ -267,9 +290,16 @@ void GhidraDec::runSelectiveDecompilation(func_t *fnc2decomp, bool force)
 					*decompInfo,
 					decompInfo->decompiledFunction);
 
-			decompInfo->navigationList.erase(
-					decompInfo->navigationActual,
-					decompInfo->navigationList.end());
+			if (hasValidNavigationPosition(decompInfo))
+			{
+				decompInfo->navigationList.erase(
+						decompInfo->navigationActual,
+						decompInfo->navigationList.end());
+			}
+			else
+			{
+				decompInfo->navigationList.clear();
+			}
 			decompInfo->navigationList.push_back(decompInfo->decompiledFunction);
 			decompInfo->navigationActual = decompInfo->navigationList.end();
 			decompInfo->navigationActual--;
