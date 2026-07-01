@@ -259,6 +259,14 @@ def classify_run_result(exit_code: int, log_path: Path, output_path: Path) -> tu
             return "dangerous_fail", pattern
     if exit_code == 124:
         return "dangerous_fail", "IDA process timeout"
+    if platform.system().lower() == "windows":
+        crash_codes = {
+            0xC0000005: "Windows access violation",
+            0xC00000FD: "Windows stack overflow",
+            0xC0000409: "Windows stack buffer overrun",
+        }
+        if exit_code in crash_codes:
+            return "dangerous_fail", crash_codes[exit_code]
     if not output_path.exists():
         return "dangerous_fail", "output was not created"
     return "dangerous_fail", f"exit code {exit_code}"
@@ -382,6 +390,27 @@ def list_functions(args: argparse.Namespace, input_path: Path) -> list[dict[str,
     return list(data.get("functions", []))
 
 
+def normal_result(args: argparse.Namespace, input_path: Path, exit_code: int) -> dict[str, object]:
+    case_dir = Path(args.work_dir).resolve() / case_name(input_path)
+    work_input = case_dir / input_path.name
+    output_path = case_dir / (work_input.name + ".c")
+    log_path = case_dir / "ida-batch.log"
+    done_path = output_path.with_suffix(output_path.suffix + ".done")
+    outcome, reason = classify_run_result(exit_code, log_path, output_path)
+    return {
+        "input": str(input_path),
+        "case_dir": str(case_dir),
+        "log": str(log_path),
+        "output": str(output_path),
+        "done": str(done_path),
+        "exit_code": exit_code,
+        "outcome": outcome,
+        "reason": reason,
+        "output_bytes": output_path.stat().st_size if output_path.exists() else 0,
+        "passed": outcome == "success",
+    }
+
+
 def run_individual_functions(args: argparse.Namespace, input_path: Path) -> int:
     functions = list_functions(args, input_path)
     if args.individual_ea:
@@ -498,7 +527,7 @@ def read_input_lists(paths: list[str]) -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--ida", help="Path to idat/idat64/ida/ida64")
     parser.add_argument("--ida-dir", help="IDA 9.3 installation directory; used when --ida is omitted")
     parser.add_argument("--ghidra-dir", help="Ghidra installation used by the plugin")
@@ -524,7 +553,9 @@ def main() -> int:
     parser.add_argument("--fail-log-pattern", action="append", default=[], help="Additional log substring that fails a run")
     parser.add_argument("--no-default-fail-log-patterns", action="store_true")
     parser.add_argument("--print-log-tail", type=int, default=80)
+    parser.add_argument("--input", dest="input_paths", action="append", default=[], help="Input path; repeatable")
     parser.add_argument("--input-list", action="append", default=[], help="Newline-delimited input path list")
+    parser.add_argument("--summary-json", help="Write a JSON summary for normal decompile-all runs")
     parser.add_argument(
         "--individual-functions",
         action="store_true",
@@ -551,7 +582,7 @@ def main() -> int:
     parser.add_argument("inputs", nargs="*")
     args = parser.parse_args()
 
-    args.inputs = read_input_lists(args.input_list) + args.inputs
+    args.inputs = read_input_lists(args.input_list) + args.input_paths + args.inputs
     if not args.inputs:
         raise SystemExit("No inputs were provided.")
 
@@ -565,20 +596,46 @@ def main() -> int:
         raise SystemExit("--save-idb can only be used with a single input")
 
     failures = 0
+    normal_results = []
     for input_path in expand_inputs(args.inputs):
         if not input_path.exists() or not input_path.is_file():
             print(f"[ghidradec-batch] FAIL: input not found: {input_path}", file=sys.stderr)
             failures += 1
+            normal_results.append({
+                "input": str(input_path),
+                "exit_code": 1,
+                "outcome": "dangerous_fail",
+                "reason": "input not found",
+                "passed": False,
+            })
             continue
         if args.individual_functions:
             code = run_individual_functions(args, input_path)
         else:
             code = run_one(args, input_path)
+            normal_results.append(normal_result(args, input_path, code))
         if code != 0:
             failures += 1
             print(f"[ghidradec-batch] FAIL: {input_path} exited with {code}", file=sys.stderr)
         else:
             print(f"[ghidradec-batch] PASS: {input_path}")
+    if args.summary_json and not args.individual_functions:
+        counts = {"success": 0, "graceful_fail": 0, "dangerous_fail": 0}
+        for result in normal_results:
+            outcome = str(result.get("outcome", "dangerous_fail"))
+            counts[outcome] = counts.get(outcome, 0) + 1
+        summary_path = Path(args.summary_json).resolve()
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(json.dumps({
+            "inputs": len(normal_results),
+            "passed": counts.get("success", 0),
+            "failed": counts.get("graceful_fail", 0) + counts.get("dangerous_fail", 0),
+            "success": counts.get("success", 0),
+            "graceful_fail": counts.get("graceful_fail", 0),
+            "dangerous_fail": counts.get("dangerous_fail", 0),
+            "results": normal_results,
+        }, indent=2, sort_keys=True), encoding="utf-8")
+        print(f"[ghidradec-batch] wrote summary {summary_path}")
     return 1 if failures else 0
 
 

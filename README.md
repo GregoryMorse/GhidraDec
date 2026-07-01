@@ -121,6 +121,8 @@ corpus-scale testing should use the batch runner described in
 `angr/binaries` samples in x86_64, x86_32, then x86_16 order and runs IDA Pro
 9.3 decompile-all in batch mode with dialog automation.
 
+For a local licensed run, use `python tools/ida_corpus_battery.py --corpus angr-binaries --arch x86_64,x86_32,x86_16 --tier smoke,extended`.
+
 Public GitHub-hosted CI is compile/package-only. IDA-backed regression runs
 belong on a licensed self-hosted runner or local release-certification machine.
 

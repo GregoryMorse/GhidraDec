@@ -3152,7 +3152,6 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					std::string reason;
 					if (shouldSkipAllDecompilationFunction(this, f, name, reason)) {
 						allFuncNames[ea] = name;
-						allFuncRanges[ea] = getFunctionRanges(f, "ram");
 						INFO_MSG("Skipping all-decompile entry function " << name.c_str() << " @ " << std::hex << ea << ": " << reason.c_str() << "\n");
 					} else {
 						allFuncs.push_back(ea);
@@ -3174,7 +3173,6 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				std::string reason;
 				if (shouldSkipAllDecompilationFunction(this, f, name, reason)) {
 					allFuncNames[f->start_ea] = name;
-					allFuncRanges[f->start_ea] = getFunctionRanges(f, "ram");
 					INFO_MSG("Skipping all-decompile function " << name.c_str() << " @ " << std::hex << f->start_ea << ": " << reason.c_str() << "\n");
 					continue;
 				}
@@ -4106,24 +4104,29 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 	if (di->idacb->decInt == nullptr) di->idacb->decInt = new DecompInterface();
 	std::vector<CoreType> cts(&defaultCoreTypes[0], &defaultCoreTypes[numDefCoreTypes]);
 	try {
+		INFO_MSG("GhidraDec trace: decompiler setup begin\n");
 		di->idacb->decInt->setup(di->idacb, di->idacb->sleighfilename, di->idacb->pspec, di->idacb->cspec, cts, di->idacb->getOpts(), (int)di->timeout, (int)di->maxPayload);
+		INFO_MSG("GhidraDec trace: decompiler setup complete\n");
 	} catch (DecompError& err) {
 		WARNING_GUI("Decompilation FAILED: " << err.explain << ".\n");
 		di->decompSuccess = false;
 		di->outputFile.clear();
 		return;
 	}
-	for (std::map<ea_t, bool>::iterator it = di->idacb->exportData.begin(); it != di->idacb->exportData.end(); it++) {
-		bool rdonly, volat;
-		std::vector<TypeInfo> tc;
-		di->idacb->lookupDataInfo(it->first, &rdonly, &volat, tc); //must create interface first - for register translation
+	if (!di->idacb->exportData.empty()) {
+		INFO_MSG("GhidraDec trace: deferring export data lookup, count="
+			<< std::dec << di->idacb->exportData.size() << "\n");
 	}
 	time_t startTime = time(NULL);
 	if (di->decompiledFunction == nullptr) {
 		//can decompile entry points first
 		std::map<ea_t, size_t> entries;
 		size_t num = di->idacb->allFuncs.size();
-		if (di->decompPid == 0) di->idacb->decInt->registerProgram();
+		if (di->decompPid == 0) {
+			INFO_MSG("GhidraDec trace: all-decompile registerProgram begin\n");
+			di->idacb->decInt->registerProgram();
+			INFO_MSG("GhidraDec trace: all-decompile registerProgram complete, pid=" << std::dec << di->decompPid << "\n");
+		}
 		std::vector<ea_t> notIded;
 		for (size_t i = 0; i < num; i++) {
 			if (di->idacb->imports.find(di->idacb->allFuncs[i]) != di->idacb->imports.end()) continue;
@@ -4132,7 +4135,9 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 			tryDecomp(di, defaultDecMode, di->idacb->allFuncs[i], disp, bSucc, blockGraph, true);
 			notIded.push_back(di->idacb->allFuncs[i]);
 		}
+		INFO_MSG("GhidraDec trace: all-decompile updateDatabaseFromParams begin, count=" << std::dec << notIded.size() << "\n");
 		di->idacb->updateDatabaseFromParams(notIded);
+		INFO_MSG("GhidraDec trace: all-decompile updateDatabaseFromParams complete\n");
 		int successes = 0, total = 0;
 		for (size_t i = 0; i < num; i++) {
 			if (di->idacb->imports.find(di->idacb->allFuncs[i]) != di->idacb->imports.end()) continue;

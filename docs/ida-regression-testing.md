@@ -41,6 +41,25 @@ python tools/corpus.py stage \
   --output-list build/corpus/angr-x86.txt
 ```
 
+For normal local certification runs, prefer the battery wrapper. It stages the
+manifest-selected files, writes the input list, launches the IDA batch runner,
+and writes machine-readable summaries:
+
+```bash
+python tools/ida_corpus_battery.py \
+  --corpus angr-binaries \
+  --arch x86_64,x86_32,x86_16 \
+  --tier smoke,extended \
+  --ida-dir "/path/to/IDA Professional 9.3" \
+  --ghidra-dir /path/to/ghidra \
+  --plugin build/matrix/ida-9.3/Release/ghidradec64.dll \
+  --work-dir build/ida-corpus-regression/angr-x86-all \
+  --report-dir build/corpus-reports/angr-x86-all
+```
+
+Use `--no-stage` when the selected corpus files are already present under
+`build/corpus`. Use `--refresh` to redownload the pinned public inputs.
+
 ## Test Flow
 
 1. Copy the target binary into an isolated work directory.
@@ -67,6 +86,24 @@ The default work directory is `build/ida-regression`. Each input gets its own
 subdirectory containing the copied binary, IDA log, optional analyzed database,
 and GhidraDec output.
 
+`tools/ida_batch.py` and `tools/ida_corpus_battery.py` report three outcomes:
+
+* `success`: IDA exited cleanly, the done marker was written, and decompiler
+  output met the minimum size check.
+* `graceful_fail`: the plugin reported a controlled diagnostic, such as a
+  selected import function that intentionally cannot be decompiled.
+* `dangerous_fail`: IDA crashed, timed out, failed to create output, or hit an
+  unhandled failure pattern. Windows crash exit codes such as stack overflow and
+  access violation are named in the JSON summary.
+
+The battery writes:
+
+* `inputs.txt`: exact staged binaries used for the run.
+* `ida-batch-summary.json`: per-input pass/fail details, logs, outputs, done
+  markers, and output sizes.
+* `battery-summary.json`: selected corpus metadata plus the embedded batch
+  summary and command line.
+
 By default the runner removes stale IDA sidecar databases for raw binary inputs
 before each run. Pass `--reuse-database` only when deliberately debugging a
 previously scanned database. Pass `--paramid` to include Ghidra parameter
@@ -76,6 +113,11 @@ On Windows, `tools/ida_batch.py` also watches IDA-owned dialogs and sends the
 default confirmation action for common startup, warning, crash, and recovery
 dialogs. This keeps IDA Pro 9.3 batch runs non-interactive while still logging
 which dialogs were handled.
+
+For deeper diagnosis, pass `--individual-functions` to `tools/ida_batch.py`.
+This first asks IDA for the analyzed function list and then launches one
+isolated plugin invocation per function, which is useful for separating
+per-function coverage from combined decompile-all failures.
 
 ## CI Shape
 
