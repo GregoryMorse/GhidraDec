@@ -1064,6 +1064,15 @@ namespace idaplugin {
 #define PRINT_WARNING true
 #define PRINT_INFO    true
 
+inline bool ghidradec_trace_enabled()
+{
+	qstring value;
+	if (!qgetenv("GHIDRADEC_TRACE", &value))
+		return PRINT_DEBUG;
+	std::string flag = value.c_str();
+	return !flag.empty() && flag != "0" && flag != "false" && flag != "FALSE";
+}
+
 #define DBG_MSG(body)     if (PRINT_DEBUG)   { std::stringstream ss; ss << std::showbase << body; msg("%s", ss.str().c_str()); }
 /// Use this only for non-critical error messages.
 #define ERROR_MSG(body)   if (PRINT_ERROR)   { std::stringstream ss; ss << std::showbase << "[GhidraDec error]  :\t" << body; msg("%s", ss.str().c_str()); }
@@ -1071,6 +1080,8 @@ namespace idaplugin {
 #define WARNING_MSG(body) if (PRINT_WARNING) { std::stringstream ss; ss << std::showbase << "[GhidraDec warning]:\t" << body; msg("%s", ss.str().c_str()); }
 /// Use this to inform user.
 #define INFO_MSG(body)    if (PRINT_INFO)    { std::stringstream ss; ss << std::showbase << "[GhidraDec info]   :\t" << body; msg("%s", ss.str().c_str()); }
+/// Use this for regression/debug diagnostics that should not appear in normal GUI use.
+#define TRACE_MSG(body)   if (ghidradec_trace_enabled()) { std::stringstream ss; ss << std::showbase << "[GhidraDec trace]  :\t" << body; msg("%s", ss.str().c_str()); }
 
 /// Use instead of IDA SDK's warning() function.
 #define WARNING_GUI(body) { std::stringstream ss; ss << std::showbase << body; warning("%s", ss.str().c_str()); }

@@ -471,6 +471,12 @@ bool GhidraDec::canDecompileInput()
 			decompInfo->toolMap["metapc"].push_back((int)i); break;
 		}
 	}
+	for (size_t i = 0; i < decompInfo->li.size(); i++) {
+		if (decompInfo->li[i].processor == "AARCH64") {
+			decompInfo->toolMap[decompInfo->li[i].bigEndian ? "armb" : "arm"].push_back((int)i);
+			decompInfo->toolMap["aarch64"].push_back((int)i);
+		}
+	}
 	std::string pname = inf_procname;
 	std::transform(pname.begin(), pname.end(), pname.begin(), [](unsigned char c) { return std::tolower(c); });
 	return decompInfo->toolMap.find(pname) != decompInfo->toolMap.end();

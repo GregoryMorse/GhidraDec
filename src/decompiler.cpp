@@ -3152,7 +3152,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					std::string reason;
 					if (shouldSkipAllDecompilationFunction(this, f, name, reason)) {
 						allFuncNames[ea] = name;
-						INFO_MSG("Skipping all-decompile entry function " << name.c_str() << " @ " << std::hex << ea << ": " << reason.c_str() << "\n");
+						TRACE_MSG("Skipping all-decompile entry function " << name.c_str() << " @ " << std::hex << ea << ": " << reason.c_str() << "\n");
 					} else {
 						allFuncs.push_back(ea);
 						allFuncNames[ea] = name;
@@ -3173,7 +3173,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				std::string reason;
 				if (shouldSkipAllDecompilationFunction(this, f, name, reason)) {
 					allFuncNames[f->start_ea] = name;
-					INFO_MSG("Skipping all-decompile function " << name.c_str() << " @ " << std::hex << f->start_ea << ": " << reason.c_str() << "\n");
+					TRACE_MSG("Skipping all-decompile function " << name.c_str() << " @ " << std::hex << f->start_ea << ": " << reason.c_str() << "\n");
 					continue;
 				}
 				allFuncs.push_back(f->start_ea);
@@ -3185,11 +3185,11 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			if (qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty()) {
 				bool limited = false;
 				size_t pages = preloadMappedSegmentByteCache(this, BATCH_SEGMENT_PRELOAD_LIMIT, &limited);
-				INFO_MSG("Preloaded byte cache for " << std::dec << pages
+				TRACE_MSG("Preloaded byte cache for " << std::dec << pages
 					<< " mapped segment pages for batch decompilation"
 					<< (limited ? " (limit reached)" : "") << "\n");
 			}
-			INFO_MSG("Preloaded byte cache for " << std::dec << allFuncRanges.size()
+			TRACE_MSG("Preloaded byte cache for " << std::dec << allFuncRanges.size()
 				<< " all-decompile functions\n");
 		} else {
 			allFuncNames[di->decompiledFunction->start_ea] = get_name(di->decompiledFunction->start_ea).c_str();
@@ -3199,7 +3199,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			if (qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty()) {
 				bool limited = false;
 				size_t pages = preloadMappedSegmentByteCache(this, BATCH_SEGMENT_PRELOAD_LIMIT, &limited);
-				INFO_MSG("Preloaded byte cache for " << std::dec << pages
+				TRACE_MSG("Preloaded byte cache for " << std::dec << pages
 					<< " mapped segment pages for batch decompilation"
 					<< (limited ? " (limit reached)" : "") << "\n");
 			}
@@ -3985,30 +3985,30 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		FuncProtoInfo paramInfo;
 		definedFuncs[ea] = true;
 		try {
-			INFO_MSG("GhidraDec trace: tryDecomp begin for " << funcName.c_str() << " @ " << std::hex << ea << "\n");
+			TRACE_MSG("tryDecomp begin for " << funcName.c_str() << " @ " << std::hex << ea << "\n");
 			if (di->decompPid == 0) {
-				INFO_MSG("GhidraDec trace: registerProgram begin\n");
+				TRACE_MSG("registerProgram begin\n");
 				decInt->registerProgram();
-				INFO_MSG("GhidraDec trace: registerProgram complete, pid=" << std::dec << di->decompPid << "\n");
+				TRACE_MSG("registerProgram complete, pid=" << std::dec << di->decompPid << "\n");
 			}
 			if (!di->skipParamIdentification && (funcProtoInfos.find(ea) == funcProtoInfos.end() || !funcProtoInfos[ea].bFromParamId)) {
-				INFO_MSG("GhidraDec trace: paramid begin for " << funcName.c_str() << " @ " << std::hex << ea << "\n");
+				TRACE_MSG("paramid begin for " << funcName.c_str() << " @ " << std::hex << ea << "\n");
 				identParams(ea);
 				std::vector<ea_t> notIded;
 				for (std::map<ea_t, FuncInfo>::iterator it = funcProtoInfos.begin(); it != funcProtoInfos.end(); it++)
 					if (!it->second.bFromParamId) {
 						if (it->first != ea && imports.find(it->first) == imports.end()) notIded.push_back(it->first);
 					}
-				INFO_MSG("GhidraDec trace: paramid dependent count=" << std::dec << notIded.size() << "\n");
+				TRACE_MSG("paramid dependent count=" << std::dec << notIded.size() << "\n");
 				for (size_t i = 0; i < notIded.size(); i++) {
-					INFO_MSG("GhidraDec trace: paramid dependent " << std::dec << (i + 1) << "/" << notIded.size() << " @ " << std::hex << notIded[i] << "\n");
+					TRACE_MSG("paramid dependent " << std::dec << (i + 1) << "/" << notIded.size() << " @ " << std::hex << notIded[i] << "\n");
 					identParams(notIded[i]);
 				}
 				for (std::map<ea_t, FuncInfo>::iterator it = funcProtoInfos.begin(); it != funcProtoInfos.end(); )
 					if (!it->second.bFromParamId) funcProtoInfos.erase(it++); else it++;
 				if (!paramOnly) {
 					notIded.push_back(ea);
-					INFO_MSG("GhidraDec trace: updating IDA database from paramid results\n");
+					TRACE_MSG("updating IDA database from paramid results\n");
 					updateDatabaseFromParams(notIded);
 				}
 				//usage tracking obviously should not be affected by sub-functions
@@ -4018,12 +4018,12 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				usedFuncs.clear();
 			}
 			else if (di->skipParamIdentification) {
-				INFO_MSG("GhidraDec trace: skipping parameter identification for regression smoke test\n");
+				TRACE_MSG("skipping parameter identification for regression smoke test\n");
 			}
 			if (paramOnly) return code;
-			INFO_MSG("GhidraDec trace: doDecompile begin for " << funcName.c_str() << " @ " << std::hex << ea << "\n");
+			TRACE_MSG("doDecompile begin for " << funcName.c_str() << " @ " << std::hex << ea << "\n");
 			code = decInt->doDecompile(dec, AddrInfo{ "ram", ea }, display, funcProto, funcColorProto, paramInfo, blockGraph);
-			INFO_MSG("GhidraDec trace: doDecompile complete, code bytes=" << std::dec << code.size() << ", display bytes=" << display.size() << "\n");
+			TRACE_MSG("doDecompile complete, code bytes=" << std::dec << code.size() << ", display bytes=" << display.size() << "\n");
 			if (funcProto.size() != 0) {
 				funcProtos[ea] = funcProto;
 				funcColorProtos[ea] = funcColorProto;
@@ -4054,7 +4054,7 @@ std::string tryDecomp(RdGlobalInfo* di, DecMode dec, ea_t ea, std::string & disp
 {
 	std::string code, err;
 	std::string fn = di->idacb->allFuncNames[ea];
-	INFO_MSG((paramOnly ? "Identifying function parameters: " : "Decompiling function: ") << fn.c_str() << " @ " << std::hex << ea << std::endl);
+	TRACE_MSG((paramOnly ? "Identifying function parameters: " : "Decompiling function: ") << fn.c_str() << " @ " << std::hex << ea << std::endl);
 	code = di->idacb->tryDecomp(dec, ea, fn.c_str(), display, err, blockGraph, paramOnly);
 	if (err.size() != 0) { INFO_MSG(err); }
 	else bSucc = true;
@@ -4104,9 +4104,9 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 	if (di->idacb->decInt == nullptr) di->idacb->decInt = new DecompInterface();
 	std::vector<CoreType> cts(&defaultCoreTypes[0], &defaultCoreTypes[numDefCoreTypes]);
 	try {
-		INFO_MSG("GhidraDec trace: decompiler setup begin\n");
+		TRACE_MSG("decompiler setup begin\n");
 		di->idacb->decInt->setup(di->idacb, di->idacb->sleighfilename, di->idacb->pspec, di->idacb->cspec, cts, di->idacb->getOpts(), (int)di->timeout, (int)di->maxPayload);
-		INFO_MSG("GhidraDec trace: decompiler setup complete\n");
+		TRACE_MSG("decompiler setup complete\n");
 	} catch (DecompError& err) {
 		WARNING_GUI("Decompilation FAILED: " << err.explain << ".\n");
 		di->decompSuccess = false;
@@ -4114,7 +4114,7 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 		return;
 	}
 	if (!di->idacb->exportData.empty()) {
-		INFO_MSG("GhidraDec trace: deferring export data lookup, count="
+		TRACE_MSG("deferring export data lookup, count="
 			<< std::dec << di->idacb->exportData.size() << "\n");
 	}
 	time_t startTime = time(NULL);
@@ -4123,9 +4123,9 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 		std::map<ea_t, size_t> entries;
 		size_t num = di->idacb->allFuncs.size();
 		if (di->decompPid == 0) {
-			INFO_MSG("GhidraDec trace: all-decompile registerProgram begin\n");
+			TRACE_MSG("all-decompile registerProgram begin\n");
 			di->idacb->decInt->registerProgram();
-			INFO_MSG("GhidraDec trace: all-decompile registerProgram complete, pid=" << std::dec << di->decompPid << "\n");
+			TRACE_MSG("all-decompile registerProgram complete, pid=" << std::dec << di->decompPid << "\n");
 		}
 		std::vector<ea_t> notIded;
 		for (size_t i = 0; i < num; i++) {
@@ -4135,9 +4135,9 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 			tryDecomp(di, defaultDecMode, di->idacb->allFuncs[i], disp, bSucc, blockGraph, true);
 			notIded.push_back(di->idacb->allFuncs[i]);
 		}
-		INFO_MSG("GhidraDec trace: all-decompile updateDatabaseFromParams begin, count=" << std::dec << notIded.size() << "\n");
+		TRACE_MSG("all-decompile updateDatabaseFromParams begin, count=" << std::dec << notIded.size() << "\n");
 		di->idacb->updateDatabaseFromParams(notIded);
-		INFO_MSG("GhidraDec trace: all-decompile updateDatabaseFromParams complete\n");
+		TRACE_MSG("all-decompile updateDatabaseFromParams complete\n");
 		int successes = 0, total = 0;
 		for (size_t i = 0; i < num; i++) {
 			if (di->idacb->imports.find(di->idacb->allFuncs[i]) != di->idacb->imports.end()) continue;
@@ -4203,7 +4203,7 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 		return;
 	}
 
-	INFO_MSG("GhidraDec trace: final output assembly begin, code bytes=" << std::dec
+	TRACE_MSG("final output assembly begin, code bytes=" << std::dec
 		<< code.size() << ", display bytes=" << display.size() << "\n");
 	qstring batchOutputEnv;
 	const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
@@ -4223,17 +4223,17 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 			display += std::string({ COLOR_ON, COLOR_AUTOCMT }) + str + std::string({ COLOR_OFF, COLOR_AUTOCMT }) + "\n";
 		}
 	}
-	INFO_MSG("GhidraDec trace: final output assembly complete, code bytes=" << std::dec
+	TRACE_MSG("final output assembly complete, code bytes=" << std::dec
 		<< code.size() << ", display bytes=" << display.size() << "\n");
 
 	//should save to a .c file?
 	//INFO_MSG("Decompiled file: " << decName << "\n");
 	if (di->outputFile.size() != 0) {
-		INFO_MSG("GhidraDec trace: final output write begin: " << di->outputFile.c_str() << "\n");
+		TRACE_MSG("final output write begin: " << di->outputFile.c_str() << "\n");
 		FILE* fp = qfopen(di->outputFile.c_str(), "wb");
 		qfwrite(fp, code.c_str(), code.size());
 		qfclose(fp);
-		INFO_MSG("GhidraDec trace: final output write complete\n");
+		TRACE_MSG("final output write complete\n");
 		di->outputFile.clear();
 	}
 
@@ -4244,7 +4244,7 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 	}
 
 	di->decompSuccess = true;
-	INFO_MSG("GhidraDec trace: localDecompilation complete\n");
+	TRACE_MSG("localDecompilation complete\n");
 }
 
 ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
@@ -4398,9 +4398,9 @@ static int idaapi threadFunc(void* ud)
 
 	di->outputFile.clear();
 	di->suppressViewer = false;
-	INFO_MSG("GhidraDec trace: worker cleanup begin\n");
+	TRACE_MSG("worker cleanup begin\n");
 	stopDecompilation(di, true, false, true);
-	INFO_MSG("GhidraDec trace: worker cleanup complete\n");
+	TRACE_MSG("worker cleanup complete\n");
 	di->decompRunning = false;
 	writeBatchDoneMarker(di);
 	return 0;
@@ -4445,7 +4445,21 @@ void decompileInput(RdGlobalInfo &decompInfo)
 
 	if ((decompInfo.customCspec.empty() || decompInfo.customPspec.empty() || decompInfo.customSlafile.empty()) &&
 		!detectProcCompiler(&decompInfo, pspec, cspec, sleighfilename)) {
-		WARNING_GUI("No matching Ghidra processor found - Decompilation FAILED.\n");
+		std::string message = "No matching Ghidra processor found - Decompilation FAILED.";
+		qstring batchOutputEnv;
+		const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
+		if (batchOutput) {
+			INFO_MSG(message << "\n");
+			FILE* fp = qfopen(batchOutputEnv.c_str(), "wb");
+			if (fp != nullptr) {
+				std::string code = "//" + message + "\n";
+				qfwrite(fp, code.c_str(), code.size());
+				qfclose(fp);
+			}
+			writeBatchDoneMarker(&decompInfo);
+		} else {
+			WARNING_GUI(message << "\n");
+		}
 		decompInfo.decompSuccess = false;
 		decompInfo.outputFile.clear();
 		return;

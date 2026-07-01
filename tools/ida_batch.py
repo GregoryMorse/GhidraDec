@@ -45,6 +45,7 @@ DEFAULT_FAILURE_PATTERNS = (
     "Unhandled exception:",
     "Caught decompilation error:",
     "Skipped decompiling import function:",
+    "No matching Ghidra processor found",
     "[ghidradec-batch] FAIL:",
 )
 GRACEFUL_FAILURE_PATTERNS = (
@@ -52,6 +53,7 @@ GRACEFUL_FAILURE_PATTERNS = (
     "Low-level Error:",
     "[GhidraDec error]",
     "Skipped decompiling import function:",
+    "No matching Ghidra processor found",
 )
 DANGEROUS_FAILURE_PATTERNS = (
     "Unhandled exception:",
@@ -309,12 +311,12 @@ def run_one(
     done_path = output_path.with_suffix(output_path.suffix + ".done")
     idb_path = Path(args.save_idb).resolve() if args.save_idb else default_idb_path(work_input)
     log_path = case_dir / log_name
+    protocol_log_path = protocol_log_override or (case_dir / "ghidradec-protocol.log")
     remove_if_exists(log_path)
     remove_if_exists(done_path)
     if output_path_override is not None:
         remove_if_exists(output_path_override)
-    if protocol_log_override is not None:
-        remove_if_exists(protocol_log_override)
+    remove_if_exists(protocol_log_path)
     if not args.reuse_database:
         clean_ida_database_sidecars(work_input, idb_path)
     plugin_names, ida_user_dir = stage_plugin_plugins(args.plugin, case_dir)
@@ -332,8 +334,8 @@ def run_one(
     env["GHIDRADEC_BATCH_CLEAN_OUTPUT"] = "1"
     env["GHIDRADEC_TEST_SKIP_PARAMID"] = "0" if args.paramid else "1"
     env["GHIDRADEC_TEST_TIMEOUT"] = str(args.timeout)
-    if protocol_log_override is not None:
-        env["GHIDRADEC_PROTOCOL_LOG"] = str(protocol_log_override)
+    env["GHIDRADEC_TRACE"] = "1" if args.trace else "0"
+    env["GHIDRADEC_PROTOCOL_LOG"] = str(protocol_log_path)
     if ida_user_dir is not None:
         env["IDAUSR"] = str(ida_user_dir)
         print(f"[ghidradec-batch] staged plugin(s) in IDAUSR={ida_user_dir}")
@@ -553,6 +555,8 @@ def main() -> int:
     parser.add_argument("--fail-log-pattern", action="append", default=[], help="Additional log substring that fails a run")
     parser.add_argument("--no-default-fail-log-patterns", action="store_true")
     parser.add_argument("--print-log-tail", type=int, default=80)
+    parser.add_argument("--trace", dest="trace", action="store_true", default=True, help="Enable GhidraDec trace logging in IDA")
+    parser.add_argument("--no-trace", dest="trace", action="store_false", help="Disable GhidraDec trace logging in IDA")
     parser.add_argument("--input", dest="input_paths", action="append", default=[], help="Input path; repeatable")
     parser.add_argument("--input-list", action="append", default=[], help="Newline-delimited input path list")
     parser.add_argument("--summary-json", help="Write a JSON summary for normal decompile-all runs")

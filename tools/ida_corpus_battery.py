@@ -98,6 +98,8 @@ def build_ida_batch_command(args: argparse.Namespace, input_list: Path, summary_
         cmd.append("--paramid")
     if args.dialog_automation == "off":
         cmd.extend(["--dialog-automation", "off"])
+    if not args.trace:
+        cmd.append("--no-trace")
     return cmd
 
 
@@ -122,6 +124,8 @@ def main() -> int:
     parser.add_argument("--reuse-database", action="store_true")
     parser.add_argument("--save-database", action="store_true")
     parser.add_argument("--paramid", action="store_true")
+    parser.add_argument("--trace", dest="trace", action="store_true", default=True, help="Enable GhidraDec trace logging in IDA")
+    parser.add_argument("--no-trace", dest="trace", action="store_false", help="Disable GhidraDec trace logging in IDA")
     parser.add_argument("--dialog-automation", choices=["auto", "off"], default="auto")
     parser.add_argument("--no-stage", action="store_true", help="Use already staged corpus files only")
     parser.add_argument("--dry-run", action="store_true", help="Stage/list targets but do not launch IDA")

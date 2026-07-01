@@ -39,12 +39,25 @@
 #include <future>
 #include <stack>
 #include <cctype>
+#include <cstdlib>
+#include <fstream>
 
 #include "sleighinterface.h"
 
 using namespace ghidra;
 using namespace std;
 using XmlError = ghidra::DecoderError;
+
+static void setupTrace(DecompileCallback* callback, const std::string& message)
+{
+	const char* protocolLog = std::getenv("GHIDRADEC_PROTOCOL_LOG");
+	if (protocolLog != nullptr && protocolLog[0] != '\0') {
+		std::ofstream fp(protocolLog, std::ios::app | std::ios::binary);
+		fp << "Received: setup " << message << "\n";
+	}
+	if (callback != nullptr)
+		callback->protocolRecorder("setup " + message, false);
+}
 
 static ElementId ELEM_COMMAND_GETBYTES = ElementId("command_getbytes", 240);
 static ElementId ELEM_COMMAND_GETCALLFIXUP = ElementId("command_getcallfixup", 241);
@@ -1141,15 +1154,17 @@ void parsePcodeElement(Element* pcode,
 	for (iter = children.begin(); iter != children.end(); ++iter) {
 		Element* child = *iter;
 		if (child->getName() == "input") {
-			inputs.push_back(std::pair<std::string, int>(child->getAttributeValue("name"),
-				strtoull(child->getAttributeValue("size").c_str(), nullptr, 10)));
+			inputs.push_back(std::pair<std::string, int>(child->getAttributeValue("name"), 0));
 		} else if (child->getName() == "output") {
-			outputs.push_back(std::pair<std::string, int>(child->getAttributeValue("name"),
-				strtoull(child->getAttributeValue("size").c_str(), nullptr, 10)));
+			outputs.push_back(std::pair<std::string, int>(child->getAttributeValue("name"), 0));
 		} else if (child->getName() == "body") {
 			body = child->getContent();
 		}
 	}
+	for (size_t i = 0; i < inputs.size(); i++)
+		inputs[i].second = (int)i;
+	for (size_t i = 0; i < outputs.size(); i++)
+		outputs[i].second = (int)(inputs.size() + i);
 }
 
 void decodeVarnodeList(Decoder& decoder, const ElementId& elemId, std::vector<VarnodeData>& out)
@@ -2684,6 +2699,7 @@ std::string DecompInterface::getPackedAddress(AddrInfo addr)
 void DecompInterface::setupTranslator(DecompileCallback* cb, std::string sleighfilename)
 {
 	callback = cb;
+	setupTrace(callback, "translator begin");
 	/*ifstream s(sleighfilename);
 	Document* doc = xml_tree(s);
 	s.close();
@@ -2740,25 +2756,34 @@ void DecompInterface::setupTranslator(DecompileCallback* cb, std::string sleighf
 	if (context != nullptr) delete context;
 	if (loader != nullptr) delete loader;
 	context = new ContextInternal();
+	setupTrace(callback, "context allocated");
 	// Set up the assembler/pcode-translator
 	//if (trans != nullptr)
 		//trans->reset(&loader, context);
 	//else
 	loader = new CallbackLoadImage(callback);
+	setupTrace(callback, "loader allocated");
 
 	DocumentStorage docstorage;
 	if (lastsleighfile != sleighfilename) {
 		lastsleighfile = sleighfilename;
 		if (trans != nullptr) delete trans;
 		trans = new Sleigh(loader, context);
+		setupTrace(callback, "sleigh allocated");
 		Element sleighroot(nullptr);
 		sleighroot.setName("sleigh");
 		sleighroot.addContent(sleighfilename.c_str(), 0, (int4)sleighfilename.size());
 		docstorage.registerTag(&sleighroot);
+		setupTrace(callback, "sleigh initialize begin");
 		trans->initialize(docstorage); // Initialize the translator
+		setupTrace(callback, "sleigh initialize complete");
 	} else {
+		setupTrace(callback, "sleigh reset begin");
 		trans->reset(loader, context);
+		setupTrace(callback, "sleigh reset complete");
+		setupTrace(callback, "sleigh reinitialize begin");
 		trans->initialize(docstorage);
+		setupTrace(callback, "sleigh reinitialize complete");
 	}
 
 	for (std::map<std::string, XmlPcodeEmit*>::iterator it = callFixupMap.begin();
@@ -2784,6 +2809,7 @@ void DecompInterface::setupTranslator(DecompileCallback* cb, std::string sleighf
 	callExecPcodeMap.clear();
 
 	uniqueBase = trans->getUniqueBase(); //for pcode injections
+	setupTrace(callback, "translator complete");
 }
 
 #define getDefaultSpace getDefaultCodeSpace //Ghidra 10
@@ -2792,7 +2818,9 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 	std::string pspecfilename, std::string cspecfilename, std::vector<CoreType>& coreTypes,
 	Options opt, int timeout, int maxpload)
 {
+	setupTrace(cb, "interface setup begin");
 	setupTranslator(cb, sleighfilename);
+	setupTrace(cb, "core types begin");
 	std::string szCoreTypes = "    <coretypes>\n";
 	for (std::vector<CoreType>::iterator it = coreTypes.begin(); it != coreTypes.end(); it++) {
 		it->id = hashName(it->name);
@@ -2805,11 +2833,15 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 	}
 	szCoreTypes += "    </coretypes>\n";
 	coretypesxml = szCoreTypes;
+	setupTrace(cb, "read compiler and processor specs begin");
 	cspecxml = readFileAsString(cspecfilename);
 	pspecxml = readFileAsString(pspecfilename);
-	
+	setupTrace(cb, "read compiler and processor specs complete");
+
 	std::vector<InitStateItem> inits;
+	setupTrace(cb, "ida initial state begin");
 	cb->getInits(inits);
+	setupTrace(cb, "ida initial state complete count=\"" + std::to_string(inits.size()) + "\"");
 	//no good way to do this in a future-proof way as no protected members, no good accessor methods, XML looks the best
 	partmap<Address, TrackedSet> newtrackmap;
 	std::string str;
@@ -2840,7 +2872,9 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 	istringstream ss(pspecxml);
 	Document* doc;
 	try {
+		setupTrace(cb, "processor spec parse begin");
 		doc = xml_tree(ss);
+		setupTrace(cb, "processor spec parse complete");
 	} catch (XmlError& err) {
 		throw DecompError("Processor spec file not found or could not be parsed: " + err.explain);
 	}
@@ -2965,6 +2999,7 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 		}
 	}
 	delete doc;
+	setupTrace(cb, "processor spec apply complete");
 
 	for (partmap<Address, TrackedSet>::iterator it = newtrackmap.begin();
 		it != newtrackmap.end(); ++it) {
@@ -2987,7 +3022,9 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 
 	istringstream s(cspecxml);
 	try {
+		setupTrace(cb, "compiler spec parse begin");
 		doc = xml_tree(s);
+		setupTrace(cb, "compiler spec parse complete");
 	} catch (XmlError& err) {
 		throw DecompError("Compiler spec file not found or could not be parsed: " + err.explain);
 	}
@@ -2997,11 +3034,14 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 	const List& l(el->getChildren());
 	for (iter = l.begin(); iter != l.end(); ++iter) {
 		el = *iter;
-		if (el->getName() == "default_proto") {
+		std::string elemName = el->getName();
+		setupTrace(cb, "compiler element begin name=\"" + elemName + "\"");
+		if (elemName == "default_proto") {
 			const List& lst(el->getChildren());
 			List::const_iterator it;
 			for (it = lst.begin(); it != lst.end(); ++it) {
 				el = *it; //el->getName() == "prototype"
+				setupTrace(cb, "compiler default_proto prototype name=\"" + el->getAttributeValue("name") + "\"");
 				callStyle = el->getAttributeValue("name");
 				callStyles[el->getAttributeValue("name")] =
 					strtoull(el->getAttributeValue("extrapop").c_str(), nullptr, 10);
@@ -3009,10 +3049,11 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 				//break;
 			}
 			//break;
-		} else if (el->getName() == "prototype") {
+		} else if (elemName == "prototype") {
 			//callStyle = el->getAttributeValue("name");
 			//CALLMECHANISM_TYPE is for Dalvik/JVM all so far are dynamic
 			//input, output, pcode inject="uponentry/uponreturn" dynamic="true/false" then use el->getAttributeValue("name") + "@@inject_uponentry" or "@@inject_uponreturn"; -> body
+			setupTrace(cb, "compiler prototype name=\"" + el->getAttributeValue("name") + "\"");
 			callStyles[el->getAttributeValue("name")] =
 				strtoull(el->getAttributeValue("extrapop").c_str(), nullptr, 10);
 			const List& lst(el->getChildren());
@@ -3042,13 +3083,14 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 				}
 			}
 			//<pcode inject="uponentry"/"uponreturn" dynamic="true"/"false"><body></pcode>
-		} else if (el->getName() == "resolveprototype") {
+		} else if (elemName == "resolveprototype") {
 			callStyles[el->getAttributeValue("name")] = -1;
-		} else if (el->getName() == "stackpointer") {
+		} else if (elemName == "stackpointer") {
 			stackPointerReg = el->getAttributeValue("register");
 			//stackPointerSpace = el->getAttributeValue("space");
-		} else if (el->getName() == "callfixup") { //CALLFIXUP_TYPE - wider use
+		} else if (elemName == "callfixup") { //CALLFIXUP_TYPE - wider use
 			//target name=..., pcode -> body[CDATA]
+			setupTrace(cb, "compiler callfixup name=\"" + el->getAttributeValue("name") + "\"");
 			const List& lst(el->getChildren());
 			List::const_iterator it;
 			intb paramShift = 0;
@@ -3074,8 +3116,10 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 					}
 				}
 			}
-		} else if (el->getName() == "callotherfixup") { //CALLOTHERFIXUP_TYPE is for Dalvik/JVM all so far are dynamic
+		} else if (elemName == "callotherfixup") { //CALLOTHERFIXUP_TYPE is for Dalvik/JVM all so far are dynamic
 			//targetop="" -> pcode -> body[CDATA]
+			std::string targetop = el->getAttributeValue("targetop");
+			setupTrace(cb, "compiler callotherfixup name=\"" + targetop + "\"");
 			const List& lst(el->getChildren());
 			List::const_iterator it;
 			for (it = lst.begin(); it != lst.end(); ++it) {
@@ -3084,35 +3128,25 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 					for (size_t i = 0; i < e->getNumAttributes(); i++) {
 						if (e->getAttributeName(i) == "dynamic") {
 							if (e->getAttributeValue(i) == "true")
-								callFixupOtherMap[el->getAttributeValue("name")] = new XmlPcodeEmit;
+								callFixupOtherMap[targetop] = new XmlPcodeEmit;
 							break;
 						}
 					}
-					List::const_iterator t;
-					const List& l(e->getChildren());
 					std::string body;
 					std::vector<std::pair<std::string, int>> inputs;
 					std::vector<std::pair<std::string, int>> outputs;
-					for (t = l.begin(); t != l.end(); ++t) {
-						if ((*t)->getName() == "input") { //name, size
-							inputs.push_back(std::pair<std::string, int>((*t)->getAttributeValue("name"),
-								strtoull((*t)->getAttributeValue("size").c_str(), nullptr, 10)));
-						} else if ((*t)->getName() == "output") { //name, size
-							outputs.push_back(std::pair<std::string, int>((*t)->getAttributeValue("name"),
-								strtoull((*t)->getAttributeValue("size").c_str(), nullptr, 10)));
-						} else if ((*t)->getName() == "body") {
-							body = (*t)->getContent();
-						}
-					}
+					parsePcodeElement(e, body, inputs, outputs);
 					if (body.size() != 0) {
-						callFixupOtherMap[el->getAttributeValue("targetop")] = getPcodeSnippet(body, inputs, outputs);
+						callFixupOtherMap[targetop] = getPcodeSnippet(body, inputs, outputs);
 					} else {
-						callFixupOtherMap[el->getAttributeValue("targetop")]->inputs = inputs;
-						callFixupOtherMap[el->getAttributeValue("targetop")]->outputs = outputs;
+						if (callFixupOtherMap[targetop] == nullptr)
+							callFixupOtherMap[targetop] = new XmlPcodeEmit;
+						callFixupOtherMap[targetop]->inputs = inputs;
+						callFixupOtherMap[targetop]->outputs = outputs;
 					}
 				}
 			}
-		} else if (el->getName() == "global") {
+		} else if (elemName == "global") {
 			const List& lst(el->getChildren());
 			List::const_iterator it;
 			for (it = lst.begin(); it != lst.end(); ++it) {
@@ -3126,6 +3160,7 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 				}
 			}
 		}
+		setupTrace(cb, "compiler element complete name=\"" + elemName + "\"");
 	}
 	std::string procSpaces = "<spaces defaultspace=\"" + trans->getDefaultSpace()->getName() + "\">";
 	for (int i = 0; i < trans->numSpaces(); i++) {
@@ -3154,10 +3189,14 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 		"\" uniqbase=\"0x" + to_string(uniqBase, hex) + "\">\n  " + procSpaces + "\n</sleigh>\n";
 
 	delete doc;
+	setupTrace(cb, "compiler spec apply complete");
 	xmlOptions = getOptions(opt);
+	setupTrace(cb, "options xml complete");
 	packedOptions = getPackedOptions(opt);
+	setupTrace(cb, "packed options complete");
 	symbolIds.clear();
 	functionSymbolEntries.clear();
+	setupTrace(cb, "interface setup complete");
 }
 
 /**

@@ -31,6 +31,15 @@ the repo and fetch/extract binaries into the build tree.
 2. `x86_32`
 3. `x86_16`
 
+The baseline expansion order then adds:
+
+1. `armel`
+2. `armhf`
+3. `aarch64`
+4. `mips`
+5. `mipsel`
+6. `mips64`
+
 Stage the smoke tier with:
 
 ```bash
@@ -55,6 +64,20 @@ python tools/ida_corpus_battery.py \
   --plugin build/matrix/ida-9.3/Release/ghidradec64.dll \
   --work-dir build/ida-corpus-regression/angr-x86-all \
   --report-dir build/corpus-reports/angr-x86-all
+```
+
+For the first non-x86 smoke sweep:
+
+```bash
+python tools/ida_corpus_battery.py \
+  --corpus angr-binaries \
+  --arch armel,armhf,aarch64,mips,mipsel,mips64 \
+  --tier smoke \
+  --ida-dir "/path/to/IDA Professional 9.3" \
+  --ghidra-dir /path/to/ghidra \
+  --plugin build/matrix/ida-9.3/Release/ghidradec64.dll \
+  --work-dir build/ida-corpus-regression/angr-arm-mips-smoke \
+  --report-dir build/corpus-reports/angr-arm-mips-smoke
 ```
 
 Use `--no-stage` when the selected corpus files are already present under
@@ -108,6 +131,20 @@ By default the runner removes stale IDA sidecar databases for raw binary inputs
 before each run. Pass `--reuse-database` only when deliberately debugging a
 previously scanned database. Pass `--paramid` to include Ghidra parameter
 identification in a deeper release-certification run.
+
+Batch runs enable `GHIDRADEC_TRACE` by default so the IDA log and
+`ghidradec-protocol.log` contain setup, query, and decompile breadcrumbs. Pass
+`--no-trace` to `tools/ida_batch.py` or `tools/ida_corpus_battery.py` for quieter
+logs. GUI use defaults to user-facing `INFO_MSG` output only; set
+`GHIDRADEC_TRACE=1` when debugging an interactive session.
+
+Current ARM/AArch64/MIPS smoke status:
+
+* `armel`, `armhf`, `aarch64`, and `mipsel` pass the smoke targets.
+* `mips` and `mips64` reach controlled `graceful_fail` results on the current
+  big-endian smoke samples because the native Ghidra decompiler child exits
+  during function decompilation. The plugin survives, writes diagnostics, and
+  does not crash IDA.
 
 On Windows, `tools/ida_batch.py` also watches IDA-owned dialogs and sends the
 default confirmation action for common startup, warning, crash, and recovery

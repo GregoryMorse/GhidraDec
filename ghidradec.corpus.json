@@ -80,11 +80,177 @@
           "path": "tests/x86/hello_syscalls",
           "enabled": true,
           "notes": "x86 baseline sample kept in the 16-bit expansion lane for loader/processor smoke coverage."
+        },
+        {
+          "id": "angr-armel-fauxware",
+          "arch": "armel",
+          "tier": "smoke",
+          "path": "tests/armel/fauxware",
+          "enabled": true
+        },
+        {
+          "id": "angr-armel-test_arrays",
+          "arch": "armel",
+          "tier": "smoke",
+          "path": "tests/armel/test_arrays",
+          "enabled": true
+        },
+        {
+          "id": "angr-armel-test_loops",
+          "arch": "armel",
+          "tier": "extended",
+          "path": "tests/armel/test_loops",
+          "enabled": true
+        },
+        {
+          "id": "angr-armel-test_division",
+          "arch": "armel",
+          "tier": "extended",
+          "path": "tests/armel/test_division",
+          "enabled": true
+        },
+        {
+          "id": "angr-armhf-fauxware",
+          "arch": "armhf",
+          "tier": "smoke",
+          "path": "tests/armhf/fauxware",
+          "enabled": true
+        },
+        {
+          "id": "angr-armhf-test_arrays",
+          "arch": "armhf",
+          "tier": "smoke",
+          "path": "tests/armhf/test_arrays",
+          "enabled": true
+        },
+        {
+          "id": "angr-armhf-test_loops",
+          "arch": "armhf",
+          "tier": "extended",
+          "path": "tests/armhf/test_loops",
+          "enabled": true
+        },
+        {
+          "id": "angr-armhf-test_division",
+          "arch": "armhf",
+          "tier": "extended",
+          "path": "tests/armhf/test_division",
+          "enabled": true
+        },
+        {
+          "id": "angr-aarch64-test_arrays",
+          "arch": "aarch64",
+          "tier": "smoke",
+          "path": "tests/aarch64/test_arrays",
+          "enabled": true
+        },
+        {
+          "id": "angr-aarch64-test_loops",
+          "arch": "aarch64",
+          "tier": "extended",
+          "path": "tests/aarch64/test_loops",
+          "enabled": true
+        },
+        {
+          "id": "angr-aarch64-test_division",
+          "arch": "aarch64",
+          "tier": "extended",
+          "path": "tests/aarch64/test_division",
+          "enabled": true
+        },
+        {
+          "id": "angr-mips-fauxware",
+          "arch": "mips",
+          "tier": "smoke",
+          "path": "tests/mips/fauxware",
+          "enabled": true,
+          "notes": "Big-endian MIPS."
+        },
+        {
+          "id": "angr-mips-test_arrays",
+          "arch": "mips",
+          "tier": "smoke",
+          "path": "tests/mips/test_arrays",
+          "enabled": true,
+          "notes": "Big-endian MIPS."
+        },
+        {
+          "id": "angr-mips-test_loops",
+          "arch": "mips",
+          "tier": "extended",
+          "path": "tests/mips/test_loops",
+          "enabled": true,
+          "notes": "Big-endian MIPS."
+        },
+        {
+          "id": "angr-mips-test_division",
+          "arch": "mips",
+          "tier": "extended",
+          "path": "tests/mips/test_division",
+          "enabled": true,
+          "notes": "Big-endian MIPS."
+        },
+        {
+          "id": "angr-mipsel-fauxware",
+          "arch": "mipsel",
+          "tier": "smoke",
+          "path": "tests/mipsel/fauxware",
+          "enabled": true,
+          "notes": "Little-endian MIPS."
+        },
+        {
+          "id": "angr-mipsel-test_arrays",
+          "arch": "mipsel",
+          "tier": "smoke",
+          "path": "tests/mipsel/test_arrays",
+          "enabled": true,
+          "notes": "Little-endian MIPS."
+        },
+        {
+          "id": "angr-mipsel-test_loops",
+          "arch": "mipsel",
+          "tier": "extended",
+          "path": "tests/mipsel/test_loops",
+          "enabled": true,
+          "notes": "Little-endian MIPS."
+        },
+        {
+          "id": "angr-mipsel-test_division",
+          "arch": "mipsel",
+          "tier": "extended",
+          "path": "tests/mipsel/test_division",
+          "enabled": true,
+          "notes": "Little-endian MIPS."
+        },
+        {
+          "id": "angr-mips64-test_arrays",
+          "arch": "mips64",
+          "tier": "smoke",
+          "path": "tests/mips64/test_arrays",
+          "enabled": true,
+          "notes": "Big-endian MIPS64."
+        },
+        {
+          "id": "angr-mips64-test_loops",
+          "arch": "mips64",
+          "tier": "extended",
+          "path": "tests/mips64/test_loops",
+          "enabled": true,
+          "notes": "Big-endian MIPS64."
+        },
+        {
+          "id": "angr-mips64-test_division",
+          "arch": "mips64",
+          "tier": "extended",
+          "path": "tests/mips64/test_division",
+          "enabled": true,
+          "notes": "Big-endian MIPS64."
         }
       ]
     }
   ],
   "orders": {
-    "x86-first": ["x86_64", "x86_32", "x86_16"]
+    "x86-first": ["x86_64", "x86_32", "x86_16"],
+    "baseline-expansion": ["x86_64", "x86_32", "x86_16", "armel", "armhf", "aarch64", "mips", "mipsel", "mips64"]
   }
 }
