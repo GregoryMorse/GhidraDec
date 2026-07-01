@@ -16,6 +16,13 @@ set(GHIDRADEC_GHIDRA_SOURCE_DIR "${GHIDRADEC_GENERATED_DEPS_DIR}/ghidra-decompil
 set(GHIDRADEC_GHIDRA_DECOMPILE_DIR "${GHIDRADEC_GENERATED_DEPS_DIR}/ghidra-decompiler/decompile" CACHE PATH "Generated Ghidra decompiler source subset used by this build.")
 option(GHIDRADEC_REFRESH_GHIDRA_SOURCES "Refresh generated decompiler sources from GHIDRA_DECOMPILER_CPP_DIR during configure." OFF)
 
+set(GHIDRADEC_DEFAULT_DEPLOY_DIR "")
+if(WIN32 AND DEFINED ENV{APPDATA})
+	file(TO_CMAKE_PATH "$ENV{APPDATA}/Hex-Rays/IDA Pro/plugins" GHIDRADEC_DEFAULT_DEPLOY_DIR)
+endif()
+option(GHIDRADEC_AUTO_DEPLOY "Try to copy built IDA plugins to GHIDRADEC_DEPLOY_DIR after each successful build." OFF)
+set(GHIDRADEC_DEPLOY_DIR "${GHIDRADEC_DEFAULT_DEPLOY_DIR}" CACHE PATH "Optional IDA plugin directory for GHIDRADEC_AUTO_DEPLOY.")
+
 set(GHIDRA_DEC_DEPS
 	"address.*"
 	"context.*"
@@ -329,6 +336,21 @@ function(ghidradec_add_idaplugin TARGET_NAME EA_MODE IDA_LIBRARY OUTPUT_NAME)
 		else()
 			# ghidradec64 should be renamed after build to ghidradec, but lib and exp cannot conflict.
 			set_target_properties(${TARGET_NAME} PROPERTIES SUFFIX ".p64")
+		endif()
+	endif()
+
+	if(GHIDRADEC_AUTO_DEPLOY)
+		if(GHIDRADEC_DEPLOY_DIR)
+			add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
+				COMMAND "${CMAKE_COMMAND}"
+					"-DSOURCE=$<TARGET_FILE:${TARGET_NAME}>"
+					"-DDESTINATION=${GHIDRADEC_DEPLOY_DIR}"
+					-P "${CMAKE_CURRENT_LIST_DIR}/cmake/deploy_plugin.cmake"
+				COMMENT "Trying to deploy $<TARGET_FILE_NAME:${TARGET_NAME}> to ${GHIDRADEC_DEPLOY_DIR}"
+				VERBATIM
+			)
+		else()
+			message(WARNING "GHIDRADEC_AUTO_DEPLOY is ON but GHIDRADEC_DEPLOY_DIR is empty; skipping plugin deploy.")
 		endif()
 	endif()
 

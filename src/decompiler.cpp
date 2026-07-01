@@ -3896,7 +3896,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 
 	void IdaCallback::updateDatabaseFromParams(std::vector<ea_t> eas)
 	{
-		if ((di->viewFeatures & 2) == 0) return;
+		if ((di->viewFeatures & VIEW_FEATURE_APPLY_PARAM_ID) == 0) return;
 		return; //not fully working
 		for (size_t i = 0; i < eas.size(); ) {
 			if (!funcProtoInfos[eas[i]].bFromParamId) eas.erase(eas.begin() + i); else i++;
@@ -4402,7 +4402,7 @@ ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 
 void displayBlockGraph(RdGlobalInfo* di, ea_t ea)
 {
-	if ((di->viewFeatures & 1) == 0) return;
+	if ((di->viewFeatures & VIEW_FEATURE_GRAPH) == 0) return;
 	di->idacb->executeOnMainThread([di, ea]() {
 		if (di->graphViewer != nullptr) {
 			if (find_widget((di->viewerName + "_Graph").c_str()) != nullptr)
@@ -4511,6 +4511,8 @@ void decompileInput(RdGlobalInfo &decompInfo)
 	std::string pspec;
 	std::string cspec;
 
+	time_t stageStart = time(NULL);
+	TRACE_MSG("detectProcCompiler begin\n");
 	if ((decompInfo.customCspec.empty() || decompInfo.customPspec.empty() || decompInfo.customSlafile.empty()) &&
 		!detectProcCompiler(&decompInfo, pspec, cspec, sleighfilename)) {
 		std::string message = "No matching Ghidra processor found - Decompilation FAILED.";
@@ -4532,12 +4534,16 @@ void decompileInput(RdGlobalInfo &decompInfo)
 		decompInfo.outputFile.clear();
 		return;
 	}
+	TRACE_MSG("detectProcCompiler complete in " << std::dec << (time(NULL) - stageStart) << " seconds\n");
 
 	if (!decompInfo.customCspec.empty()) cspec = decompInfo.customCspec;
 	if (!decompInfo.customPspec.empty()) pspec = decompInfo.customPspec;
 	if (!decompInfo.customSlafile.empty()) sleighfilename = decompInfo.customSlafile;
 	INFO_MSG("Detected Processor spec: " << pspec << " Compiler spec: " << cspec << " Sleigh file: " << sleighfilename << "\n");
+	stageStart = time(NULL);
+	TRACE_MSG("IdaCallback init begin\n");
 	decompInfo.idacb->init(sleighfilename, pspec, cspec);
+	TRACE_MSG("IdaCallback init complete in " << std::dec << (time(NULL) - stageStart) << " seconds\n");
 
 	// Create decompilation thread.
 	//

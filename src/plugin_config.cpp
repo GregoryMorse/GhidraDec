@@ -149,7 +149,7 @@ bool readConfigFile(RdGlobalInfo& rdgi)
 	}
 
 	rdgi.ghidraPath = root.get(JSON_ghidraPath, "").asString();
-	rdgi.viewFeatures = root.get(JSON_viewFeatures, 1 | 2).asUInt();
+	rdgi.viewFeatures = root.get(JSON_viewFeatures, ghidradec_default_view_features()).asUInt();
 	rdgi.cacheSize = (sval_t)root.get(JSON_cacheSize, 10).asUInt64();
 	rdgi.maxPayload = (sval_t)root.get(JSON_maxPayload, 50).asUInt64();
 	rdgi.timeout = (sval_t)root.get(JSON_timeout, 30).asUInt64();
@@ -350,7 +350,8 @@ bool askUserToConfigurePlugin(RdGlobalInfo& rdgi)
 		"Path to %A (unnecessary if it is in the system PATH):\n"
 		"<Ghidra Folder:F1::60::>\n"
 		"<Show Control-Flow Graph View:C>\n"
-		"<Use Extra Parameter Identification Phase:C>>\n"
+		"<Use Extra Parameter Identification Phase:C>\n"
+		"<Back up IDA database before decompilation:C>>\n"
 		"<Cache Size (Functions):D::::>\n"
 		"<Decompiler Max-Payload (MBytes):D::::>\n"
 		"<Decompiler Timeout (seconds):D::::>\n"

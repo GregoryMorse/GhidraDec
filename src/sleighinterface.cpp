@@ -85,6 +85,7 @@ static ElementId ELEM_COMMAND_GETPCODE = ElementId("command_getpcode", 251);
 static ElementId ELEM_COMMAND_GETPCODEEXECUTABLE = ElementId("command_getpcodeexecutable", 252);
 static ElementId ELEM_COMMAND_GETREGISTER = ElementId("command_getregister", 253);
 static ElementId ELEM_COMMAND_GETREGISTERNAME = ElementId("command_getregistername", 254);
+static ElementId ELEM_COMMAND_GETSTRINGDATA = ElementId("command_getstringdata", 255);
 static ElementId ELEM_COMMAND_GETTRACKEDREGISTERS = ElementId("command_gettrackedregisters", 256);
 static ElementId ELEM_COMMAND_GETUSEROPNAME = ElementId("command_getuseropname", 257);
 static ElementId ELEM_RESPONSE_SCOPE = ElementId("scope", 80);
@@ -117,6 +118,7 @@ static AttributeId ATTRIB_RESPONSE_MODEL = AttributeId("model", 13);
 static AttributeId ATTRIB_RESPONSE_NORETURN = AttributeId("noreturn", 123);
 static AttributeId ATTRIB_RESPONSE_VOLATILE = AttributeId("volatile", 65);
 static AttributeId ATTRIB_RESPONSE_CAT = AttributeId("cat", 61);
+static AttributeId ATTRIB_RESPONSE_MAXSIZE = AttributeId("maxsize", 120);
 static ElementId ELEM_OPTION_READONLY = ElementId("readonly", 151);
 static ElementId ELEM_OPTION_COMMENTHEADER = ElementId("commentheader", 177);
 static ElementId ELEM_OPTION_COMMENTINDENT = ElementId("commentindent", 178);
@@ -2068,6 +2070,48 @@ std::vector<uchar> DecompInterface::readResponse() {
 						writeString(name);
 						write(query_response_end, sizeof(query_response_end));
 						callback->protocolRecorder("queryresponse(command_getregistername \"" + escapeCStr(name) + "\")", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETSTRINGDATA) {
+						int4 maxSize = (int4)decoder.readSignedInteger(ATTRIB_RESPONSE_MAXSIZE);
+						std::string dtName = decoder.readString(ATTRIB_TYPE);
+						uintb dtId = decoder.readUnsignedInteger(ATTRIB_ID);
+						Address queryAddr = Address::decode(decoder);
+						decoder.closeElement(elemId);
+						AddrSpace* space = queryAddr.getSpace();
+						AddrInfo addr{ space != nullptr ? space->getName() : std::string(), queryAddr.getOffset() };
+						callback->protocolRecorder("query(command_getstringdata addr=\"" + addr.space +
+							":0x" + to_string(addr.offset, hex) + "\" type=\"" +
+							escapeCStr(dtName) + "\" id=\"" + to_string(dtId, hex) +
+							"\" maxsize=\"" + std::to_string(maxSize) + "\")", false);
+						std::vector<uchar> res = callback->getStringData(addr);
+						uchar isTruncated = 0;
+						if (maxSize >= 0 && res.size() > static_cast<size_t>(maxSize)) {
+							res.resize(static_cast<size_t>(maxSize));
+							isTruncated = 1;
+						}
+						std::vector<uchar> dblres;
+						dblres.resize(res.size() * 2);
+						for (size_t i = 0; i < res.size(); i++) {
+							dblres[i * 2] = (uchar)(((res[i] >> 4) & 0xf) + 65);
+							dblres[i * 2 + 1] = (uchar)((res[i] & 0xf) + 65);
+						}
+						write(query_response_start, sizeof(query_response_start));
+						write(byte_start, sizeof(byte_start));
+						int sz = (int)res.size();
+						uchar sz1 = (sz & 0x3f) + 0x20;
+						sz >>= 6;
+						uchar sz2 = (sz & 0x3f) + 0x20;
+						write(&sz1, sizeof(sz1));
+						write(&sz2, sizeof(sz2));
+						write(&isTruncated, sizeof(isTruncated));
+						if (!dblres.empty())
+							write(dblres.data(), dblres.size());
+						write(byte_end, sizeof(byte_end));
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getstringdata bytes=\"" +
+							std::to_string(res.size()) + "\" truncated=\"" +
+							std::to_string(isTruncated) + "\")", true);
 						goto query_response_written;
 					}
 					throw DecompError("Unsupported packed decompiler query element " + std::to_string(elemId));

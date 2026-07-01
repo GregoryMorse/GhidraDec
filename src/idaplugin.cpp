@@ -15,6 +15,7 @@
 //conversion.h in x86 needs a fix for adding __cdecl to the ios_base return pointer format as in std::ios_base &(__cdecl* format)(std::ios_base &) = std::dec
 
 #include <cstdint>
+#include <ctime>
 #include <fstream>
 #include <iostream>
 
@@ -45,6 +46,12 @@ static bool hasValidNavigationPosition(const RdGlobalInfo* decompInfo)
 	return decompInfo != nullptr
 			&& !decompInfo->navigationList.empty()
 			&& decompInfo->navigationActual != decompInfo->navigationList.end();
+}
+
+static bool shouldBackupIdbBeforeDecompile(const RdGlobalInfo* decompInfo)
+{
+	return decompInfo != nullptr
+			&& (decompInfo->viewFeatures & VIEW_FEATURE_BACKUP_IDB) != 0;
 }
 
 GhidraDec::GhidraDec()
@@ -341,9 +348,21 @@ void GhidraDec::runSelectiveDecompilation(func_t *fnc2decomp, bool force)
 
 	INFO_MSG("Running Ghidra decompiler plugin:\n");
 
-	saveIdaDatabase();
+	if (shouldBackupIdbBeforeDecompile(decompInfo))
+	{
+		time_t stageStart = time(NULL);
+		TRACE_MSG("IDA database backup before selective decompilation begin\n");
+		saveIdaDatabase();
+		TRACE_MSG("IDA database backup before selective decompilation complete in " << std::dec << (time(NULL) - stageStart) << " seconds\n");
+	}
+	time_t stageStart = time(NULL);
+	TRACE_MSG("generatePluginDatabase begin\n");
 	generatePluginDatabase();
+	TRACE_MSG("generatePluginDatabase complete in " << std::dec << (time(NULL) - stageStart) << " seconds\n");
+	stageStart = time(NULL);
+	TRACE_MSG("decompileInput dispatch begin\n");
 	decompileInput(*decompInfo);
+	TRACE_MSG("decompileInput dispatch complete in " << std::dec << (time(NULL) - stageStart) << " seconds\n");
 }
 
 /**
@@ -379,9 +398,21 @@ void GhidraDec::runAllDecompilation()
 
 	INFO_MSG("Selected file: " << decompInfo->outputFile << "\n");
 
-	saveIdaDatabase();
+	if (shouldBackupIdbBeforeDecompile(decompInfo))
+	{
+		time_t stageStart = time(NULL);
+		TRACE_MSG("IDA database backup before full decompilation begin\n");
+		saveIdaDatabase();
+		TRACE_MSG("IDA database backup before full decompilation complete in " << std::dec << (time(NULL) - stageStart) << " seconds\n");
+	}
+	time_t stageStart = time(NULL);
+	TRACE_MSG("generatePluginDatabase begin\n");
 	generatePluginDatabase();
+	TRACE_MSG("generatePluginDatabase complete in " << std::dec << (time(NULL) - stageStart) << " seconds\n");
+	stageStart = time(NULL);
+	TRACE_MSG("decompileInput dispatch begin\n");
 	decompileInput(*decompInfo);
+	TRACE_MSG("decompileInput dispatch complete in " << std::dec << (time(NULL) - stageStart) << " seconds\n");
 }
 
 /**

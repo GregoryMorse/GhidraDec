@@ -1135,6 +1135,22 @@ void stopDecompilation(RdGlobalInfo*, bool, bool, bool);
 
 class GhidraDec;
 class IdaCallback;
+
+enum ViewFeatureFlags : ushort
+{
+	VIEW_FEATURE_GRAPH = 1,
+	VIEW_FEATURE_APPLY_PARAM_ID = 2,
+	VIEW_FEATURE_BACKUP_IDB = 4,
+};
+
+inline ushort ghidradec_default_view_features()
+{
+	ushort flags = VIEW_FEATURE_GRAPH | VIEW_FEATURE_APPLY_PARAM_ID;
+	if (!ghidradec_trace_enabled())
+		flags |= VIEW_FEATURE_BACKUP_IDB;
+	return flags;
+}
+
 /**
  * General information used by this plugin.
  */
@@ -1245,7 +1261,7 @@ class RdGlobalInfo
 		std::string ghidraPath = "";
 		sval_t cacheSize = 10, maxPayload = 50, timeout = 30, cmtLevel = 20, maxChars = 100, numChars = 2;
 		int comStyle = 0, intFormat = 2;
-		ushort viewFeatures = 1 | 2;
+		ushort viewFeatures = ghidradec_default_view_features();
 		ushort alysChecks = 1 | 4 | 8 | 16 | 32, dispChecks = 4 | 8 | 128 | 256 | 1024;
 
 		std::vector<LangInfo> li;
