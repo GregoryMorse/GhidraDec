@@ -4281,6 +4281,21 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 		//can decompile entry points first
 		std::map<ea_t, size_t> entries;
 		size_t num = di->idacb->allFuncs.size();
+		size_t startIndex = 0;
+		size_t endIndex = num;
+		qstring sliceStartEnv, sliceMaxEnv;
+		if (qgetenv("GHIDRADEC_BATCH_FUNCTION_START_INDEX", &sliceStartEnv) && !sliceStartEnv.empty())
+			startIndex = (size_t)strtoull(sliceStartEnv.c_str(), nullptr, 0);
+		if (startIndex > num) startIndex = num;
+		if (qgetenv("GHIDRADEC_BATCH_FUNCTION_MAX", &sliceMaxEnv) && !sliceMaxEnv.empty()) {
+			size_t maxCount = (size_t)strtoull(sliceMaxEnv.c_str(), nullptr, 0);
+			if (maxCount != 0 && startIndex + maxCount < endIndex)
+				endIndex = startIndex + maxCount;
+		}
+		if (startIndex != 0 || endIndex != num) {
+			INFO_MSG("Running all-decompile slice: functions " << std::dec
+				<< startIndex << ".." << endIndex << " of " << num << "\n");
+		}
 		if (di->decompPid == 0) {
 			TRACE_MSG("all-decompile registerProgram begin\n");
 			di->idacb->decInt->registerProgram();
@@ -4288,7 +4303,7 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 		}
 		std::vector<ea_t> notIded;
 		if (!di->skipParamIdentification) {
-			for (size_t i = 0; i < num; i++) {
+			for (size_t i = startIndex; i < endIndex; i++) {
 				if (di->idacb->imports.find(di->idacb->allFuncs[i]) != di->idacb->imports.end()) continue;
 				bool bSucc = false;
 				std::string disp;
@@ -4303,7 +4318,7 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 			TRACE_MSG("all-decompile updateDatabaseFromParams complete\n");
 		}
 		int successes = 0, total = 0;
-		for (size_t i = 0; i < num; i++) {
+		for (size_t i = startIndex; i < endIndex; i++) {
 			if (di->idacb->imports.find(di->idacb->allFuncs[i]) != di->idacb->imports.end()) continue;
 			std::string disp;
 			total++;

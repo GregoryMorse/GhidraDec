@@ -71,10 +71,14 @@ inline uint32 get_aflags0(ea_t ea) { return flags_t(getnode(ea).altval(NALT_AFLA
 #define inf_min_ea inf.min_ea
 #define inf_max_ea inf.max_ea
 #define inf_procname std::string(inf.procname)
-#define inf_is_32bit() inf.is_32bit
-#define inf_is_64bit() inf.is_64bit
+#define inf_is_32bit() inf.is_32bit()
+#define inf_is_64bit() inf.is_64bit()
 #define inf_cc_cm inf.cc.cm
-#define inf_is_be() inf.is_be
+#if IDA_SDK_VERSION < 700
+#define inf_is_be() inf.mf
+#else
+#define inf_is_be() inf.is_be()
+#endif
 #else
 #define PLUGIN_SKIP  0
 #define PLUGIN_KEEP 2

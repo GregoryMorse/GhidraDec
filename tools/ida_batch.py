@@ -351,6 +351,8 @@ def run_one(
     env["GHIDRADEC_BATCH_TIMEOUT"] = str(args.timeout)
     env["GHIDRADEC_BATCH_STABLE_POLLS"] = str(args.stable_polls)
     env["GHIDRADEC_BATCH_MIN_OUTPUT_BYTES"] = str(args.min_output_bytes)
+    env["GHIDRADEC_BATCH_FUNCTION_START_INDEX"] = str(args.function_start_index)
+    env["GHIDRADEC_BATCH_FUNCTION_MAX"] = str(args.function_max)
     env["GHIDRADEC_BATCH_CLEAN_OUTPUT"] = "1"
     env["GHIDRADEC_TEST_SKIP_PARAMID"] = "0" if args.paramid else "1"
     env["GHIDRADEC_TEST_TIMEOUT"] = str(args.timeout)
@@ -632,6 +634,8 @@ def main() -> int:
     )
     parser.add_argument("--individual-start-index", type=int, default=0)
     parser.add_argument("--individual-max", type=int, default=0, help="Maximum individual functions to run; 0 means all")
+    parser.add_argument("--function-start-index", type=int, default=0, help="First all-decompile function index to process")
+    parser.add_argument("--function-max", type=int, default=0, help="Maximum all-decompile functions to process; 0 means all")
     parser.add_argument(
         "--individual-ea",
         action="append",
