@@ -41,6 +41,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 
 #include "sleighinterface.h"
 
@@ -104,6 +105,9 @@ static ElementId ELEM_RESPONSE_TYPEREF = ElementId("typeref", 63);
 static ElementId ELEM_RESPONSE_ADDR = ElementId("addr", 11);
 static ElementId ELEM_RESPONSE_VAL = ElementId("val", 8);
 static ElementId ELEM_RESPONSE_VALUE = ElementId("value", 9);
+static ElementId ELEM_RESPONSE_DATA = ElementId("data", 1);
+static ElementId ELEM_RESPONSE_CPOOLREC = ElementId("cpoolrec", 110);
+static ElementId ELEM_RESPONSE_TOKEN = ElementId("token", 112);
 static ElementId ELEM_RESPONSE_PARENT = ElementId("parent", 77);
 static ElementId ELEM_RESPONSE_RANGELIST = ElementId("rangelist", 13);
 static ElementId ELEM_RESPONSE_RANGE = ElementId("range", 12);
@@ -127,6 +131,8 @@ static AttributeId ATTRIB_RESPONSE_NORETURN = AttributeId("noreturn", 123);
 static AttributeId ATTRIB_RESPONSE_VOLATILE = AttributeId("volatile", 65);
 static AttributeId ATTRIB_RESPONSE_CAT = AttributeId("cat", 61);
 static AttributeId ATTRIB_RESPONSE_MAXSIZE = AttributeId("maxsize", 120);
+static AttributeId ATTRIB_RESPONSE_LENGTH = AttributeId("length", 82);
+static AttributeId ATTRIB_RESPONSE_TAG = AttributeId("tag", 83);
 static ElementId ELEM_OPTION_READONLY = ElementId("readonly", 151);
 static ElementId ELEM_OPTION_COMMENTHEADER = ElementId("commentheader", 177);
 static ElementId ELEM_OPTION_COMMENTINDENT = ElementId("commentindent", 178);
@@ -618,17 +624,59 @@ static std::pair<std::string, std::string> getPackedArtificialHalt(Translate& tr
 	return std::pair<std::string, std::string>(packedStream.str(), xml);
 }
 
-static std::pair<std::string, std::string> getPackedUnimplementedInstruction(AddrInfo addr)
+static std::pair<std::string, std::string> getPackedUnimplementedInstruction(AddrInfo addr, int4 length = 1)
 {
 	std::ostringstream packedStream;
 	PackedEncode encoder(packedStream);
+	if (length < 1)
+		length = 1;
 	encoder.openElement(ELEM_RESPONSE_UNIMPL);
-	encoder.writeSignedInteger(ATTRIB_OFFSET, 1);
+	encoder.writeSignedInteger(ATTRIB_OFFSET, length);
 	encoder.closeElement(ELEM_RESPONSE_UNIMPL);
 
-	std::string xml = "<unimpl offset=\"1\" at=\"" + addr.space + ":0x" +
+	std::string xml = "<unimpl offset=\"" + std::to_string(length) + "\" at=\"" + addr.space + ":0x" +
 		to_string(addr.offset, hex) + "\"/>\n";
 	return std::pair<std::string, std::string>(packedStream.str(), xml);
+}
+
+static int4 readJvmSwitchLength(DecompileCallback* callback, const AddrInfo& addr,
+	unsigned long long functionEntry, uchar opcode)
+{
+	if (callback == nullptr || (opcode != 0xaa && opcode != 0xab) || addr.offset < functionEntry)
+		return 0;
+
+	unsigned long long bytecodeOffset = addr.offset - functionEntry;
+	size_t padding = (4 - ((bytecodeOffset + 1) & 3)) & 3;
+	size_t headerSize = opcode == 0xaa ? 1 + padding + 12 : 1 + padding + 8;
+	std::vector<uchar> header(headerSize);
+	if (callback->getBytes(header.data(), static_cast<int>(header.size()), addr) != header.size())
+		return 0;
+
+	auto readS4 = [&header](size_t offset) -> int4 {
+		uint4 value =
+			(static_cast<uint4>(header[offset]) << 24) |
+			(static_cast<uint4>(header[offset + 1]) << 16) |
+			(static_cast<uint4>(header[offset + 2]) << 8) |
+			static_cast<uint4>(header[offset + 3]);
+		return static_cast<int4>(value);
+	};
+
+	size_t pos = 1 + padding + 4; // Skip opcode, padding, and default offset.
+	if (opcode == 0xaa) {
+		int4 low = readS4(pos);
+		int4 high = readS4(pos + 4);
+		if (high < low)
+			return 0;
+		uint8 cases = static_cast<uint8>(high) - static_cast<uint8>(low) + 1;
+		if (cases > 65536)
+			return 0;
+		return static_cast<int4>(1 + padding + 12 + cases * 4);
+	}
+
+	int4 pairs = readS4(pos);
+	if (pairs < 0 || pairs > 65536)
+		return 0;
+	return static_cast<int4>(1 + padding + 8 + static_cast<uint8>(pairs) * 8);
 }
 
 static std::string getPackedEmptyPcodeInject(Translate& trans, AddrInfo addr)
@@ -1057,6 +1105,43 @@ static void encodePackedTypeRef(PackedEncode& encoder, const TypeInfo& typeInfo)
 			encoder.writeSignedInteger(ATTRIB_SIZE, static_cast<intb>(typeInfo.size));
 	}
 	encoder.closeElement(ELEM_RESPONSE_TYPEREF);
+}
+
+static void encodePackedCPoolRecord(PackedEncode& encoder, const CPoolRecord& rec)
+{
+	size_t tagIndex = rec.tag >= PRIMITIVE && rec.tag <= CHECK_CAST ?
+		static_cast<size_t>(rec.tag) : static_cast<size_t>(PRIMITIVE);
+	encoder.openElement(ELEM_RESPONSE_CPOOLREC);
+	encoder.writeString(ATTRIB_RESPONSE_TAG, cpoolreftags[tagIndex]);
+	if (rec.constructor)
+		encoder.writeBool(ATTRIB_CONSTRUCTOR, true);
+	if (rec.tag == PRIMITIVE) {
+		encoder.openElement(ELEM_RESPONSE_VALUE);
+		encoder.writeUnsignedInteger(ATTRIB_CONTENT, rec.value);
+		encoder.closeElement(ELEM_RESPONSE_VALUE);
+	}
+	if (!rec.data.empty()) {
+		std::ostringstream data;
+		int wrap = 0;
+		for (size_t i = 0; i < rec.data.size(); ++i) {
+			data << std::setfill('0') << std::setw(2) << std::hex
+				<< static_cast<unsigned int>(rec.data[i]) << ' ';
+			if (++wrap > 15) {
+				data << '\n';
+				wrap = 0;
+			}
+		}
+		encoder.openElement(ELEM_RESPONSE_DATA);
+		encoder.writeSignedInteger(ATTRIB_RESPONSE_LENGTH, rec.data.size());
+		encoder.writeString(ATTRIB_CONTENT, data.str());
+		encoder.closeElement(ELEM_RESPONSE_DATA);
+	} else {
+		encoder.openElement(ELEM_RESPONSE_TOKEN);
+		encoder.writeString(ATTRIB_CONTENT, rec.token);
+		encoder.closeElement(ELEM_RESPONSE_TOKEN);
+	}
+	encodePackedTypeRef(encoder, TypeInfo{ "undefined", 1, "unknown" });
+	encoder.closeElement(ELEM_RESPONSE_CPOOLREC);
 }
 
 static void encodePackedMappedData(PackedEncode& encoder, const Address& addr,
@@ -1727,41 +1812,10 @@ std::vector<uchar> DecompInterface::readResponse() {
 							std::to_string(refs.size()) + "\")", false);
 						CPoolRecord rec = { PRIMITIVE, false, false, 0, std::vector<uchar>(), "" };
 						callback->getCPoolRef(refs, rec);
-						std::string dblres;
-						ostringstream tokenEsc;
-						if (!rec.data.empty()) {
-							int wrap = 0;
-							for (size_t i = 0; i < rec.data.size(); i++) {
-								int val = (rec.data[i] >> 4) & 0xf;
-								dblres.push_back(val > 9 ? val - 10 + 'a' : (val + '0'));
-								val = rec.data[i] & 0xf;
-								dblres.push_back(val > 9 ? val - 10 + 'a' : (val + '0'));
-								dblres.push_back(' ');
-								if (++wrap > 15) {
-									dblres.push_back('\n');
-									wrap = 0;
-								}
-							}
-						} else {
-							xml_escape(tokenEsc, rec.token.c_str());
-						}
-						size_t tagIndex = rec.tag >= PRIMITIVE && rec.tag <= CHECK_CAST ?
-							static_cast<size_t>(rec.tag) : static_cast<size_t>(PRIMITIVE);
-						std::string cpoolFallbackType =
-							"  <type name=\"undefined\" id=\"" +
-							std::to_string(hashName("undefined")) +
-							"\" metatype=\"unknown\" size=\"1\">\n  </type>\n";
-						std::string s = "<cpoolrec ref=\"" + std::to_string(refs.empty() ? 0 : refs[0]) +
-							"\" tag=\"" + cpoolreftags[tagIndex] + "\"" +
-							std::string(rec.hasThis ? " hasthis=\"true\"" : "") +
-							std::string(rec.constructor ? " constructor=\"true\"" : "") + ">\n" +
-							(rec.tag == PRIMITIVE ? "  <value>" +
-								std::to_string(rec.value) + "</value>\n" : "") +
-							(!rec.data.empty() ? "  <data length=\"" +
-								std::to_string(rec.data.size()) + "\">\n" + dblres + "</data>\n" :
-								"  <token>" + tokenEsc.str() + "</token>\n") +
-							cpoolFallbackType +
-							"</cpoolrec>";
+						std::ostringstream packedResponse;
+						PackedEncode encoder(packedResponse);
+						encodePackedCPoolRecord(encoder, rec);
+						std::string s = packedResponse.str();
 						write(query_response_start, sizeof(query_response_start));
 						writeString(s);
 						write(query_response_end, sizeof(query_response_end));
@@ -2072,7 +2126,27 @@ std::vector<uchar> DecompInterface::readResponse() {
 						}
 						std::ostringstream packedResponse;
 						PackedEncode encoder(packedResponse);
-						emitter->encodePacked(encoder, *trans, base, injectOffset);
+						if (emitter->ops.empty()) {
+							AddrSpace* baseSpace = trans->getSpaceByName(base.space);
+							AddrSpace* uniqueSpace = trans->getUniqueSpace();
+							AddrSpace* constSpace = trans->getConstantSpace();
+							if (baseSpace == nullptr || uniqueSpace == nullptr || constSpace == nullptr)
+								throw DecompError("Cannot build no-op pcode injection without base/unique/const spaces");
+							uint4 tmpSize = !contextOutputs.empty() && contextOutputs[0].size != 0 ?
+								contextOutputs[0].size : 4;
+							VarnodeData tmp{ uniqueSpace, uniqueBase, tmpSize };
+							uniqueBase += 16;
+							VarnodeData zero{ constSpace, 0, tmpSize };
+							encoder.openElement(ELEM_RESPONSE_INST);
+							encoder.writeSignedInteger(ATTRIB_OFFSET, injectOffset);
+							Address(baseSpace, base.offset).encode(encoder);
+							writePackedPcodeOp(encoder, CPUI_COPY, &tmp, &zero, 1);
+							encoder.closeElement(ELEM_RESPONSE_INST);
+							callback->protocolRecorder("queryresponse(command_getpcodeinject no-op fallback name=\"" +
+								escapeCStr(injectName) + "\")", true);
+						} else {
+							emitter->encodePacked(encoder, *trans, base, injectOffset);
+						}
 						std::string packed = packedResponse.str();
 						if (deleteEmitter)
 							delete emitter;
@@ -2089,21 +2163,21 @@ std::vector<uchar> DecompInterface::readResponse() {
 						AddrInfo addr{ queryAddr.getSpace()->getName(), queryAddr.getOffset() };
 						callback->protocolRecorder("query(command_getpcode addr=\"" + addr.space +
 							":0x" + to_string(addr.offset, hex) + "\")", false);
+						MappedSymbolInfo owner = { KIND_HOLE };
 						if (addr.space == startOffs.space) {
-							MappedSymbolInfo msi = { KIND_HOLE };
-							callback->getMappedSymbol(addr, msi);
+							callback->getMappedSymbol(addr, owner);
 							callback->protocolRecorder("query(command_getpcode owner kind=\"" +
-								mappedSymbolKindName(msi.kind) + "\" entry=\"0x" +
-								to_string(msi.entryPoint, hex) + "\" size=\"" +
-								std::to_string(msi.size) + "\" name=\"" +
-								escapeCStr(msi.name) + "\")", false);
-							if (msi.kind == KIND_FUNCTION && msi.entryPoint != startOffs.offset) {
+								mappedSymbolKindName(owner.kind) + "\" entry=\"0x" +
+								to_string(owner.entryPoint, hex) + "\" size=\"" +
+								std::to_string(owner.size) + "\" name=\"" +
+								escapeCStr(owner.name) + "\")", false);
+							if (owner.kind == KIND_FUNCTION && owner.entryPoint != startOffs.offset) {
 								write(query_response_start, sizeof(query_response_start));
 								write(query_response_end, sizeof(query_response_end));
 								callback->protocolRecorder("queryresponse(command_getpcode emptyOutsideCurrentFunction)", true);
 								goto query_response_written;
 							}
-							if (msi.kind == KIND_HOLE && addr.offset != startOffs.offset) {
+							if (owner.kind == KIND_HOLE && addr.offset != startOffs.offset) {
 								write(query_response_start, sizeof(query_response_start));
 								write(query_response_end, sizeof(query_response_end));
 								callback->protocolRecorder("queryresponse(command_getpcode emptyUnknownCode)", true);
@@ -2114,7 +2188,22 @@ std::vector<uchar> DecompInterface::readResponse() {
 						try {
 							callback->protocolRecorder("query(command_getpcode translate begin addr=\"" +
 								addr.space + ":0x" + to_string(addr.offset, hex) + "\")", false);
+							uchar opcode = 0;
+							bool isJvm = lastsleighfile.find("JVM.sla") != std::string::npos ||
+								lastsleighfile.find("JVM\\") != std::string::npos ||
+								lastsleighfile.find("JVM/") != std::string::npos;
+							if (isJvm && owner.kind == KIND_FUNCTION &&
+								callback->getBytes(&opcode, 1, addr) == 1 &&
+								(opcode == 0xaa || opcode == 0xab)) {
+								int4 switchLength = readJvmSwitchLength(callback, addr, owner.entryPoint, opcode);
+								std::tie(packed, xml) = getPackedUnimplementedInstruction(addr, switchLength);
+								callback->protocolRecorder("query(command_getpcode JVM switch fallback addr=\"" +
+									addr.space + ":0x" + to_string(addr.offset, hex) + "\" opcode=\"0x" +
+									to_string(static_cast<uint4>(opcode), hex) + "\" length=\"" +
+									std::to_string(switchLength <= 0 ? 1 : switchLength) + "\")", true);
+							} else {
 							std::tie(packed, xml) = getPackedPcode(*trans, addr);
+							}
 							callback->protocolRecorder("query(command_getpcode translate end addr=\"" +
 								addr.space + ":0x" + to_string(addr.offset, hex) + "\" bytes=\"" +
 								std::to_string(packed.size()) + "\")", true);
@@ -3336,8 +3425,13 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 				std::vector<std::pair<std::string, int>> inputs;
 				std::vector<std::pair<std::string, int>> outputs;
 				parsePcodeElement(el, body, inputs, outputs);
-				if (finalname.size() != 0 && body.size() != 0)
-					callExecPcodeMap[finalname] = getPcodeSnippet(body, inputs, outputs);
+				if (finalname.size() != 0 && body.size() != 0) {
+					XmlPcodeEmit* emit = new XmlPcodeEmit;
+					emit->body = body;
+					emit->inputs = inputs;
+					emit->outputs = outputs;
+					callExecPcodeMap[finalname] = emit;
+				}
 			}
 		}
 	}

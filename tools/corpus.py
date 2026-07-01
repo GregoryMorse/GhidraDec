@@ -7,6 +7,7 @@ import argparse
 import json
 import sys
 import urllib.request
+import zipfile
 from pathlib import Path
 
 
@@ -40,7 +41,7 @@ def selected_targets(manifest: dict, corpus_name: str, architectures: set[str], 
 
 
 def target_output_path(destination: Path, corpus: dict, target: dict) -> Path:
-    source_name = Path(target["path"]).name
+    source_name = target.get("outputName") or Path(target.get("archiveMember", target["path"])).name
     return destination / corpus["name"] / target["arch"] / target["id"] / source_name
 
 
@@ -51,6 +52,24 @@ def download(url: str, output: Path, refresh: bool) -> Path:
     print(f"[ghidradec-corpus] downloading {url}", file=sys.stderr)
     with urllib.request.urlopen(url) as response, output.open("wb") as handle:
         handle.write(response.read())
+    return output
+
+
+def stage_target(destination: Path, corpus: dict, target: dict, refresh: bool) -> Path:
+    output = target_output_path(destination, corpus, target)
+    url = corpus["baseUrl"].rstrip("/") + "/" + target["path"]
+    archive_member = target.get("archiveMember")
+    if not archive_member:
+        return download(url, output, refresh)
+
+    archive_path = output.parent / Path(target["path"]).name
+    download(url, archive_path, refresh)
+    if output.exists() and not refresh:
+        return output
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive_path) as archive:
+        with archive.open(archive_member) as source, output.open("wb") as handle:
+            handle.write(source.read())
     return output
 
 
@@ -67,9 +86,7 @@ def stage(args: argparse.Namespace) -> None:
     for corpus, target in targets:
         if corpus["kind"] != "github-raw":
             raise SystemExit(f"Unsupported corpus kind: {corpus['kind']}")
-        output = target_output_path(destination, corpus, target)
-        url = corpus["baseUrl"].rstrip("/") + "/" + target["path"]
-        staged_paths.append(download(url, output, args.refresh))
+        staged_paths.append(stage_target(destination, corpus, target, args.refresh))
 
     if args.output_list:
         list_path = Path(args.output_list).resolve()

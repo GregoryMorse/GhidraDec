@@ -335,6 +335,56 @@
           "notes": "RISC-V 64 little-endian smoke target. Uses local IDA-PRO aliasing until Ghidra's RISCV ldefs advertise the riscv external name upstream."
         },
         {
+          "id": "angr-java-simple1-class1",
+          "arch": "java",
+          "tier": "smoke",
+          "path": "tests/java/simple1.jar",
+          "archiveMember": "simple1/Class1.class",
+          "outputName": "simple1_Class1.class",
+          "enabled": true,
+          "notes": "Small JVM class from angr simple1.jar. Exercises IDA java processor and Ghidra JVM p-code/decompiler protocol support."
+        },
+        {
+          "id": "angr-java-simple1-class2",
+          "arch": "java",
+          "tier": "smoke",
+          "path": "tests/java/simple1.jar",
+          "archiveMember": "simple1/Class2.class",
+          "outputName": "simple1_Class2.class",
+          "enabled": true,
+          "notes": "Second JVM class from angr simple1.jar."
+        },
+        {
+          "id": "angr-java-array-operations",
+          "arch": "java",
+          "tier": "extended",
+          "path": "tests/java/array_operations/mixedjava.jar",
+          "archiveMember": "MixedJava.class",
+          "outputName": "MixedJava.class",
+          "enabled": true,
+          "notes": "JVM array-operation class from angr. Good first target for constant-pool and JVM p-code query coverage."
+        },
+        {
+          "id": "angr-java-simple2-class1",
+          "arch": "java",
+          "tier": "extended",
+          "path": "tests/java/simple2.jar",
+          "archiveMember": "simple2/Class1.class",
+          "outputName": "simple2_Class1.class",
+          "enabled": true,
+          "notes": "JVM class from angr simple2.jar. Exercises interface and inner-class metadata adjacent to the code model."
+        },
+        {
+          "id": "angr-dalvik-android1-apk",
+          "arch": "dalvik",
+          "tier": "smoke",
+          "path": "tests/java/android1.apk",
+          "archiveMember": "classes.dex",
+          "outputName": "android1_classes.dex",
+          "enabled": true,
+          "notes": "Small Android DEX extracted from angr android1.apk. Exercises IDA dalvik loader/processor and Ghidra Dalvik protocol paths; local aliasing is used until Ghidra's Dalvik ldefs expose IDA-PRO dalvik."
+        },
+        {
           "id": "angr-mips64-test_arrays",
           "arch": "mips64",
           "tier": "smoke",
@@ -363,6 +413,6 @@
   ],
   "orders": {
     "x86-first": ["x86_64", "x86_32", "x86_16"],
-    "baseline-expansion": ["x86_64", "x86_32", "x86_16", "armel", "armhf", "aarch64", "mipsel", "ppc", "ppc64", "ppc64el", "riscv64", "m68k", "hppa", "sh4"]
+    "baseline-expansion": ["x86_64", "x86_32", "x86_16", "armel", "armhf", "aarch64", "mipsel", "ppc", "ppc64", "ppc64el", "riscv64", "java", "dalvik", "m68k", "hppa", "sh4"]
   }
 }

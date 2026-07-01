@@ -547,6 +547,7 @@ bool GhidraDec::canDecompileInput()
 		}
 	}
 	addProcessorAlias("RISCV", "riscv");
+	addProcessorAlias("Dalvik", "dalvik");
 	addProcessorAlias("SuperH4", "sh3");
 	addProcessorAlias("SuperH4", "sh3b");
 	addProcessorAlias("SuperH4", "sh4");
