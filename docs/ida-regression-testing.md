@@ -138,13 +138,19 @@ Batch runs enable `GHIDRADEC_TRACE` by default so the IDA log and
 logs. GUI use defaults to user-facing `INFO_MSG` output only; set
 `GHIDRADEC_TRACE=1` when debugging an interactive session.
 
-Current ARM/AArch64/MIPS smoke status:
+Current ARM/AArch64/MIPS smoke status from the pinned angr smoke set:
 
-* `armel`, `armhf`, `aarch64`, and `mipsel` pass the smoke targets.
-* `mips` and `mips64` reach controlled `graceful_fail` results on the current
-  big-endian smoke samples because the native Ghidra decompiler child exits
-  during function decompilation. The plugin survives, writes diagnostics, and
-  does not crash IDA.
+* `aarch64`, `armel`, `armhf`, and `mipsel` pass: 7 successful inputs out of
+  the 10-target ARM/MIPS smoke sweep.
+* `mips` big-endian and `mips64` big-endian currently reach controlled
+  `graceful_fail` results: 3 failing inputs, 0 `dangerous_fail` outcomes. The
+  plugin survives, writes diagnostics, and does not crash IDA.
+* The current MIPS BE failure signature is a native `decompile.exe` access
+  violation reading `0xffffffffffffffff` after a `$gp`-relative global
+  `getMappedSymbols` query. The protocol log reaches ordinary MIPS BE
+  subregister-hole queries and then the global data query before the child pipe
+  closes. Treat this as the next focused backend/protocol bug, not as a harness
+  instability.
 
 On Windows, `tools/ida_batch.py` also watches IDA-owned dialogs and sends the
 default confirmation action for common startup, warning, crash, and recovery

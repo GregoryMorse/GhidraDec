@@ -59,6 +59,21 @@ static void setupTrace(DecompileCallback* callback, const std::string& message)
 		callback->protocolRecorder("setup " + message, false);
 }
 
+static bool stripCallotherFixup(std::string& xml, const std::string& targetop)
+{
+	const std::string needle = "targetop=\"" + targetop + "\"";
+	size_t attr = xml.find(needle);
+	if (attr == std::string::npos)
+		return false;
+	size_t begin = xml.rfind("<callotherfixup", attr);
+	size_t end = xml.find("</callotherfixup>", attr);
+	if (begin == std::string::npos || end == std::string::npos)
+		return false;
+	end += std::string("</callotherfixup>").size();
+	xml.erase(begin, end - begin);
+	return true;
+}
+
 static ElementId ELEM_COMMAND_GETBYTES = ElementId("command_getbytes", 240);
 static ElementId ELEM_COMMAND_GETCALLFIXUP = ElementId("command_getcallfixup", 241);
 static ElementId ELEM_COMMAND_GETCALLMECH = ElementId("command_getcallmech", 242);
@@ -74,8 +89,12 @@ static ElementId ELEM_COMMAND_GETTRACKEDREGISTERS = ElementId("command_gettracke
 static ElementId ELEM_COMMAND_GETUSEROPNAME = ElementId("command_getuseropname", 257);
 static ElementId ELEM_RESPONSE_SCOPE = ElementId("scope", 80);
 static ElementId ELEM_RESPONSE_MAPSYM = ElementId("mapsym", 76);
+static ElementId ELEM_RESPONSE_SYMBOL = ElementId("symbol", 6);
 static ElementId ELEM_RESPONSE_FUNCTIONSHELL = ElementId("functionshell", 72);
 static ElementId ELEM_RESPONSE_FUNCTION = ElementId("function", 116);
+static ElementId ELEM_RESPONSE_EXTERNREFSYMBOL = ElementId("externrefsymbol", 70);
+static ElementId ELEM_RESPONSE_LABELSYM = ElementId("labelsym", 75);
+static ElementId ELEM_RESPONSE_TYPEREF = ElementId("typeref", 63);
 static ElementId ELEM_RESPONSE_ADDR = ElementId("addr", 11);
 static ElementId ELEM_RESPONSE_RANGELIST = ElementId("rangelist", 13);
 static ElementId ELEM_RESPONSE_RANGE = ElementId("range", 12);
@@ -97,6 +116,7 @@ static AttributeId ATTRIB_RESPONSE_EXTRAPOP = AttributeId("extrapop", 6);
 static AttributeId ATTRIB_RESPONSE_MODEL = AttributeId("model", 13);
 static AttributeId ATTRIB_RESPONSE_NORETURN = AttributeId("noreturn", 123);
 static AttributeId ATTRIB_RESPONSE_VOLATILE = AttributeId("volatile", 65);
+static AttributeId ATTRIB_RESPONSE_CAT = AttributeId("cat", 61);
 static ElementId ELEM_OPTION_READONLY = ElementId("readonly", 151);
 static ElementId ELEM_OPTION_COMMENTHEADER = ElementId("commentheader", 177);
 static ElementId ELEM_OPTION_COMMENTINDENT = ElementId("commentindent", 178);
@@ -992,6 +1012,129 @@ static std::string mappedSymbolKindName(MappedSymbolKinds kind)
 	}
 }
 
+static std::string getMappedSymbolName(const MappedSymbolInfo& msi, const Address& addr,
+	const std::string& prefix)
+{
+	if (!msi.name.empty())
+		return msi.name;
+	return prefix + "_" + to_string(addr.getOffset(), hex);
+}
+
+static TypeInfo mappedSymbolPackedCoreType(const std::vector<TypeInfo>& typeChain, uintb mapSize)
+{
+	if (!typeChain.empty()) {
+		const TypeInfo& first = typeChain.front();
+		if (first.metaType != "ptr" && first.metaType != "array" &&
+			first.metaType != "struct" && first.metaType != "code")
+			return first;
+		if (first.metaType == "array" && typeChain.size() > 1)
+			return typeChain[1];
+	}
+	std::string metaType = "unknown";
+	int typ = DecompInterface::coreTypeLookup(static_cast<size_t>(mapSize), metaType);
+	return TypeInfo{ typ == -1 ? "undefined" : defaultCoreTypes[typ].name,
+		mapSize == 0 ? 1 : mapSize, metaType };
+}
+
+static void encodePackedTypeRef(PackedEncode& encoder, const TypeInfo& typeInfo)
+{
+	encoder.openElement(ELEM_RESPONSE_TYPEREF);
+	encoder.writeString(ATTRIB_NAME, typeInfo.typeName.empty() ? "undefined" : typeInfo.typeName);
+	encoder.writeUnsignedInteger(ATTRIB_ID, hashName(typeInfo.typeName.empty() ? "undefined" : typeInfo.typeName));
+	if (typeInfo.size != 0) {
+		int typ = DecompInterface::coreTypeLookup(static_cast<size_t>(typeInfo.size), typeInfo.metaType);
+		if (typ == -1)
+			encoder.writeSignedInteger(ATTRIB_SIZE, static_cast<intb>(typeInfo.size));
+	}
+	encoder.closeElement(ELEM_RESPONSE_TYPEREF);
+}
+
+static void encodePackedMappedData(PackedEncode& encoder, const Address& addr,
+	const std::string& name, const std::vector<TypeInfo>& typeChain, uintb mapSize,
+	bool readOnly, bool volatil)
+{
+	if (mapSize == 0)
+		mapSize = 1;
+	TypeInfo typeInfo = mappedSymbolPackedCoreType(typeChain, mapSize);
+	encoder.openElement(ELEM_RESPONSE_SCOPE);
+	encoder.writeUnsignedInteger(ATTRIB_ID, 0);
+	encoder.openElement(ELEM_RESPONSE_MAPSYM);
+	encoder.openElement(ELEM_RESPONSE_SYMBOL);
+	encoder.writeString(ATTRIB_NAME, name);
+	encoder.writeBool(ATTRIB_NAMELOCK, !name.empty());
+	encoder.writeBool(ATTRIB_TYPELOCK, true);
+	encoder.writeBool(ATTRIB_READONLY, readOnly);
+	encoder.writeBool(ATTRIB_RESPONSE_VOLATILE, volatil);
+	encoder.writeSignedInteger(ATTRIB_RESPONSE_CAT, -1);
+	encodePackedTypeRef(encoder, typeInfo);
+	encoder.closeElement(ELEM_RESPONSE_SYMBOL);
+	addr.encode(encoder, mapSize);
+	encoder.openElement(ELEM_RESPONSE_RANGELIST);
+	encoder.closeElement(ELEM_RESPONSE_RANGELIST);
+	encoder.closeElement(ELEM_RESPONSE_MAPSYM);
+	encoder.closeElement(ELEM_RESPONSE_SCOPE);
+}
+
+static void encodePackedMappedLabel(PackedEncode& encoder, const Address& addr,
+	const std::string& name, uintb mapSize, bool readOnly, bool volatil)
+{
+	if (mapSize == 0)
+		mapSize = 1;
+	encoder.openElement(ELEM_RESPONSE_SCOPE);
+	encoder.writeUnsignedInteger(ATTRIB_ID, 0);
+	encoder.openElement(ELEM_RESPONSE_MAPSYM);
+	encoder.openElement(ELEM_RESPONSE_LABELSYM);
+	encoder.writeString(ATTRIB_NAME, name);
+	encoder.writeBool(ATTRIB_NAMELOCK, true);
+	encoder.writeBool(ATTRIB_TYPELOCK, true);
+	encoder.writeBool(ATTRIB_READONLY, readOnly);
+	encoder.writeBool(ATTRIB_RESPONSE_VOLATILE, volatil);
+	encoder.writeSignedInteger(ATTRIB_RESPONSE_CAT, -1);
+	encoder.closeElement(ELEM_RESPONSE_LABELSYM);
+	addr.encode(encoder, mapSize);
+	encoder.openElement(ELEM_RESPONSE_RANGELIST);
+	encoder.closeElement(ELEM_RESPONSE_RANGELIST);
+	encoder.closeElement(ELEM_RESPONSE_MAPSYM);
+	encoder.closeElement(ELEM_RESPONSE_SCOPE);
+}
+
+static void encodePackedMappedExternRef(PackedEncode& encoder, const Address& addr,
+	const std::string& name)
+{
+	encoder.openElement(ELEM_RESPONSE_SCOPE);
+	encoder.writeUnsignedInteger(ATTRIB_ID, 0);
+	encoder.openElement(ELEM_RESPONSE_MAPSYM);
+	encoder.openElement(ELEM_RESPONSE_EXTERNREFSYMBOL);
+	encoder.writeString(ATTRIB_NAME, name);
+	addr.encode(encoder);
+	encoder.closeElement(ELEM_RESPONSE_EXTERNREFSYMBOL);
+	addr.encode(encoder, 1);
+	encoder.openElement(ELEM_RESPONSE_RANGELIST);
+	encoder.closeElement(ELEM_RESPONSE_RANGELIST);
+	encoder.closeElement(ELEM_RESPONSE_MAPSYM);
+	encoder.closeElement(ELEM_RESPONSE_SCOPE);
+}
+
+static bool registerContainingHole(const Translate* trans, const Address& queryAddr,
+	uintb& first, uintb& last)
+{
+	if (trans == nullptr || queryAddr.getSpace() == nullptr ||
+		queryAddr.getSpace()->getName() != "register")
+		return false;
+
+	static const int4 candidateSizes[] = { 8, 4, 2, 1 };
+	for (int4 size : candidateSizes) {
+		uintb base = queryAddr.getOffset() & ~(static_cast<uintb>(size) - 1);
+		std::string name = trans->getRegisterName(queryAddr.getSpace(), base, size);
+		if (name.empty())
+			continue;
+		first = base;
+		last = base + static_cast<uintb>(size) - 1;
+		return true;
+	}
+	return false;
+}
+
 static void encodePackedNoReturnPrototype(PackedEncode& encoder, const FuncProtoInfo& func)
 {
 	encoder.openElement(ELEM_RESPONSE_PROTOTYPE);
@@ -1612,6 +1755,19 @@ std::vector<uchar> DecompInterface::readResponse() {
 							encoder.closeElement(ELEM_RESPONSE_RANGELIST);
 							encoder.closeElement(ELEM_RESPONSE_MAPSYM);
 							encoder.closeElement(ELEM_RESPONSE_SCOPE);
+						} else if (msi.kind == KIND_DATA) {
+							uintb mapSize = !msi.typeChain.empty() ?
+								static_cast<uintb>(msi.typeChain.front().size) : 1;
+							encodePackedMappedData(encoder, queryAddr,
+								getMappedSymbolName(msi, queryAddr, "DAT"),
+								msi.typeChain, mapSize, msi.readonly, msi.volatil);
+						} else if (msi.kind == KIND_LABEL) {
+							encodePackedMappedLabel(encoder, queryAddr,
+								getMappedSymbolName(msi, queryAddr, "LAB"),
+								1, msi.readonly, msi.volatil);
+						} else if (msi.kind == KIND_EXTERNALREFERENCE) {
+							encodePackedMappedExternRef(encoder, queryAddr,
+								getMappedSymbolName(msi, queryAddr, "EXT"));
 						} else {
 							uintb first = queryAddr.getOffset();
 							uintb last = queryAddr.getOffset();
@@ -1629,6 +1785,8 @@ std::vector<uchar> DecompInterface::readResponse() {
 									}
 								}
 							}
+							if (msi.kind == KIND_HOLE)
+								registerContainingHole(trans, queryAddr, first, last);
 							encoder.openElement(ELEM_RESPONSE_HOLE);
 							encoder.writeSpace(ATTRIB_SPACE, queryAddr.getSpace());
 							encoder.writeUnsignedInteger(ATTRIB_FIRST, first);
@@ -2835,6 +2993,8 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 	coretypesxml = szCoreTypes;
 	setupTrace(cb, "read compiler and processor specs begin");
 	cspecxml = readFileAsString(cspecfilename);
+	if (stripCallotherFixup(cspecxml, "setISAMode"))
+		setupTrace(cb, "stripped no-op callotherfixup targetop=\"setISAMode\"");
 	pspecxml = readFileAsString(pspecfilename);
 	setupTrace(cb, "read compiler and processor specs complete");
 

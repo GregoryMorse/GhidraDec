@@ -64,6 +64,7 @@ namespace idaplugin {
 		std::vector<std::string> modNames;
 		std::map<std::string, bool> importNames;
 		std::map<ea_t, ImportInfo> imports;
+		std::map<ea_t, MappedSymbolInfo> batchMappedSymbols;
 		std::map<std::string, std::vector<ea_t>> typeToAddress;
 		std::map<ea_t, bool> usedImports;
 		std::map<std::string, bool> usedTypes;
@@ -120,6 +121,7 @@ namespace idaplugin {
 		std::string getHeaderDefFromAnalysis(bool allImports, std::string& forDisplay);
 
 		void init(std::string sleighfilename, std::string pspec, std::string cspec);
+		void preloadBatchMappedSymbols();
 		void addrToArgLoc(SizedAddrInfo addr, argloc_t& al);
 		void funcInfoToIDA(FuncProtoInfo& paramInfo, tinfo_t & ti);
 		void typeInfoToIDA(int idx, std::vector<TypeInfo>& type, tinfo_t& ti);

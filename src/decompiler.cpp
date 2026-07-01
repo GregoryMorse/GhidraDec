@@ -391,6 +391,17 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		runCommand(di->decCmd, "",
 			&di->decompPid, &di->hDecomp, &di->rdHandle, &di->wrHandle,
 			true);
+		qstring launchDelayEnv;
+		if (di->decompPid != 0 &&
+			qgetenv("GHIDRADEC_DECOMPILER_LAUNCH_DELAY_MS", &launchDelayEnv) &&
+			!launchDelayEnv.empty()) {
+			int delayMs = atoi(launchDelayEnv.c_str());
+			if (delayMs > 0) {
+				TRACE_MSG("delaying decompiler protocol for debugger attach, pid="
+					<< std::dec << di->decompPid << ", delayMs=" << delayMs << "\n");
+				qsleep(delayMs);
+			}
+		}
 	}
 	size_t IdaCallback::readDec(void* Buf, size_t MaxCharCount)
 	{		
@@ -934,13 +945,14 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 		}
 		if (di->skipParamIdentification && !di->outputFile.empty()) {
-			std::map<ea_t, ImportInfo>::iterator imp = imports.find((ea_t)addr.offset);
-			if (imp != imports.end()) {
-				usedImports[(ea_t)addr.offset] = true;
-				msi.kind = KIND_EXTERNALREFERENCE;
-				msi.entryPoint = addr.offset;
-				msi.name = imp->second.name.empty() ?
-					("imp_" + to_string(addr.offset, std::hex)) : imp->second.name;
+			std::map<ea_t, MappedSymbolInfo>::iterator cached = batchMappedSymbols.find((ea_t)addr.offset);
+			if (cached != batchMappedSymbols.end()) {
+				msi = cached->second;
+				if (msi.kind == KIND_DATA) {
+					usedData[(ea_t)addr.offset] = msi.typeChain;
+				} else if (msi.kind == KIND_EXTERNALREFERENCE) {
+					usedImports[(ea_t)addr.offset] = true;
+				}
 			} else {
 				msi.kind = KIND_HOLE;
 				msi.readonly = false;
@@ -3017,6 +3029,59 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		qsem_free(finishSem);
 		delete ef;
 	}
+	void IdaCallback::preloadBatchMappedSymbols()
+	{
+		if (!di->skipParamIdentification || di->outputFile.empty())
+			return;
+
+		for (std::map<ea_t, ImportInfo>::iterator it = imports.begin(); it != imports.end(); ++it) {
+			MappedSymbolInfo msi = { KIND_EXTERNALREFERENCE };
+			msi.entryPoint = it->first;
+			msi.readonly = false;
+			msi.volatil = false;
+			msi.name = it->second.name.empty() ?
+				("imp_" + to_string((unsigned long long)it->first, std::hex)) : it->second.name;
+			batchMappedSymbols[it->first] = msi;
+		}
+
+		for (ea_t ea = inf_min_ea; ; ) {
+			ea = next_head(ea, inf_max_ea);
+			if (ea == BADADDR)
+				break;
+			if (imports.find(ea) != imports.end())
+				continue;
+			if (get_func(ea) != nullptr)
+				continue;
+
+			flags_t fl = get_flags(ea);
+			MappedSymbolInfo msi = { KIND_HOLE };
+			if (is_data(fl) || (is_unknown(fl) && is_mapped(ea))) {
+				msi.kind = KIND_DATA;
+				unsigned long long size = is_unknown(fl) ? 1 : get_item_size(ea);
+				if (size == 0 || size == BADSIZE)
+					size = 1;
+				std::string metaType = "unknown";
+				int typ = DecompInterface::coreTypeLookup((size_t)size, metaType);
+				if (typ == -1 && size != 1) {
+					msi.typeChain.push_back(TypeInfo{ "", size, "array", false, false, false, size });
+					msi.typeChain.push_back(TypeInfo{ "undefined", 1, metaType });
+				} else {
+					msi.typeChain.push_back(TypeInfo{ typ == -1 ? "undefined" : defaultCoreTypes[typ].name, size, metaType });
+				}
+				getMemoryInfo(ea, &msi.readonly, &msi.volatil);
+				msi.name = getSymbolName(ea);
+			} else if (has_name(fl) || has_dummy_name(fl)) {
+				msi.kind = KIND_LABEL;
+				getMemoryInfo(ea, &msi.readonly, &msi.volatil);
+				msi.name = getSymbolName(ea);
+			}
+			if (msi.kind != KIND_HOLE)
+				batchMappedSymbols[ea] = msi;
+		}
+
+		TRACE_MSG("Preloaded batch mapped symbols: " << std::dec
+			<< batchMappedSymbols.size() << "\n");
+	}
 	void IdaCallback::init(std::string s, std::string p, std::string c)
 	{
 		sleighfilename = s;
@@ -3027,6 +3092,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		allFuncs.clear();
 		allFuncNames.clear();
 		allFuncRanges.clear();
+		batchMappedSymbols.clear();
 		sregRanges.clear();
 		typeDatabase.clear();
 		exportData.clear();
@@ -3204,6 +3270,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					<< (limited ? " (limit reached)" : "") << "\n");
 			}
 		}
+		preloadBatchMappedSymbols();
 	}
 	void IdaCallback::addrToArgLoc(SizedAddrInfo addr, argloc_t & al)
 	{
