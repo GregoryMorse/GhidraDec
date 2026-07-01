@@ -467,6 +467,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 #define CACHEPAGESIZE 4096ull
 #define CACHELIMIT 128
 #define CACHECLEANUPAFTER 256
+#define BATCH_SEGMENT_PRELOAD_LIMIT (64ull * 1024ull * 1024ull)
 	void preloadByteCachePage(IdaCallback* cb, ea_t page)
 	{
 		if (cb->byteCache.find(page) != cb->byteCache.end() &&
@@ -503,11 +504,54 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 		}
 	}
+	size_t preloadMappedSegmentByteCache(IdaCallback* cb, unsigned long long maxBytes, bool* limited)
+	{
+		size_t pages = 0;
+		unsigned long long bytes = 0;
+		if (limited != nullptr)
+			*limited = false;
+		for (int i = 0; i < get_segm_qty(); i++) {
+			segment_t* seg = getnseg(i);
+			if (seg == nullptr || seg->end_ea <= seg->start_ea)
+				continue;
+			ea_t page = seg->start_ea & (~(CACHEPAGESIZE - 1));
+			ea_t lastPage = (seg->end_ea - 1) & (~(CACHEPAGESIZE - 1));
+			while (page <= lastPage) {
+				if (bytes + CACHEPAGESIZE > maxBytes) {
+					if (limited != nullptr)
+						*limited = true;
+					return pages;
+				}
+				preloadByteCachePage(cb, page);
+				pages++;
+				bytes += CACHEPAGESIZE;
+				if (lastPage - page < CACHEPAGESIZE)
+					break;
+				page += CACHEPAGESIZE;
+			}
+		}
+		return pages;
+	}
+	void writeBatchDoneMarker(RdGlobalInfo* di)
+	{
+		qstring donePathEnv;
+		if (!qgetenv("GHIDRADEC_BATCH_DONE", &donePathEnv) || donePathEnv.empty())
+			return;
+		std::string donePath = donePathEnv.c_str();
+		FILE* fp = qfopen(donePath.c_str(), "wb");
+		if (fp == nullptr)
+			return;
+		std::string text = std::string("success=") + (di->decompSuccess ? "1" : "0") + "\n";
+		qfwrite(fp, text.c_str(), text.size());
+		qfclose(fp);
+	}
 	int IdaCallback::getBytes(unsigned char* ptr, int size, AddrInfo addr)
 	{
 		int i = 0;
 		if (addr.space == "ram") {
-			if (byteCache.size() > CACHECLEANUPAFTER) {
+			qstring batchOutputEnv;
+			const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
+			if (!batchOutput && byteCache.size() > CACHECLEANUPAFTER) {
 				for (std::map<ea_t, std::pair<unsigned long long, std::vector<unsigned short>>>::iterator it = byteCache.begin(); it != byteCache.end();) {
 					if (it->second.first < cacheCount - CACHELIMIT) it = byteCache.erase(it);
 					else it++;
@@ -515,15 +559,18 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 			//paging strategy for easy lookup - just like the processor utilizes
 			bool bFetch = false;
-			qstring batchOutputEnv;
-			const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
 			unsigned long long page = addr.offset & (~(CACHEPAGESIZE - 1)),
 				firstPage = page,
 				pgoffs = addr.offset & (CACHEPAGESIZE - 1);
 			do {
 				if (byteCache.find((ea_t)page) == byteCache.end()) {
-					if (batchOutput && page != firstPage)
+					if (batchOutput) {
+						protocolRecorder("getBytes batchCacheMissNoFetch addr=\"ram:0x" +
+							to_string(addr.offset, std::hex) + "\" size=\"" +
+							std::to_string(size) + "\" page=\"0x" +
+							to_string(page, std::hex) + "\"", true);
 						break;
+					}
 					bFetch = true;
 					break;
 				}
@@ -3136,12 +3183,28 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				allFuncRanges[f->start_ea] = getFunctionRanges(f, "ram");
 			}
 			preloadFunctionByteCache(this);
+			qstring batchOutputEnv;
+			if (qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty()) {
+				bool limited = false;
+				size_t pages = preloadMappedSegmentByteCache(this, BATCH_SEGMENT_PRELOAD_LIMIT, &limited);
+				INFO_MSG("Preloaded byte cache for " << std::dec << pages
+					<< " mapped segment pages for batch decompilation"
+					<< (limited ? " (limit reached)" : "") << "\n");
+			}
 			INFO_MSG("Preloaded byte cache for " << std::dec << allFuncRanges.size()
 				<< " all-decompile functions\n");
 		} else {
 			allFuncNames[di->decompiledFunction->start_ea] = get_name(di->decompiledFunction->start_ea).c_str();
 			allFuncRanges[di->decompiledFunction->start_ea] = getFunctionRanges(di->decompiledFunction, "ram");
 			preloadFunctionByteCache(this);
+			qstring batchOutputEnv;
+			if (qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty()) {
+				bool limited = false;
+				size_t pages = preloadMappedSegmentByteCache(this, BATCH_SEGMENT_PRELOAD_LIMIT, &limited);
+				INFO_MSG("Preloaded byte cache for " << std::dec << pages
+					<< " mapped segment pages for batch decompilation"
+					<< (limited ? " (limit reached)" : "") << "\n");
+			}
 		}
 	}
 	void IdaCallback::addrToArgLoc(SizedAddrInfo addr, argloc_t & al)
@@ -4089,6 +4152,21 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 		bool bSucc = false;
 		if (di->idacb->imports.find(di->decompiledFunction->start_ea) != di->idacb->imports.end()) {
 			di->decompSuccess = false;
+			std::string funcName = di->idacb->allFuncNames[di->decompiledFunction->start_ea];
+			std::string message = "Skipped decompiling import function: " + funcName +
+				" @ 0x" + to_string((unsigned long long)di->decompiledFunction->start_ea, std::hex);
+			INFO_MSG(message << "\n");
+			qstring batchOutputEnv;
+			const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
+			if (batchOutput && !di->outputFile.empty()) {
+				std::string code = "//" + message + "\n";
+				FILE* fp = qfopen(di->outputFile.c_str(), "wb");
+				qfwrite(fp, code.c_str(), code.size());
+				qfclose(fp);
+				di->outputFile.clear();
+			} else {
+				WARNING_GUI(message << ".\n");
+			}
 			return;
 		}
 		code = tryDecomp(di, defaultDecMode, (unsigned long long)di->decompiledFunction->start_ea, display, bSucc, blockGraph);
@@ -4120,6 +4198,8 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 		return;
 	}
 
+	INFO_MSG("GhidraDec trace: final output assembly begin, code bytes=" << std::dec
+		<< code.size() << ", display bytes=" << display.size() << "\n");
 	qstring batchOutputEnv;
 	const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
 	if (batchOutput) {
@@ -4138,23 +4218,28 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 			display += std::string({ COLOR_ON, COLOR_AUTOCMT }) + str + std::string({ COLOR_OFF, COLOR_AUTOCMT }) + "\n";
 		}
 	}
+	INFO_MSG("GhidraDec trace: final output assembly complete, code bytes=" << std::dec
+		<< code.size() << ", display bytes=" << display.size() << "\n");
 
 	//should save to a .c file?
 	//INFO_MSG("Decompiled file: " << decName << "\n");
 	if (di->outputFile.size() != 0) {
+		INFO_MSG("GhidraDec trace: final output write begin: " << di->outputFile.c_str() << "\n");
 		FILE* fp = qfopen(di->outputFile.c_str(), "wb");
 		qfwrite(fp, code.c_str(), code.size());
 		qfclose(fp);
+		INFO_MSG("GhidraDec trace: final output write complete\n");
 		di->outputFile.clear();
 	}
 
-	if (di->isSelectiveDecompilation())
+	if (di->decompiledFunction != nullptr)
 	{
 		di->fnc2code[di->decompiledFunction].code = display;
 		di->fnc2code[di->decompiledFunction].blockGraph = blockGraph;
 	}
 
 	di->decompSuccess = true;
+	INFO_MSG("GhidraDec trace: localDecompilation complete\n");
 }
 
 ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
@@ -4287,12 +4372,13 @@ void displayBlockGraph(RdGlobalInfo* di, ea_t ea)
 static int idaapi threadFunc(void* ud)
 {
 	RdGlobalInfo* di = static_cast<RdGlobalInfo*>(ud);
+	const bool selectiveDecompilation = di->decompiledFunction != nullptr;
 	di->decompRunning = true;
 
 	INFO_MSG("Local decompilation ...\n");
 	localDecompilation(di);
 
-	if (di->decompSuccess && di->isSelectiveDecompilation() && !di->suppressViewer)
+	if (di->decompSuccess && selectiveDecompilation && !di->suppressViewer)
 	{
 		//showDecompiledCode(di);
 		ShowOutput show(di);
@@ -4307,7 +4393,11 @@ static int idaapi threadFunc(void* ud)
 
 	di->outputFile.clear();
 	di->suppressViewer = false;
+	INFO_MSG("GhidraDec trace: worker cleanup begin\n");
+	stopDecompilation(di, true, false, true);
+	INFO_MSG("GhidraDec trace: worker cleanup complete\n");
 	di->decompRunning = false;
+	writeBatchDoneMarker(di);
 	return 0;
 }
 

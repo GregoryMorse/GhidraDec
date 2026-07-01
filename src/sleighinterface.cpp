@@ -1459,7 +1459,10 @@ std::vector<uchar> DecompInterface::readResponse() {
 						int4 size = 0;
 						Address queryAddr = Address::decode(decoder, size);
 						decoder.closeElement(elemId);
-						callback->protocolRecorder("query(\"command_getbytes\")", false);
+						callback->protocolRecorder("query(command_getbytes addr=\"" +
+							std::string(queryAddr.getSpace() != nullptr ? queryAddr.getSpace()->getName() : "<null>") +
+							":0x" + to_string(queryAddr.getOffset(), hex) + "\" size=\"" +
+							std::to_string(size) + "\")", false);
 						std::vector<uchar> res;
 						res.resize(size);
 						callback->getBytes(res.data(), size, AddrInfo{ queryAddr.getSpace()->getName(), queryAddr.getOffset() });

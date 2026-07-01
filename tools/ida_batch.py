@@ -44,12 +44,14 @@ DEFAULT_FAILURE_PATTERNS = (
     "Low-level Error:",
     "Unhandled exception:",
     "Caught decompilation error:",
+    "Skipped decompiling import function:",
     "[ghidradec-batch] FAIL:",
 )
 GRACEFUL_FAILURE_PATTERNS = (
     "Caught decompilation error:",
     "Low-level Error:",
     "[GhidraDec error]",
+    "Skipped decompiling import function:",
 )
 DANGEROUS_FAILURE_PATTERNS = (
     "Unhandled exception:",
@@ -296,9 +298,11 @@ def run_one(
     case_dir = work_root / case_name(input_path)
     work_input = copy_input(input_path.resolve(), case_dir, args.refresh)
     output_path = output_path_override or (case_dir / (work_input.name + ".c"))
+    done_path = output_path.with_suffix(output_path.suffix + ".done")
     idb_path = Path(args.save_idb).resolve() if args.save_idb else default_idb_path(work_input)
     log_path = case_dir / log_name
     remove_if_exists(log_path)
+    remove_if_exists(done_path)
     if output_path_override is not None:
         remove_if_exists(output_path_override)
     if protocol_log_override is not None:
@@ -310,6 +314,7 @@ def run_one(
     env = os.environ.copy()
     env["GHIDRADEC_BATCH_INPUT"] = str(work_input)
     env["GHIDRADEC_BATCH_OUTPUT"] = str(output_path)
+    env["GHIDRADEC_BATCH_DONE"] = str(done_path)
     env["GHIDRADEC_BATCH_SAVE_IDB"] = str(idb_path) if args.save_database else ""
     env["GHIDRADEC_BATCH_PLUGIN"] = plugin_names
     env["GHIDRADEC_BATCH_PLUGIN_ARG"] = str(plugin_arg_override if plugin_arg_override is not None else args.plugin_arg)
@@ -379,10 +384,23 @@ def list_functions(args: argparse.Namespace, input_path: Path) -> list[dict[str,
 
 def run_individual_functions(args: argparse.Namespace, input_path: Path) -> int:
     functions = list_functions(args, input_path)
-    start = max(0, args.individual_start_index)
-    selected = functions[start:]
-    if args.individual_max > 0:
-        selected = selected[:args.individual_max]
+    if args.individual_ea:
+        wanted = set()
+        for value in args.individual_ea:
+            for item in value.split(","):
+                item = item.strip()
+                if item:
+                    wanted.add(int(item, 0))
+        selected = [(index, function) for index, function in enumerate(functions) if int(function["ea"]) in wanted]
+        found = {int(function["ea"]) for _, function in selected}
+        missing = sorted(wanted - found)
+        for ea in missing:
+            print(f"[ghidradec-batch] missing requested function @ 0x{ea:x}", file=sys.stderr)
+    else:
+        start = max(0, args.individual_start_index)
+        selected = list(enumerate(functions[start:], start=start))
+        if args.individual_max > 0:
+            selected = selected[:args.individual_max]
     if not selected:
         print(f"[ghidradec-batch] FAIL: no functions selected for {input_path}", file=sys.stderr)
         return 1
@@ -392,7 +410,7 @@ def run_individual_functions(args: argparse.Namespace, input_path: Path) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     summary = []
     counts = {"success": 0, "graceful_fail": 0, "dangerous_fail": 0}
-    for index, function in enumerate(selected, start=start):
+    for index, function in selected:
         ea = int(function["ea"])
         ea_hex = f"0x{ea:x}"
         name = str(function.get("name") or ea_hex)
@@ -514,6 +532,12 @@ def main() -> int:
     )
     parser.add_argument("--individual-start-index", type=int, default=0)
     parser.add_argument("--individual-max", type=int, default=0, help="Maximum individual functions to run; 0 means all")
+    parser.add_argument(
+        "--individual-ea",
+        action="append",
+        default=[],
+        help="Run only matching function entry addresses; accepts hex/decimal values and comma-delimited lists",
+    )
     parser.add_argument("--debugger", help="Launch IDA under a debugger such as cdb.exe")
     parser.add_argument("--debugger-command", help="Debugger command string passed with cdb/windbg -c")
     parser.add_argument("--debugger-symbols", help="Debugger symbol path passed with cdb/windbg -y")

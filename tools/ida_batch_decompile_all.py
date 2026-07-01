@@ -133,6 +133,16 @@ def output_ready(path, start_time, min_bytes):
     return size >= min_bytes, size
 
 
+def done_ready(path, start_time):
+    if not path:
+        return True
+    if not os.path.exists(path):
+        return False
+    if os.path.getmtime(path) + 1.0 < start_time:
+        return False
+    return True
+
+
 def plugin_names():
     names = []
     configured = os.environ.get("GHIDRADEC_BATCH_PLUGIN", "ghidradec64")
@@ -157,7 +167,7 @@ def pump_ui_events():
     time.sleep(0.05)
 
 
-def wait_for_output(output_path, start_time, timeout_seconds, stable_polls, min_bytes):
+def wait_for_output(output_path, done_path, start_time, timeout_seconds, stable_polls, min_bytes):
     last_size = -1
     stable_count = 0
     last_log_second = -1
@@ -170,7 +180,7 @@ def wait_for_output(output_path, start_time, timeout_seconds, stable_polls, min_
             else:
                 stable_count = 1
                 last_size = size
-            if stable_count >= stable_polls:
+            if stable_count >= stable_polls and done_ready(done_path, start_time):
                 log("Output ready: decompile output is {} bytes".format(size))
                 ida_pro.qexit(0)
                 return
@@ -223,9 +233,12 @@ def main():
         select_function_for_plugin()
 
         output_path = normalize_path(os.environ.get("GHIDRADEC_BATCH_OUTPUT", "")) or (input_path + ".c")
+        done_path = normalize_path(os.environ.get("GHIDRADEC_BATCH_DONE", ""))
         if os.environ.get("GHIDRADEC_BATCH_CLEAN_OUTPUT", "1") not in ("0", "false", "False"):
             if os.path.exists(output_path):
                 os.remove(output_path)
+            if done_path and os.path.exists(done_path):
+                os.remove(done_path)
 
         timeout_seconds = max(10, env_int("GHIDRADEC_BATCH_TIMEOUT", 600))
         stable_polls = max(1, env_int("GHIDRADEC_BATCH_STABLE_POLLS", 3))
@@ -235,12 +248,12 @@ def main():
         start_time = time.time()
         run_plugin(plugin_argument)
         ready, size = output_ready(output_path, start_time, min_bytes)
-        if ready and stable_polls <= 1:
+        if ready and stable_polls <= 1 and done_ready(done_path, start_time):
             log("Output ready: decompile output is {} bytes".format(size))
             ida_pro.qexit(0)
             return
 
-        wait_for_output(output_path, start_time, timeout_seconds, stable_polls, min_bytes)
+        wait_for_output(output_path, done_path, start_time, timeout_seconds, stable_polls, min_bytes)
     except SystemExit:
         raise
     except Exception as exc:
