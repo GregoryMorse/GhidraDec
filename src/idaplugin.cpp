@@ -531,12 +531,27 @@ bool GhidraDec::canDecompileInput()
 			decompInfo->toolMap["metapc"].push_back((int)i); break;
 		}
 	}
+	auto addProcessorAlias = [this](const std::string& processor, const std::string& alias) {
+		for (size_t i = 0; i < decompInfo->li.size(); i++) {
+			if (decompInfo->li[i].processor != processor) continue;
+			auto& matches = decompInfo->toolMap[alias];
+			const int index = (int)i;
+			if (std::find(matches.begin(), matches.end(), index) == matches.end())
+				matches.push_back(index);
+		}
+	};
 	for (size_t i = 0; i < decompInfo->li.size(); i++) {
 		if (decompInfo->li[i].processor == "AARCH64") {
 			decompInfo->toolMap[decompInfo->li[i].bigEndian ? "armb" : "arm"].push_back((int)i);
 			decompInfo->toolMap["aarch64"].push_back((int)i);
 		}
 	}
+	addProcessorAlias("RISCV", "riscv");
+	addProcessorAlias("SuperH4", "sh3");
+	addProcessorAlias("SuperH4", "sh3b");
+	addProcessorAlias("SuperH4", "sh4");
+	addProcessorAlias("SuperH4", "sh4b");
+	addProcessorAlias("SuperH4", "sh2a");
 	std::string pname = inf_procname;
 	std::transform(pname.begin(), pname.end(), pname.begin(), [](unsigned char c) { return std::tolower(c); });
 	return decompInfo->toolMap.find(pname) != decompInfo->toolMap.end();

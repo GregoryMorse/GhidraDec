@@ -164,7 +164,7 @@
           "tier": "smoke",
           "path": "tests/mips/fauxware",
           "enabled": false,
-          "notes": "Big-endian MIPS. Deferred while the BE-specific native decompiler crash is investigated; keep MIPS LE enabled."
+          "notes": "Big-endian MIPS. Disabled because Ghidra decompile.exe closes the pipe with Read pipe is bad on this BE lane; keep MIPS LE enabled."
         },
         {
           "id": "angr-mips-test_arrays",
@@ -172,7 +172,7 @@
           "tier": "smoke",
           "path": "tests/mips/test_arrays",
           "enabled": false,
-          "notes": "Big-endian MIPS. Deferred while the BE-specific native decompiler crash is investigated; keep MIPS LE enabled."
+          "notes": "Big-endian MIPS. Disabled because Ghidra decompile.exe closes the pipe with Read pipe is bad on this BE lane; keep MIPS LE enabled."
         },
         {
           "id": "angr-mips-test_loops",
@@ -180,7 +180,7 @@
           "tier": "extended",
           "path": "tests/mips/test_loops",
           "enabled": false,
-          "notes": "Big-endian MIPS. Deferred while the BE-specific native decompiler crash is investigated; keep MIPS LE enabled."
+          "notes": "Big-endian MIPS. Disabled because Ghidra decompile.exe closes the pipe with Read pipe is bad on this BE lane; keep MIPS LE enabled."
         },
         {
           "id": "angr-mips-test_division",
@@ -188,7 +188,7 @@
           "tier": "extended",
           "path": "tests/mips/test_division",
           "enabled": false,
-          "notes": "Big-endian MIPS. Deferred while the BE-specific native decompiler crash is investigated; keep MIPS LE enabled."
+          "notes": "Big-endian MIPS. Disabled because Ghidra decompile.exe closes the pipe with Read pipe is bad on this BE lane; keep MIPS LE enabled."
         },
         {
           "id": "angr-mipsel-fauxware",
@@ -275,16 +275,16 @@
           "arch": "ppc64",
           "tier": "extended",
           "path": "tests/ppc64/test_loops",
-          "enabled": false,
-          "notes": "PowerPC 64 big-endian target is present, but held out of the stable grid while the non-x86 calling-convention bridge is validated."
+          "enabled": true,
+          "notes": "PowerPC 64 big-endian extended target. Validates default-prototype pcode injection handling in PPC64 cspecs."
         },
         {
           "id": "angr-ppc64-test_division",
           "arch": "ppc64",
           "tier": "extended",
           "path": "tests/ppc64/test_division",
-          "enabled": false,
-          "notes": "PowerPC 64 big-endian target is present, but held out of the stable grid while the non-x86 calling-convention bridge is validated."
+          "enabled": true,
+          "notes": "PowerPC 64 big-endian extended target. Validates default-prototype pcode injection handling in PPC64 cspecs."
         },
         {
           "id": "angr-ppc64el-fauxware",
@@ -300,7 +300,7 @@
           "tier": "extended",
           "path": "tests/ppc64el/fauxware_static",
           "enabled": false,
-          "notes": "PowerPC 64 little-endian static target is present, but held out of the stable grid while the non-x86 calling-convention bridge is validated."
+          "notes": "PowerPC 64 little-endian static target is present, but remains disabled because decompile-all timed out at 300s and IDA exited with Windows heap corruption after cancellation."
         },
         {
           "id": "angr-m68k-mul-add-sub-xor",
@@ -308,7 +308,7 @@
           "tier": "smoke",
           "path": "tests/m68k/mul_add_sub_xor_m68k_be",
           "enabled": false,
-          "notes": "Motorola 68000 big-endian target is present, but this angr binary currently expands into a large static analysis case and is not stable enough for the default smoke grid."
+          "notes": "Motorola 68000 big-endian target is present, but decompile-all did not create stable output within 240s and IDA exited with Windows heap corruption after cancellation."
         },
         {
           "id": "angr-hppa-test-instr",
@@ -316,7 +316,7 @@
           "tier": "smoke",
           "path": "tests/hppa/test-instr_hppa",
           "enabled": false,
-          "notes": "PA-RISC target is present, but the current binary hits repeated bad-branch decompiler diagnostics and timed out during the broad smoke run."
+          "notes": "PA-RISC target is present, but it emits repeated bad-branch diagnostics, did not create stable output within 240s, and IDA exited with Windows heap corruption after cancellation."
         },
         {
           "id": "angr-sh4-test-instr",
@@ -324,15 +324,15 @@
           "tier": "smoke",
           "path": "tests/sh4/test-instr_sh4",
           "enabled": false,
-          "notes": "SuperH4 target is present, but disabled until local Ghidra/IDA processor binding is confirmed by a successful batch run."
+          "notes": "SuperH4 binding now resolves through IDA sh3/sh4 aliases, but this static-style target did not create stable output within 240s and IDA exited with Windows heap corruption after cancellation."
         },
         {
           "id": "angr-riscv64-test-return-type",
           "arch": "riscv64",
           "tier": "smoke",
           "path": "tests/riscv64/test_return_type_riscv64.elf",
-          "enabled": false,
-          "notes": "RISC-V 64 target is present in angr, but disabled until Ghidra's RISCV ldefs advertise an IDA-PRO external name."
+          "enabled": true,
+          "notes": "RISC-V 64 little-endian smoke target. Uses local IDA-PRO aliasing until Ghidra's RISCV ldefs advertise the riscv external name upstream."
         },
         {
           "id": "angr-mips64-test_arrays",
@@ -340,7 +340,7 @@
           "tier": "smoke",
           "path": "tests/mips64/test_arrays",
           "enabled": false,
-          "notes": "Big-endian MIPS64. Deferred with MIPS BE while MIPS LE coverage continues."
+          "notes": "Big-endian MIPS64. Disabled with MIPS BE because Ghidra decompile.exe closes the pipe with Read pipe is bad."
         },
         {
           "id": "angr-mips64-test_loops",
@@ -348,7 +348,7 @@
           "tier": "extended",
           "path": "tests/mips64/test_loops",
           "enabled": false,
-          "notes": "Big-endian MIPS64. Deferred with MIPS BE while MIPS LE coverage continues."
+          "notes": "Big-endian MIPS64. Disabled with MIPS BE because Ghidra decompile.exe closes the pipe with Read pipe is bad."
         },
         {
           "id": "angr-mips64-test_division",
@@ -356,13 +356,13 @@
           "tier": "extended",
           "path": "tests/mips64/test_division",
           "enabled": false,
-          "notes": "Big-endian MIPS64. Deferred with MIPS BE while MIPS LE coverage continues."
+          "notes": "Big-endian MIPS64. Disabled with MIPS BE because Ghidra decompile.exe closes the pipe with Read pipe is bad."
         }
       ]
     }
   ],
   "orders": {
     "x86-first": ["x86_64", "x86_32", "x86_16"],
-    "baseline-expansion": ["x86_64", "x86_32", "x86_16", "armel", "armhf", "aarch64", "mipsel", "ppc", "ppc64", "ppc64el", "m68k", "hppa", "sh4", "riscv64"]
+    "baseline-expansion": ["x86_64", "x86_32", "x86_16", "armel", "armhf", "aarch64", "mipsel", "ppc", "ppc64", "ppc64el", "riscv64", "m68k", "hppa", "sh4"]
   }
 }

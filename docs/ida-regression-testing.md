@@ -39,6 +39,13 @@ The baseline expansion order then adds:
 4. `mips`
 5. `mipsel`
 6. `mips64`
+7. `ppc`
+8. `ppc64`
+9. `ppc64el`
+10. `riscv64`
+11. `m68k`
+12. `hppa`
+13. `sh4`
 
 Stage the smoke tier with:
 
@@ -138,38 +145,52 @@ Batch runs enable `GHIDRADEC_TRACE` by default so the IDA log and
 logs. GUI use defaults to user-facing `INFO_MSG` output only; set
 `GHIDRADEC_TRACE=1` when debugging an interactive session.
 
-Current ARM/AArch64/MIPS smoke status from the pinned angr smoke set:
+Current baseline status from the pinned angr set:
 
-* `aarch64`, `armel`, `armhf`, and `mipsel` pass and remain enabled in the
-  baseline expansion lane.
+* The explicit baseline smoke grid currently passes `18/18` with no
+  `graceful_fail` or `dangerous_fail` results. Report:
+  `build/corpus-reports/angr-baseline-smoke/ida-batch-summary.json`.
+* The enabled extended grid currently passes `17/17` with no `graceful_fail` or
+  `dangerous_fail` results. Report:
+  `build/corpus-reports/angr-baseline-extended/ida-batch-summary.json`.
+
+Current ARM/AArch64/MIPS/RISC-V status from the pinned angr set:
+
+* `aarch64`, `armel`, `armhf`, and `mipsel` smoke/extended targets pass and
+  remain enabled in the baseline expansion lane.
+* `riscv64` smoke now passes and remains enabled. The plugin currently adds a
+  local `riscv` alias while waiting for Ghidra's RISCV ldefs to advertise an
+  `IDA-PRO` external name upstream.
 * `mips` big-endian and `mips64` big-endian currently reach controlled
   `graceful_fail` results and are temporarily disabled in
-  `ghidradec.corpus.json` so broader processor coverage can continue while the
-  BE-specific native decompiler crash is investigated.
-* The current MIPS BE failure signature is a native `decompile.exe` access
-  violation reading `0xffffffffffffffff` after a `$gp`-relative global
-  `getMappedSymbols` query. The protocol log reaches ordinary MIPS BE
-  subregister-hole queries and then the global data query before the child pipe
-  closes. Treat this as the next focused backend/protocol bug, not as a harness
-  instability.
+  `ghidradec.corpus.json` so broader processor coverage can continue.
+* The current MIPS BE/MIPS64 BE failure signature is `Read pipe is bad` from
+  the native decompiler child. The small loop/division/array/fauxware samples
+  all reach the correct MIPS BE or MIPS64 BE pspec/cspec/sla and then report
+  per-function decompilation errors. Treat this as the next focused
+  backend/protocol bug, not as a harness instability.
 
-Current PowerPC smoke status from the pinned angr smoke set:
+Current PowerPC status from the pinned angr set:
 
 * `ppc`, `ppc64`, and `ppc64el` smoke targets pass and remain enabled.
+* `ppc` and the small `ppc64` extended targets pass and remain enabled.
 * PPC64 depends on compiler-spec pcode injection declared inside
   `<default_proto>`. This is covered by `angr-ppc64-fauxware`,
-  `angr-ppc64-test_arrays`, and `angr-ppc64el-fauxware`.
-* PPC64 extended/static targets are listed but still disabled until they are
-  run separately and promoted deliberately.
+  `angr-ppc64-test_arrays`, `angr-ppc64-test_loops`,
+  `angr-ppc64-test_division`, and `angr-ppc64el-fauxware`.
+* `angr-ppc64el-fauxware-static` remains disabled: decompile-all did not create
+  stable output within 300 seconds, and IDA exited with Windows heap corruption
+  after cancellation. Report:
+  `build/corpus-reports/angr-ppc64-extended/ida-batch-summary.json`.
 
 Additional processor candidates from angr are listed but not enabled by default:
 
-* `m68k` and `hppa` currently use large/static-style binaries that timed out or
-  destabilized IDA during the broad smoke sweep.
-* `sh4` loads in IDA but still needs a confirmed Ghidra/IDA language binding
-  path before it can join the stable smoke grid.
-* `riscv64` is waiting on an `IDA-PRO` external-name binding in Ghidra's RISCV
-  ldefs.
+* `m68k` and `hppa` currently use large/static-style binaries that did not
+  create stable output within 240 seconds and destabilized IDA after
+  cancellation.
+* `sh4` now reaches Ghidra's SuperH4 language through local IDA `sh3`/`sh4`
+  aliases, but the available angr static-style target timed out and IDA exited
+  with Windows heap corruption after cancellation.
 
 On Windows, `tools/ida_batch.py` also watches IDA-owned dialogs and sends the
 default confirmation action for common startup, warning, crash, and recovery

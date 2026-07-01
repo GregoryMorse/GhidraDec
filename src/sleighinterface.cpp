@@ -74,13 +74,18 @@ static bool stripCallotherFixup(std::string& xml, const std::string& targetop)
 	return true;
 }
 
+static ElementId ELEM_COMMAND_ISNAMEUSED = ElementId("command_isnameused", 239);
 static ElementId ELEM_COMMAND_GETBYTES = ElementId("command_getbytes", 240);
 static ElementId ELEM_COMMAND_GETCALLFIXUP = ElementId("command_getcallfixup", 241);
 static ElementId ELEM_COMMAND_GETCALLMECH = ElementId("command_getcallmech", 242);
 static ElementId ELEM_COMMAND_GETCALLOTHERFIXUP = ElementId("command_getcallotherfixup", 243);
 static ElementId ELEM_COMMAND_GETCODELABEL = ElementId("command_getcodelabel", 244);
 static ElementId ELEM_COMMAND_GETCOMMENTS = ElementId("command_getcomments", 245);
+static ElementId ELEM_COMMAND_GETCPOOLREF = ElementId("command_getcpoolref", 246);
+static ElementId ELEM_COMMAND_GETDATATYPE = ElementId("command_getdatatype", 247);
+static ElementId ELEM_COMMAND_GETEXTERNALREF = ElementId("command_getexternalref", 248);
 static ElementId ELEM_COMMAND_GETMAPPEDSYMBOLS = ElementId("command_getmappedsymbols", 249);
+static ElementId ELEM_COMMAND_GETNAMESPACEPATH = ElementId("command_getnamespacepath", 250);
 static ElementId ELEM_COMMAND_GETPCODE = ElementId("command_getpcode", 251);
 static ElementId ELEM_COMMAND_GETPCODEEXECUTABLE = ElementId("command_getpcodeexecutable", 252);
 static ElementId ELEM_COMMAND_GETREGISTER = ElementId("command_getregister", 253);
@@ -97,6 +102,9 @@ static ElementId ELEM_RESPONSE_EXTERNREFSYMBOL = ElementId("externrefsymbol", 70
 static ElementId ELEM_RESPONSE_LABELSYM = ElementId("labelsym", 75);
 static ElementId ELEM_RESPONSE_TYPEREF = ElementId("typeref", 63);
 static ElementId ELEM_RESPONSE_ADDR = ElementId("addr", 11);
+static ElementId ELEM_RESPONSE_VAL = ElementId("val", 8);
+static ElementId ELEM_RESPONSE_VALUE = ElementId("value", 9);
+static ElementId ELEM_RESPONSE_PARENT = ElementId("parent", 77);
 static ElementId ELEM_RESPONSE_RANGELIST = ElementId("rangelist", 13);
 static ElementId ELEM_RESPONSE_RANGE = ElementId("range", 12);
 static ElementId ELEM_RESPONSE_HOLE = ElementId("hole", 74);
@@ -1706,6 +1714,96 @@ std::vector<uchar> DecompInterface::readResponse() {
 						callback->protocolRecorder("queryresponse(command_getcomments)", true);
 						goto query_response_written;
 					}
+					if (elemId == ELEM_COMMAND_GETCPOOLREF) {
+						int4 refCount = (int4)decoder.readSignedInteger(ATTRIB_SIZE);
+						std::vector<unsigned long long> refs;
+						for (int4 i = 0; i < refCount; ++i) {
+							uint4 valueId = decoder.openElement(ELEM_RESPONSE_VALUE);
+							refs.push_back(decoder.readUnsignedInteger(ATTRIB_CONTENT));
+							decoder.closeElement(valueId);
+						}
+						decoder.closeElement(elemId);
+						callback->protocolRecorder("query(command_getcpoolref count=\"" +
+							std::to_string(refs.size()) + "\")", false);
+						CPoolRecord rec = { PRIMITIVE, false, false, 0, std::vector<uchar>(), "" };
+						callback->getCPoolRef(refs, rec);
+						std::string dblres;
+						ostringstream tokenEsc;
+						if (!rec.data.empty()) {
+							int wrap = 0;
+							for (size_t i = 0; i < rec.data.size(); i++) {
+								int val = (rec.data[i] >> 4) & 0xf;
+								dblres.push_back(val > 9 ? val - 10 + 'a' : (val + '0'));
+								val = rec.data[i] & 0xf;
+								dblres.push_back(val > 9 ? val - 10 + 'a' : (val + '0'));
+								dblres.push_back(' ');
+								if (++wrap > 15) {
+									dblres.push_back('\n');
+									wrap = 0;
+								}
+							}
+						} else {
+							xml_escape(tokenEsc, rec.token.c_str());
+						}
+						size_t tagIndex = rec.tag >= PRIMITIVE && rec.tag <= CHECK_CAST ?
+							static_cast<size_t>(rec.tag) : static_cast<size_t>(PRIMITIVE);
+						std::string cpoolFallbackType =
+							"  <type name=\"undefined\" id=\"" +
+							std::to_string(hashName("undefined")) +
+							"\" metatype=\"unknown\" size=\"1\">\n  </type>\n";
+						std::string s = "<cpoolrec ref=\"" + std::to_string(refs.empty() ? 0 : refs[0]) +
+							"\" tag=\"" + cpoolreftags[tagIndex] + "\"" +
+							std::string(rec.hasThis ? " hasthis=\"true\"" : "") +
+							std::string(rec.constructor ? " constructor=\"true\"" : "") + ">\n" +
+							(rec.tag == PRIMITIVE ? "  <value>" +
+								std::to_string(rec.value) + "</value>\n" : "") +
+							(!rec.data.empty() ? "  <data length=\"" +
+								std::to_string(rec.data.size()) + "\">\n" + dblres + "</data>\n" :
+								"  <token>" + tokenEsc.str() + "</token>\n") +
+							cpoolFallbackType +
+							"</cpoolrec>";
+						write(query_response_start, sizeof(query_response_start));
+						writeString(s);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getcpoolref)", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETDATATYPE) {
+						std::string typeName = decoder.readString(ATTRIB_NAME);
+						intb typeId = decoder.readSignedInteger(ATTRIB_ID);
+						decoder.closeElement(elemId);
+						callback->protocolRecorder("query(command_getdatatype name=\"" +
+							escapeCStr(typeName) + "\" id=\"0x" +
+							to_string(static_cast<uint8>(typeId), hex) + "\")", false);
+						std::vector<TypeInfo> typeChain;
+						callback->getMetaType(typeName, typeChain);
+						std::string s = !typeChain.empty() ? buildTypeXml(typeChain, 0) : "";
+						write(query_response_start, sizeof(query_response_start));
+						if (!s.empty()) writeString(s);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getdatatype bytes=\"" +
+							std::to_string(s.size()) + "\")", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETEXTERNALREF) {
+						Address queryAddr = Address::decode(decoder);
+						decoder.closeElement(elemId);
+						AddrInfo addr{ queryAddr.getSpace()->getName(), queryAddr.getOffset() };
+						callback->protocolRecorder("query(command_getexternalref addr=\"" + addr.space +
+							":0x" + to_string(addr.offset, hex) + "\")", false);
+						std::string externName;
+						std::string modName;
+						FuncProtoInfo func = {};
+						callback->getExternInfo(addr, externName, modName, func);
+						std::string res = !externName.empty() ?
+							writeFunc(SizedAddrInfo{ addr, 1 }, externName, modName, func) :
+							buildHoleXml(addr.space, addr.offset, addr.offset, true, false);
+						write(query_response_start, sizeof(query_response_start));
+						writeString(res);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getexternalref)", true);
+						goto query_response_written;
+					}
 					if (elemId == ELEM_COMMAND_GETMAPPEDSYMBOLS) {
 						Address queryAddr = Address::decode(decoder);
 						decoder.closeElement(elemId);
@@ -1802,6 +1900,40 @@ std::vector<uchar> DecompInterface::readResponse() {
 						writeString(res);
 						write(query_response_end, sizeof(query_response_end));
 						callback->protocolRecorder("queryresponse(command_getmappedsymbols)", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETNAMESPACEPATH) {
+						uintb namespaceId = decoder.readUnsignedInteger(ATTRIB_ID);
+						decoder.closeElement(elemId);
+						std::ostringstream packedResponse;
+						PackedEncode encoder(packedResponse);
+						encoder.openElement(ELEM_RESPONSE_PARENT);
+						encoder.openElement(ELEM_RESPONSE_VAL);
+						encoder.closeElement(ELEM_RESPONSE_VAL);
+						encoder.closeElement(ELEM_RESPONSE_PARENT);
+						std::string res = packedResponse.str();
+						write(query_response_start, sizeof(query_response_start));
+						writeString(res);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getnamespacepath id=\"0x" +
+							to_string(namespaceId, hex) + "\")", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_ISNAMEUSED) {
+						std::string symbolName = decoder.readString(ATTRIB_NAME);
+						uintb firstId = decoder.readUnsignedInteger(ATTRIB_FIRST);
+						uintb lastId = decoder.readUnsignedInteger(ATTRIB_LAST);
+						decoder.closeElement(elemId);
+						write(query_response_start, sizeof(query_response_start));
+						write(string_start, sizeof(string_start));
+						const char res = 'f';
+						write(&res, 1);
+						write(string_end, sizeof(string_end));
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_isnameused name=\"" +
+							escapeCStr(symbolName) + "\" first=\"0x" +
+							to_string(firstId, hex) + "\" last=\"0x" +
+							to_string(lastId, hex) + "\" false)", true);
 						goto query_response_written;
 					}
 					if (elemId == ELEM_COMMAND_GETCALLFIXUP ||
@@ -2224,7 +2356,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 						std::stringstream ss(liststring);
 						std::string item;
 						while (getline(ss, item, ',')) refs.push_back(strtoull(item.c_str(), nullptr, 16));
-						CPoolRecord rec;
+						CPoolRecord rec = { PRIMITIVE, false, false, 0, std::vector<uchar>(), "" };
 						callback->getCPoolRef(refs, rec);
 						std::string dblres;
 						ostringstream commentesc;
@@ -2245,8 +2377,14 @@ std::vector<uchar> DecompInterface::readResponse() {
 						} else {
 							xml_escape(commentesc, rec.token.c_str());
 						}
-						std::string s = "<cpoolrec ref=\"" + std::to_string(refs[0]) +
-							"\" tag=\"" + cpoolreftags[rec.tag] + "\"" +
+						size_t tagIndex = rec.tag >= PRIMITIVE && rec.tag <= CHECK_CAST ?
+							static_cast<size_t>(rec.tag) : static_cast<size_t>(PRIMITIVE);
+						std::string cpoolFallbackType =
+							"  <type name=\"undefined\" id=\"" +
+							std::to_string(hashName("undefined")) +
+							"\" metatype=\"unknown\" size=\"1\">\n  </type>\n";
+						std::string s = "<cpoolrec ref=\"" + std::to_string(refs.empty() ? 0 : refs[0]) +
+							"\" tag=\"" + cpoolreftags[tagIndex] + "\"" +
 							std::string(rec.hasThis ? " hasthis=\"true\"" : "") +
 							std::string(rec.constructor ? " constructor=\"true\"" : "") + ">\n" +
 							(rec.tag == PRIMITIVE ? "  <value>" +
@@ -2254,6 +2392,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 								(rec.data.size() != 0 ? "  <data length=\"" +
 									std::to_string(rec.data.size()) + "\">\n" + dblres + "</data>\n" :
 									"  <token>" + commentesc.str() + "</token>\n") +
+							cpoolFallbackType +
 							"</cpoolrec>";
 						write(query_response_start, sizeof(query_response_start));
 						writeString(s);
