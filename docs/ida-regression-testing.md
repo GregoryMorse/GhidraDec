@@ -123,7 +123,9 @@ and GhidraDec output.
 * `success`: IDA exited cleanly, the done marker was written, and decompiler
   output met the minimum size check.
 * `graceful_fail`: the plugin reported a controlled diagnostic, such as a
-  selected import function that intentionally cannot be decompiled.
+  selected import function that intentionally cannot be decompiled, a native
+  decompiler marshaling diagnostic, or a decompile-all run where not every
+  selected function completed.
 * `dangerous_fail`: IDA crashed, timed out, failed to create output, or hit an
   unhandled failure pattern. Windows crash exit codes such as stack overflow and
   access violation are named in the JSON summary.
@@ -131,10 +133,17 @@ and GhidraDec output.
 The battery writes:
 
 * `inputs.txt`: exact staged binaries used for the run.
+* `inputs-individual-functions.txt`: exact staged binaries used for any
+  manifest-selected sampled individual-function run.
 * `ida-batch-summary.json`: per-input pass/fail details, logs, outputs, done
-  markers, and output sizes.
+  markers, and output sizes for single-mode decompile-all runs.
+* `ida-batch-summary-decompile-all.json`: decompile-all details when a
+  manifest selection mixes execution modes.
+* `ida-batch-summary-individual-functions.json`: per-input pass/fail details
+  for sampled individual-function targets when the selection mixes test modes.
 * `battery-summary.json`: selected corpus metadata plus the embedded batch
-  summary and command line.
+  summary and command line. Mixed-mode runs also include `batch_runs`, one entry
+  per execution mode.
 
 By default the runner removes stale IDA sidecar databases for raw binary inputs
 before each run. Pass `--reuse-database` only when deliberately debugging a
@@ -149,50 +158,62 @@ logs. GUI use defaults to user-facing `INFO_MSG` output only; set
 
 Current baseline status from the pinned angr set:
 
-* The explicit baseline smoke grid currently passes `18/18` with no
-  `graceful_fail` or `dangerous_fail` results. Report:
-  `build/corpus-reports/angr-baseline-smoke/ida-batch-summary.json`.
-* The enabled extended grid currently passes `17/17` with no `graceful_fail` or
-  `dangerous_fail` results. Report:
-  `build/corpus-reports/angr-baseline-extended/ida-batch-summary.json`.
+* A broad enabled run passes cleanly across `47/47` decompile-all targets
+  with no `graceful_fail` or `dangerous_fail` results before enabling HPPA.
+  Report:
+  `build/corpus-reports/enabled-full-arrayfix/ida-batch-summary-decompile-all.json`.
+* The remaining HPPA target now passes directly with `935/935` functions
+  decompiled, no `graceful_fail` or `dangerous_fail` results, and is enabled in
+  `ghidradec.corpus.json`. Report:
+  `build/corpus-reports/hppa-relative-normalize/ida-batch-summary.json`.
+* The sampled static-target lane now passes `3/3` inputs, `10/10` functions per
+  input, with no `graceful_fail` or `dangerous_fail` results. Report:
+  `build/corpus-reports/individual-summary-arrayfix/ida-batch-summary-individual-functions.json`.
+* The previous strict marshaling queue (`x86_64`, `x86_16`, `armel`,
+  `aarch64`, and `ppc` samples) was fixed by emitting packed array type
+  `arraysize` as a signed integer, matching Ghidra's 12.x packed decoder.
 
 Current ARM/AArch64/MIPS/RISC-V status from the pinned angr set:
 
-* `aarch64`, `armel`, `armhf`, and `mipsel` smoke/extended targets pass and
-  remain enabled in the baseline expansion lane.
+* `armel`, `armhf`, `aarch64`, `mips`, `mipsel`, and `mips64`
+  smoke/extended targets pass cleanly in the latest strict run.
 * `riscv64` smoke now passes and remains enabled. The plugin currently adds a
   local `riscv` alias while waiting for Ghidra's RISCV ldefs to advertise an
   `IDA-PRO` external name upstream.
-* `mips` big-endian and `mips64` big-endian currently reach controlled
-  `graceful_fail` results and are temporarily disabled in
-  `ghidradec.corpus.json` so broader processor coverage can continue.
-* The current MIPS BE/MIPS64 BE failure signature is `Read pipe is bad` from
-  the native decompiler child. The small loop/division/array/fauxware samples
-  all reach the correct MIPS BE or MIPS64 BE pspec/cspec/sla and then report
-  per-function decompilation errors. Treat this as the next focused
-  backend/protocol bug, not as a harness instability.
+* MIPS big-endian now passes after register-space mapped-symbol misses were
+  changed to cache a full register-space hole instead of a one-byte partial
+  register hole. Current combined report:
+  `build/corpus-reports/mips-all-postfix/ida-batch-summary.json`.
 
 Current PowerPC status from the pinned angr set:
 
-* `ppc`, `ppc64`, and `ppc64el` smoke targets pass and remain enabled.
-* `ppc` and the small `ppc64` extended targets pass and remain enabled.
+* `ppc`, `ppc64`, and `ppc64el` smoke targets pass cleanly in the latest
+  strict run.
+* The small `ppc64` extended targets pass cleanly and remain enabled.
 * PPC64 depends on compiler-spec pcode injection declared inside
   `<default_proto>`. This is covered by `angr-ppc64-fauxware`,
   `angr-ppc64-test_arrays`, `angr-ppc64-test_loops`,
   `angr-ppc64-test_division`, and `angr-ppc64el-fauxware`.
-* `angr-ppc64el-fauxware-static` remains disabled: decompile-all did not create
-  stable output within 300 seconds, and IDA exited with Windows heap corruption
-  after cancellation. Report:
-  `build/corpus-reports/angr-ppc64-extended/ida-batch-summary.json`.
+* `angr-ppc64el-fauxware-static` is enabled as a sampled
+  `individual-functions` target. A 10-function probe currently passes `10/10`
+  with no `graceful_fail` or `dangerous_fail` results. Monolithic decompile-all
+  remains too large for routine runs.
 
-Additional processor candidates from angr are listed but not enabled by default:
+Additional processor status from angr:
 
-* `m68k` and `hppa` currently use large/static-style binaries that did not
-  create stable output within 240 seconds and destabilized IDA after
-  cancellation.
-* `sh4` now reaches Ghidra's SuperH4 language through local IDA `sh3`/`sh4`
-  aliases, but the available angr static-style target timed out and IDA exited
-  with Windows heap corruption after cancellation.
+* `m68k` is enabled as a sampled `individual-functions` target. Current probes
+  cover early, mid, and late slices with `30/30` successes and no graceful or
+  dangerous failures. Monolithic decompile-all remains too large for routine
+  runs.
+* `sh4` reaches Ghidra's SuperH4 language through local IDA `sh3`/`sh4` aliases
+  and is enabled as a sampled `individual-functions` target. Current probes
+  cover early and mid slices with `20/20` successes and no graceful or dangerous
+  failures. Monolithic decompile-all remains too large for routine runs.
+* `hppa` is enabled. The large/static-style PA-RISC target now passes
+  decompile-all with `935/935` functions after packed p-code normalization for
+  relative branches that skip terminal branches into trailing delay-slot ops.
+  Current report:
+  `build/corpus-reports/hppa-relative-normalize/ida-batch-summary.json`.
 
 Current JVM/Dalvik status from the pinned angr set:
 

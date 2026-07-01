@@ -83,6 +83,15 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		return value.size() >= len && value.compare(0, len, prefix) == 0;
 	}
 
+	void makeUnknownFunctionPrototype(FuncProtoInfo& func)
+	{
+		func = FuncProtoInfo{};
+		func.extraPop = -1;
+		func.model = "unknown";
+		func.retType.addr.size = 0;
+		func.retType.pi.ti.push_back(TypeInfo{ "void", 0, "void" });
+	}
+
 	bool isRuntimeOrLoaderFunctionName(const std::string& name)
 	{
 		if (name.empty()) return false;
@@ -1039,9 +1048,12 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			} else if (msi.kind == KIND_DATA) {
 				if (addr.space == "ram") {
 					msi.name = lookupDataInfo(addr.offset, &msi.readonly, &msi.volatil, msi.typeChain);
+					msi.size = !msi.typeChain.empty() && msi.typeChain.front().size != 0 ?
+						msi.typeChain.front().size : 1;
 				} else {
 					msi.readonly = false;
 					msi.volatil = addr.space != "register";
+					msi.size = 1;
 				}
 			} else if (msi.kind == KIND_EXTERNALREFERENCE) {
 				if (addr.space == "ram") {
@@ -1377,17 +1389,31 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	void IdaCallback::getExternInfo(AddrInfo addr, std::string& callName, std::string& modName, FuncProtoInfo& func)
 	{
 		if (addr.space != "ram") return;
-		modName = modNames[imports[(ea_t)addr.offset].idx];
-		if (funcProtoInfos.find((ea_t)addr.offset) != funcProtoInfos.end()) {
-			callName = funcProtoInfos[(ea_t)addr.offset].name;
-			func = funcProtoInfos[(ea_t)addr.offset].fpi;
+		ea_t target = (ea_t)addr.offset;
+		std::map<ea_t, ImportInfo>::iterator imp = imports.find(target);
+		if (imp != imports.end() && imp->second.idx >= 0 && imp->second.idx < (int)modNames.size())
+			modName = modNames[imp->second.idx];
+		if (funcProtoInfos.find(target) != funcProtoInfos.end()) {
+			callName = funcProtoInfos[target].name;
+			func = funcProtoInfos[target].fpi;
+		} else if (di->skipParamIdentification && !di->outputFile.empty()) {
+			if (imp != imports.end() && !imp->second.name.empty()) {
+				callName = sanitizeIdaSymbolName(imp->second.name.substr(0, imp->second.name.find("(", 0)));
+			} else {
+				std::map<ea_t, std::string>::iterator knownName = allFuncNames.find(target);
+				callName = knownName != allFuncNames.end() ?
+					knownName->second : ("sub_" + to_string((unsigned long long)target, std::hex));
+			}
+			makeUnknownFunctionPrototype(func);
+			funcProtoInfos[target] = FuncInfo{ callName.c_str(), false, func };
 		} else {
-			executeOnMainThread([this, addr, &callName, &func]() {
+			executeOnMainThread([this, target, &callName, &func]() {
 				//ids folder contains some basic information for common imports and its in comments in the disassembly but how to properly access the info?
-				func_t* f = get_func((ea_t)addr.offset);
-				getFuncInfo(addr, f, callName, func);
+				AddrInfo targetAddr{ "ram", (unsigned long long)target };
+				func_t* f = get_func(target);
+				getFuncInfo(targetAddr, f, callName, func);
 				});
-			funcProtoInfos[(ea_t)addr.offset] = FuncInfo{ callName.c_str(), false, func };
+			funcProtoInfos[target] = FuncInfo{ callName.c_str(), false, func };
 		}
 	}
 	unsigned long long IdaCallback::getTypeSize(const tinfo_t & ti)
@@ -3071,6 +3097,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			msi.entryPoint = it->first;
 			msi.readonly = false;
 			msi.volatil = false;
+			msi.size = 1;
 			msi.name = it->second.name.empty() ?
 				("imp_" + to_string((unsigned long long)it->first, std::hex)) : it->second.name;
 			batchMappedSymbols[it->first] = msi;
@@ -3092,18 +3119,28 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				unsigned long long size = is_unknown(fl) ? 1 : get_item_size(ea);
 				if (size == 0 || size == BADSIZE)
 					size = 1;
-				std::string metaType = "unknown";
-				int typ = DecompInterface::coreTypeLookup((size_t)size, metaType);
-				if (typ == -1 && size != 1) {
-					msi.typeChain.push_back(TypeInfo{ "", size, "array", false, false, false, size });
-					msi.typeChain.push_back(TypeInfo{ "undefined", 1, metaType });
-				} else {
-					msi.typeChain.push_back(TypeInfo{ typ == -1 ? "undefined" : defaultCoreTypes[typ].name, size, metaType });
-				}
-				getMemoryInfo(ea, &msi.readonly, &msi.volatil);
 				msi.name = getSymbolName(ea);
+				bool pointerNamedData =
+					!is_unknown(fl) && size > 1 && msi.name.size() > 4 &&
+					msi.name.compare(msi.name.size() - 4, 4, "_ptr") == 0;
+				if (pointerNamedData) {
+					msi.typeChain.push_back(TypeInfo{ "", size, "ptr", false, false, false });
+					msi.typeChain.push_back(TypeInfo{ "void", 0, "void" });
+				} else {
+					std::string metaType = "unknown";
+					int typ = DecompInterface::coreTypeLookup((size_t)size, metaType);
+					if (typ == -1 && size != 1) {
+						msi.typeChain.push_back(TypeInfo{ "", size, "array", false, false, false, size });
+						msi.typeChain.push_back(TypeInfo{ "undefined", 1, metaType });
+					} else {
+						msi.typeChain.push_back(TypeInfo{ typ == -1 ? "undefined" : defaultCoreTypes[typ].name, size, metaType });
+					}
+				}
+				msi.size = size;
+				getMemoryInfo(ea, &msi.readonly, &msi.volatil);
 			} else if (has_name(fl) || has_dummy_name(fl)) {
 				msi.kind = KIND_LABEL;
+				msi.size = 1;
 				getMemoryInfo(ea, &msi.readonly, &msi.volatil);
 				msi.name = getSymbolName(ea);
 			}

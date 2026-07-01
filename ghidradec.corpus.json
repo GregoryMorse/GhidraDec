@@ -163,32 +163,32 @@
           "arch": "mips",
           "tier": "smoke",
           "path": "tests/mips/fauxware",
-          "enabled": false,
-          "notes": "Big-endian MIPS. Disabled because Ghidra decompile.exe closes the pipe with Read pipe is bad on this BE lane; keep MIPS LE enabled."
+          "enabled": true,
+          "notes": "Big-endian MIPS."
         },
         {
           "id": "angr-mips-test_arrays",
           "arch": "mips",
           "tier": "smoke",
           "path": "tests/mips/test_arrays",
-          "enabled": false,
-          "notes": "Big-endian MIPS. Disabled because Ghidra decompile.exe closes the pipe with Read pipe is bad on this BE lane; keep MIPS LE enabled."
+          "enabled": true,
+          "notes": "Big-endian MIPS."
         },
         {
           "id": "angr-mips-test_loops",
           "arch": "mips",
           "tier": "extended",
           "path": "tests/mips/test_loops",
-          "enabled": false,
-          "notes": "Big-endian MIPS. Disabled because Ghidra decompile.exe closes the pipe with Read pipe is bad on this BE lane; keep MIPS LE enabled."
+          "enabled": true,
+          "notes": "Big-endian MIPS."
         },
         {
           "id": "angr-mips-test_division",
           "arch": "mips",
           "tier": "extended",
           "path": "tests/mips/test_division",
-          "enabled": false,
-          "notes": "Big-endian MIPS. Disabled because Ghidra decompile.exe closes the pipe with Read pipe is bad on this BE lane; keep MIPS LE enabled."
+          "enabled": true,
+          "notes": "Big-endian MIPS."
         },
         {
           "id": "angr-mipsel-fauxware",
@@ -299,32 +299,38 @@
           "arch": "ppc64el",
           "tier": "extended",
           "path": "tests/ppc64el/fauxware_static",
-          "enabled": false,
-          "notes": "PowerPC 64 little-endian static target is present, but remains disabled because decompile-all timed out at 300s and IDA exited with Windows heap corruption after cancellation."
+          "enabled": true,
+          "testMode": "individual-functions",
+          "individualMax": 10,
+          "notes": "PowerPC 64 little-endian static target. Monolithic decompile-all is too large for routine runs, but sampled individual-function coverage currently passes without graceful or dangerous failures."
         },
         {
           "id": "angr-m68k-mul-add-sub-xor",
           "arch": "m68k",
           "tier": "smoke",
           "path": "tests/m68k/mul_add_sub_xor_m68k_be",
-          "enabled": false,
-          "notes": "Motorola 68000 big-endian target is present, but decompile-all did not create stable output within 240s and IDA exited with Windows heap corruption after cancellation."
+          "enabled": true,
+          "testMode": "individual-functions",
+          "individualMax": 10,
+          "notes": "Motorola 68000 big-endian static-style target. Monolithic decompile-all is too large for routine runs, but sampled individual-function coverage currently passes without graceful or dangerous failures."
         },
         {
           "id": "angr-hppa-test-instr",
           "arch": "hppa",
           "tier": "smoke",
           "path": "tests/hppa/test-instr_hppa",
-          "enabled": false,
-          "notes": "PA-RISC target is present, but it emits repeated bad-branch diagnostics, did not create stable output within 240s, and IDA exited with Windows heap corruption after cancellation."
+          "enabled": true,
+          "notes": "PA-RISC target. Decompile-all currently passes after normalizing relative branches that skip terminal branches into trailing delay-slot p-code."
         },
         {
           "id": "angr-sh4-test-instr",
           "arch": "sh4",
           "tier": "smoke",
           "path": "tests/sh4/test-instr_sh4",
-          "enabled": false,
-          "notes": "SuperH4 binding now resolves through IDA sh3/sh4 aliases, but this static-style target did not create stable output within 240s and IDA exited with Windows heap corruption after cancellation."
+          "enabled": true,
+          "testMode": "individual-functions",
+          "individualMax": 10,
+          "notes": "SuperH4 binding resolves through IDA sh3/sh4 aliases. Monolithic decompile-all is too large for routine runs, but sampled individual-function coverage currently passes without graceful or dangerous failures."
         },
         {
           "id": "angr-riscv64-test-return-type",
@@ -389,24 +395,24 @@
           "arch": "mips64",
           "tier": "smoke",
           "path": "tests/mips64/test_arrays",
-          "enabled": false,
-          "notes": "Big-endian MIPS64. Disabled with MIPS BE because Ghidra decompile.exe closes the pipe with Read pipe is bad."
+          "enabled": true,
+          "notes": "Big-endian MIPS64."
         },
         {
           "id": "angr-mips64-test_loops",
           "arch": "mips64",
           "tier": "extended",
           "path": "tests/mips64/test_loops",
-          "enabled": false,
-          "notes": "Big-endian MIPS64. Disabled with MIPS BE because Ghidra decompile.exe closes the pipe with Read pipe is bad."
+          "enabled": true,
+          "notes": "Big-endian MIPS64."
         },
         {
           "id": "angr-mips64-test_division",
           "arch": "mips64",
           "tier": "extended",
           "path": "tests/mips64/test_division",
-          "enabled": false,
-          "notes": "Big-endian MIPS64. Disabled with MIPS BE because Ghidra decompile.exe closes the pipe with Read pipe is bad."
+          "enabled": true,
+          "notes": "Big-endian MIPS64."
         }
       ]
     }

@@ -60,21 +60,6 @@ static void setupTrace(DecompileCallback* callback, const std::string& message)
 		callback->protocolRecorder("setup " + message, false);
 }
 
-static bool stripCallotherFixup(std::string& xml, const std::string& targetop)
-{
-	const std::string needle = "targetop=\"" + targetop + "\"";
-	size_t attr = xml.find(needle);
-	if (attr == std::string::npos)
-		return false;
-	size_t begin = xml.rfind("<callotherfixup", attr);
-	size_t end = xml.find("</callotherfixup>", attr);
-	if (begin == std::string::npos || end == std::string::npos)
-		return false;
-	end += std::string("</callotherfixup>").size();
-	xml.erase(begin, end - begin);
-	return true;
-}
-
 static ElementId ELEM_COMMAND_ISNAMEUSED = ElementId("command_isnameused", 239);
 static ElementId ELEM_COMMAND_GETBYTES = ElementId("command_getbytes", 240);
 static ElementId ELEM_COMMAND_GETCALLFIXUP = ElementId("command_getcallfixup", 241);
@@ -101,7 +86,9 @@ static ElementId ELEM_RESPONSE_FUNCTIONSHELL = ElementId("functionshell", 72);
 static ElementId ELEM_RESPONSE_FUNCTION = ElementId("function", 116);
 static ElementId ELEM_RESPONSE_EXTERNREFSYMBOL = ElementId("externrefsymbol", 70);
 static ElementId ELEM_RESPONSE_LABELSYM = ElementId("labelsym", 75);
+static ElementId ELEM_RESPONSE_TYPE = ElementId("type", 60);
 static ElementId ELEM_RESPONSE_TYPEREF = ElementId("typeref", 63);
+static ElementId ELEM_RESPONSE_FIELD = ElementId("field", 49);
 static ElementId ELEM_RESPONSE_ADDR = ElementId("addr", 11);
 static ElementId ELEM_RESPONSE_VAL = ElementId("val", 8);
 static ElementId ELEM_RESPONSE_VALUE = ElementId("value", 9);
@@ -133,6 +120,9 @@ static AttributeId ATTRIB_RESPONSE_CAT = AttributeId("cat", 61);
 static AttributeId ATTRIB_RESPONSE_MAXSIZE = AttributeId("maxsize", 120);
 static AttributeId ATTRIB_RESPONSE_LENGTH = AttributeId("length", 82);
 static AttributeId ATTRIB_RESPONSE_TAG = AttributeId("tag", 83);
+static AttributeId ATTRIB_RESPONSE_ARRAYSIZE = AttributeId("arraysize", 48);
+static AttributeId ATTRIB_RESPONSE_CHAR = AttributeId("char", 49);
+static AttributeId ATTRIB_RESPONSE_UTF = AttributeId("utf", 59);
 static ElementId ELEM_OPTION_READONLY = ElementId("readonly", 151);
 static ElementId ELEM_OPTION_COMMENTHEADER = ElementId("commentheader", 177);
 static ElementId ELEM_OPTION_COMMENTINDENT = ElementId("commentindent", 178);
@@ -375,11 +365,19 @@ void CallbackLoadImage::loadFill(uint1* ptr, int4 size, const Address& addr)
 // Here is a simple class for emitting pcode. We simply dump an appropriate string representation
 // straight to standard out.
 class PackedPcodeRawOut : public PcodeEmit {
-	PackedEncode& encoder;
+	struct OpGroup {
+		OpCode opc;
+		bool hasOut;
+		VarnodeData out;
+		std::vector<VarnodeData> vars;
+	};
+	std::vector<OpGroup> ops;
 public:
-	PackedPcodeRawOut(PackedEncode& enc) : encoder(enc) {}
+	PackedPcodeRawOut() {}
 	virtual void dump(const Address& addr, OpCode opc,
 		VarnodeData* outvar, VarnodeData* vars, int4 isize);
+	void encodePacked(PackedEncode& encoder, const Address& address, int4 offset);
+	void normalizeTerminalSkippedRelativeBranches();
 	std::string xmlPcodes;
 	bool hasTerminal = false;
 };
@@ -505,7 +503,14 @@ void PackedPcodeRawOut::dump(const Address& addr, OpCode opc,
 	//labelBase = oldbase;
 	if (emitOpc == CPUI_BRANCH || emitOpc == CPUI_BRANCHIND || emitOpc == CPUI_RETURN)
 		hasTerminal = true;
-	writePackedPcodeOp(encoder, emitOpc, outvar, vars, isize);
+	OpGroup op;
+	op.opc = emitOpc;
+	op.hasOut = outvar != nullptr;
+	if (op.hasOut)
+		op.out = *outvar;
+	for (int i = 0; i < isize; ++i)
+		op.vars.push_back(vars[i]);
+	ops.push_back(op);
 	std::string inpstr;
 	for (int i = emitOpc == CPUI_LOAD || emitOpc == CPUI_STORE ? 1 : 0; i < isize; i++) {
 		inpstr += "    <addr space=\"" + vars[i].space->getName() + "\" offset=\"0x" +
@@ -519,6 +524,47 @@ void PackedPcodeRawOut::dump(const Address& addr, OpCode opc,
 		(emitOpc == CPUI_LOAD || emitOpc == CPUI_STORE ?
 			"    <spaceid name=\"" + vars[0].getSpaceFromConst()->getName() + "\"/>\n" : "") +
 		inpstr + "  </op>\n";
+}
+
+void PackedPcodeRawOut::normalizeTerminalSkippedRelativeBranches()
+{
+	for (size_t i = 0; i < ops.size(); ++i) {
+		OpGroup& branch = ops[i];
+		if (branch.opc != CPUI_CBRANCH && branch.opc != CPUI_BRANCH)
+			continue;
+		if (branch.vars.empty() || branch.vars[0].space == nullptr ||
+			branch.vars[0].space->getName() != "const")
+			continue;
+		uintb relativeOffset = branch.vars[0].offset;
+		if (relativeOffset == 0 || i + relativeOffset != ops.size())
+			continue;
+		size_t terminal = ops.size();
+		for (size_t j = i + 1; j < ops.size(); ++j) {
+			if (ops[j].opc == CPUI_BRANCH || ops[j].opc == CPUI_BRANCHIND ||
+				ops[j].opc == CPUI_RETURN) {
+				terminal = j;
+				break;
+			}
+		}
+		if (terminal == ops.size() || terminal + 1 >= ops.size())
+			continue;
+		uintb adjustedOffset = static_cast<uintb>(terminal + 1 - i);
+		if (adjustedOffset < relativeOffset)
+			branch.vars[0].offset = adjustedOffset;
+	}
+}
+
+void PackedPcodeRawOut::encodePacked(PackedEncode& encoder, const Address& address, int4 offset)
+{
+	normalizeTerminalSkippedRelativeBranches();
+	encoder.openElement(ELEM_RESPONSE_INST);
+	encoder.writeSignedInteger(ATTRIB_OFFSET, offset);
+	address.encode(encoder);
+	for (std::vector<OpGroup>::iterator it = ops.begin(); it != ops.end(); ++it) {
+		writePackedPcodeOp(encoder, it->opc, it->hasOut ? &it->out : nullptr,
+			it->vars.empty() ? nullptr : it->vars.data(), static_cast<int4>(it->vars.size()));
+	}
+	encoder.closeElement(ELEM_RESPONSE_INST);
 }
 
 static void appendPackedArtificialHalt(PackedPcodeRawOut& emit, AddrSpace* constSpace, const Address& address)
@@ -576,7 +622,7 @@ static std::pair<std::string, std::string> getPackedPcode(Translate& trans, Addr
 { // Dump pcode translation of machine instructions
 	std::ostringstream packedStream;
 	PackedEncode encoder(packedStream);
-	PackedPcodeRawOut emit(encoder);		// Set up the pcode dumper
+	PackedPcodeRawOut emit;		// Set up the pcode dumper
 	int4 length;			// Number of bytes of each machine instruction
 
 	//numOps = 0;
@@ -588,12 +634,8 @@ static std::pair<std::string, std::string> getPackedPcode(Translate& trans, Addr
 
 	if (address.getSpace() == nullptr)
 		throw DecompError("No address space named " + addr.space);
-	length = trans.instructionLength(address);
-	encoder.openElement(ELEM_RESPONSE_INST);
-	encoder.writeSignedInteger(ATTRIB_OFFSET, length);
-	address.encode(encoder);
 	length = trans.oneInstruction(emit, address); // Translate instruction
-	encoder.closeElement(ELEM_RESPONSE_INST);
+	emit.encodePacked(encoder, address, length);
 	std::string xml = "<inst" " offset=\"" +
 		std::to_string(length) + "\">\n  <addr space=\"" + address.getSpace()->getName() +
 		"\" offset=\"0x" + to_string(address.getOffset(), hex) + "\"/>\n" +
@@ -608,14 +650,11 @@ static std::pair<std::string, std::string> getPackedArtificialHalt(Translate& tr
 {
 	std::ostringstream packedStream;
 	PackedEncode encoder(packedStream);
-	PackedPcodeRawOut emit(encoder);
+	PackedPcodeRawOut emit;
 	Address address(trans.getSpaceByName(addr.space), addr.offset);
 
-	encoder.openElement(ELEM_RESPONSE_INST);
-	encoder.writeSignedInteger(ATTRIB_OFFSET, 1);
-	address.encode(encoder);
 	appendPackedArtificialHalt(emit, trans.getConstantSpace(), address);
-	encoder.closeElement(ELEM_RESPONSE_INST);
+	emit.encodePacked(encoder, address, 1);
 
 	std::string xml = "<inst offset=\"1\">\n  <addr space=\"" +
 		address.getSpace()->getName() + "\" offset=\"0x" +
@@ -1283,6 +1322,110 @@ static void encodePackedTypeRef(PackedEncode& encoder, const TypeInfo& typeInfo)
 	encoder.closeElement(ELEM_RESPONSE_TYPEREF);
 }
 
+static void encodePackedFallbackCoreType(PackedEncode& encoder, uintb size)
+{
+	if (size == 0)
+		size = 1;
+	std::string metaType = "unknown";
+	int typ = DecompInterface::coreTypeLookup(static_cast<size_t>(size), metaType);
+	encodePackedTypeRef(encoder, TypeInfo{
+		typ == -1 ? "undefined" : defaultCoreTypes[typ].name,
+		size,
+		metaType
+	});
+}
+
+static void encodePackedTypeInfo(PackedEncode& encoder,
+	const std::vector<TypeInfo>& typeChain, size_t index, uintb fallbackSize)
+{
+	if (index >= typeChain.size()) {
+		encodePackedFallbackCoreType(encoder, fallbackSize);
+		return;
+	}
+
+	const TypeInfo& typeInfo = typeChain[index];
+	if (typeInfo.size == (unsigned long long)-1) {
+		encodePackedTypeRef(encoder, typeInfo);
+		return;
+	}
+	if (typeInfo.metaType == "void") {
+		encoder.openElement(ELEM_RESPONSE_VOID);
+		encoder.closeElement(ELEM_RESPONSE_VOID);
+		return;
+	}
+	if (typeInfo.metaType == "ptr") {
+		encoder.openElement(ELEM_RESPONSE_TYPE);
+		if (!typeInfo.typeName.empty()) {
+			encoder.writeString(ATTRIB_NAME, typeInfo.typeName);
+			encoder.writeUnsignedInteger(ATTRIB_ID, hashName(typeInfo.typeName));
+		}
+		encoder.writeString(ATTRIB_METATYPE, "ptr");
+		encoder.writeSignedInteger(ATTRIB_SIZE,
+			static_cast<intb>(typeInfo.size == 0 ? fallbackSize : typeInfo.size));
+		if (index + 1 < typeChain.size() && typeChain[index + 1].metaType != "code")
+			encodePackedTypeInfo(encoder, typeChain, index + 1, 1);
+		else {
+			encoder.openElement(ELEM_RESPONSE_VOID);
+			encoder.closeElement(ELEM_RESPONSE_VOID);
+		}
+		encoder.closeElement(ELEM_RESPONSE_TYPE);
+		return;
+	}
+	if (typeInfo.metaType == "array") {
+		encoder.openElement(ELEM_RESPONSE_TYPE);
+		if (!typeInfo.typeName.empty()) {
+			encoder.writeString(ATTRIB_NAME, typeInfo.typeName);
+			encoder.writeUnsignedInteger(ATTRIB_ID, hashName(typeInfo.typeName));
+		}
+		encoder.writeString(ATTRIB_METATYPE, "array");
+		encoder.writeSignedInteger(ATTRIB_SIZE,
+			static_cast<intb>(typeInfo.size == 0 ? fallbackSize : typeInfo.size));
+		encoder.writeSignedInteger(ATTRIB_RESPONSE_ARRAYSIZE,
+			static_cast<intb>(typeInfo.arraySize == 0 ? 1 : typeInfo.arraySize));
+		encodePackedTypeInfo(encoder, typeChain, index + 1, 1);
+		encoder.closeElement(ELEM_RESPONSE_TYPE);
+		return;
+	}
+	if (typeInfo.metaType == "struct") {
+		encoder.openElement(ELEM_RESPONSE_TYPE);
+		encoder.writeString(ATTRIB_NAME, typeInfo.typeName.empty() ? "anon_struct" : typeInfo.typeName);
+		encoder.writeUnsignedInteger(ATTRIB_ID,
+			hashName(typeInfo.typeName.empty() ? "anon_struct" : typeInfo.typeName));
+		encoder.writeString(ATTRIB_METATYPE, "struct");
+		encoder.writeSignedInteger(ATTRIB_SIZE,
+			static_cast<intb>(typeInfo.size == 0 ? fallbackSize : typeInfo.size));
+		for (size_t i = 0; i < typeInfo.structMembers.size(); ++i) {
+			const StructMemberInfo& member = typeInfo.structMembers[i];
+			encoder.openElement(ELEM_RESPONSE_FIELD);
+			encoder.writeString(ATTRIB_NAME, member.name);
+			encoder.writeUnsignedInteger(ATTRIB_OFFSET, member.offset);
+			encodePackedTypeInfo(encoder, member.ti, 0, 1);
+			encoder.closeElement(ELEM_RESPONSE_FIELD);
+		}
+		encoder.closeElement(ELEM_RESPONSE_TYPE);
+		return;
+	}
+	if (typeInfo.metaType == "code") {
+		// Function prototypes need the full function-type encoder. For data maps,
+		// a void pointer target is safer than collapsing the outer pointer itself.
+		encoder.openElement(ELEM_RESPONSE_VOID);
+		encoder.closeElement(ELEM_RESPONSE_VOID);
+		return;
+	}
+
+	encoder.openElement(ELEM_RESPONSE_TYPE);
+	encoder.writeString(ATTRIB_NAME, typeInfo.typeName.empty() ? "undefined" : typeInfo.typeName);
+	encoder.writeUnsignedInteger(ATTRIB_ID, hashName(typeInfo.typeName.empty() ? "undefined" : typeInfo.typeName));
+	encoder.writeString(ATTRIB_METATYPE, typeInfo.metaType.empty() ? "unknown" : typeInfo.metaType);
+	encoder.writeSignedInteger(ATTRIB_SIZE,
+		static_cast<intb>(typeInfo.size == 0 ? fallbackSize : typeInfo.size));
+	if (typeInfo.isChar)
+		encoder.writeBool(ATTRIB_RESPONSE_CHAR, true);
+	if (typeInfo.isUtf)
+		encoder.writeBool(ATTRIB_RESPONSE_UTF, true);
+	encoder.closeElement(ELEM_RESPONSE_TYPE);
+}
+
 static void encodePackedCPoolRecord(PackedEncode& encoder, const CPoolRecord& rec)
 {
 	size_t tagIndex = rec.tag >= PRIMITIVE && rec.tag <= CHECK_CAST ?
@@ -1327,6 +1470,9 @@ static void encodePackedMappedData(PackedEncode& encoder, const Address& addr,
 	if (mapSize == 0)
 		mapSize = 1;
 	TypeInfo typeInfo = mappedSymbolPackedCoreType(typeChain, mapSize);
+	bool useFullType = !typeChain.empty() &&
+		(typeChain.front().metaType == "ptr" || typeChain.front().metaType == "array" ||
+			typeChain.front().metaType == "struct" || typeChain.front().metaType == "code");
 	encoder.openElement(ELEM_RESPONSE_SCOPE);
 	encoder.writeUnsignedInteger(ATTRIB_ID, 0);
 	encoder.openElement(ELEM_RESPONSE_MAPSYM);
@@ -1337,7 +1483,10 @@ static void encodePackedMappedData(PackedEncode& encoder, const Address& addr,
 	encoder.writeBool(ATTRIB_READONLY, readOnly);
 	encoder.writeBool(ATTRIB_RESPONSE_VOLATILE, volatil);
 	encoder.writeSignedInteger(ATTRIB_RESPONSE_CAT, -1);
-	encodePackedTypeRef(encoder, typeInfo);
+	if (useFullType)
+		encodePackedTypeInfo(encoder, typeChain, 0, mapSize);
+	else
+		encodePackedTypeRef(encoder, typeInfo);
 	encoder.closeElement(ELEM_RESPONSE_SYMBOL);
 	addr.encode(encoder, mapSize);
 	encoder.openElement(ELEM_RESPONSE_RANGELIST);
@@ -2088,6 +2237,15 @@ std::vector<uchar> DecompInterface::readResponse() {
 						} else if (msi.kind == KIND_DATA) {
 							uintb mapSize = !msi.typeChain.empty() ?
 								static_cast<uintb>(msi.typeChain.front().size) : 1;
+							if (mapSize == 0)
+								mapSize = 1;
+							TypeInfo packedType = mappedSymbolPackedCoreType(msi.typeChain, mapSize);
+							callback->protocolRecorder("query(command_getmappedsymbols data encoded size=\"" +
+								std::to_string(mapSize) + "\" type=\"" +
+								escapeCStr(packedType.typeName) + "\" metatype=\"" +
+								escapeCStr(packedType.metaType) + "\" chain0=\"" +
+								(msi.typeChain.empty() ? "" : escapeCStr(msi.typeChain.front().metaType)) +
+								"\")", false);
 							encodePackedMappedData(encoder, queryAddr,
 								getMappedSymbolName(msi, queryAddr, "DAT"),
 								msi.typeChain, mapSize, msi.readonly, msi.volatil);
@@ -2103,6 +2261,14 @@ std::vector<uchar> DecompInterface::readResponse() {
 							uintb last = queryAddr.getOffset();
 							bool readOnly = msi.readonly;
 							bool volatil = msi.volatil;
+							if (msi.kind == KIND_HOLE &&
+								queryAddr.getSpace() != nullptr &&
+								queryAddr.getSpace()->getName() == "register") {
+								first = 0;
+								last = queryAddr.getSpace()->getHighest();
+								readOnly = true;
+								volatil = false;
+							}
 							if (msi.kind == KIND_FUNCTION && msi.entryPoint != addr.offset) {
 								std::vector<RangeInfo>::iterator iter = msi.ranges.begin();
 								for (; iter != msi.ranges.end(); iter++) {
@@ -3447,8 +3613,6 @@ void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
 	coretypesxml = szCoreTypes;
 	setupTrace(cb, "read compiler and processor specs begin");
 	cspecxml = readFileAsString(cspecfilename);
-	if (stripCallotherFixup(cspecxml, "setISAMode"))
-		setupTrace(cb, "stripped no-op callotherfixup targetop=\"setISAMode\"");
 	pspecxml = readFileAsString(pspecfilename);
 	setupTrace(cb, "read compiler and processor specs complete");
 

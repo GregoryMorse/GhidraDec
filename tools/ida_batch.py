@@ -42,6 +42,7 @@ WINDOW_DIALOG_PATTERNS = (
 DEFAULT_FAILURE_PATTERNS = (
     "[GhidraDec error]",
     "Low-level Error:",
+    "Marshaling error:",
     "Unhandled exception:",
     "Caught decompilation error:",
     "Skipped decompiling import function:",
@@ -51,6 +52,7 @@ DEFAULT_FAILURE_PATTERNS = (
 GRACEFUL_FAILURE_PATTERNS = (
     "Caught decompilation error:",
     "Low-level Error:",
+    "Marshaling error:",
     "[GhidraDec error]",
     "Skipped decompiling import function:",
     "No matching Ghidra processor found",
@@ -188,6 +190,8 @@ def run_ida(args: argparse.Namespace, ida_args: list[str], env: dict[str, str], 
     process_args = ida_args
     if args.debugger:
         process_args = [str(Path(args.debugger).resolve())]
+        if args.debugger_child:
+            process_args.append("-o")
         if args.debugger_initial_go:
             process_args.extend(["-g", "-G"])
         if args.debugger_symbols:
@@ -213,6 +217,15 @@ def run_ida(args: argparse.Namespace, ida_args: list[str], env: dict[str, str], 
         raise
 
 
+def find_incomplete_decompile_all(text: str) -> str | None:
+    for match in re.finditer(r"Decompilation completed: (\d+) successfully decompiled out of (\d+)", text):
+        succeeded = int(match.group(1))
+        total = int(match.group(2))
+        if succeeded != total:
+            return f"incomplete decompile-all: {succeeded}/{total}"
+    return None
+
+
 def find_failure_pattern(args: argparse.Namespace, log_path: Path) -> str | None:
     if not log_path.exists():
         return None
@@ -226,6 +239,9 @@ def find_failure_pattern(args: argparse.Namespace, log_path: Path) -> str | None
     for pattern in patterns:
         if pattern in text:
             return pattern
+    incomplete = find_incomplete_decompile_all(text)
+    if incomplete is not None:
+        return incomplete
     return None
 
 
@@ -272,6 +288,9 @@ def classify_run_result(exit_code: int, log_path: Path, output_path: Path) -> tu
     for pattern in GRACEFUL_FAILURE_PATTERNS:
         if pattern in combined:
             return "graceful_fail", pattern
+    incomplete = find_incomplete_decompile_all(combined)
+    if incomplete is not None:
+        return "graceful_fail", incomplete
     return "dangerous_fail", f"exit code {exit_code}"
 
 
@@ -505,6 +524,51 @@ def run_individual_functions(args: argparse.Namespace, input_path: Path) -> int:
     return 1 if counts["graceful_fail"] or counts["dangerous_fail"] else 0
 
 
+def individual_result(args: argparse.Namespace, input_path: Path, exit_code: int) -> dict[str, object]:
+    case_dir = Path(args.work_dir).resolve() / case_name(input_path)
+    summary_path = case_dir / "individual" / "summary.json"
+    if not summary_path.exists():
+        return {
+            "input": str(input_path),
+            "case_dir": str(case_dir),
+            "summary": str(summary_path),
+            "exit_code": exit_code,
+            "outcome": "dangerous_fail",
+            "reason": "individual summary missing",
+            "passed": False,
+        }
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    graceful = int(summary.get("graceful_fail", 0))
+    dangerous = int(summary.get("dangerous_fail", 0))
+    success = int(summary.get("success", 0))
+    selected = int(summary.get("selected_functions", 0))
+    if dangerous:
+        outcome = "dangerous_fail"
+        reason = f"{dangerous} individual dangerous failure(s)"
+    elif graceful:
+        outcome = "graceful_fail"
+        reason = f"{graceful} individual graceful failure(s)"
+    elif exit_code == 0:
+        outcome = "success"
+        reason = f"{success}/{selected} individual functions passed"
+    else:
+        outcome = "dangerous_fail"
+        reason = f"exit code {exit_code}"
+    return {
+        "input": str(input_path),
+        "case_dir": str(case_dir),
+        "summary": str(summary_path),
+        "exit_code": exit_code,
+        "outcome": outcome,
+        "reason": reason,
+        "selected_functions": selected,
+        "success": success,
+        "graceful_fail": graceful,
+        "dangerous_fail": dangerous,
+        "passed": outcome == "success",
+    }
+
+
 def expand_inputs(values: list[str]) -> list[Path]:
     result: list[Path] = []
     for value in values:
@@ -523,7 +587,7 @@ def read_input_lists(paths: list[str]) -> list[str]:
     for path_text in paths:
         path = Path(path_text)
         for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
+            line = line.strip().lstrip("\ufeff")
             if line and not line.startswith("#"):
                 values.append(line)
     return values
@@ -577,6 +641,7 @@ def main() -> int:
     parser.add_argument("--debugger", help="Launch IDA under a debugger such as cdb.exe")
     parser.add_argument("--debugger-command", help="Debugger command string passed with cdb/windbg -c")
     parser.add_argument("--debugger-symbols", help="Debugger symbol path passed with cdb/windbg -y")
+    parser.add_argument("--debugger-child", action="store_true", help="Ask cdb/windbg to debug child processes")
     parser.add_argument(
         "--no-debugger-initial-go",
         dest="debugger_initial_go",
@@ -616,6 +681,7 @@ def main() -> int:
             continue
         if args.individual_functions:
             code = run_individual_functions(args, input_path)
+            normal_results.append(individual_result(args, input_path, code))
         else:
             code = run_one(args, input_path)
             normal_results.append(normal_result(args, input_path, code))
@@ -624,7 +690,7 @@ def main() -> int:
             print(f"[ghidradec-batch] FAIL: {input_path} exited with {code}", file=sys.stderr)
         else:
             print(f"[ghidradec-batch] PASS: {input_path}")
-    if args.summary_json and not args.individual_functions:
+    if args.summary_json:
         counts = {"success": 0, "graceful_fail": 0, "dangerous_fail": 0}
         for result in normal_results:
             outcome = str(result.get("outcome", "dangerous_fail"))
