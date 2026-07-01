@@ -41,6 +41,14 @@
 using namespace retdec;
 
 namespace idaplugin {
+	static constexpr char GHIDRADEC_COLOR_TYPE = COLOR_REG;
+	static constexpr char GHIDRADEC_COLOR_FUNCTION = COLOR_CNAME;
+	static constexpr char GHIDRADEC_COLOR_GLOBAL = COLOR_DNAME;
+	static constexpr char GHIDRADEC_COLOR_LOCAL = COLOR_DEFAULT;
+	static constexpr char GHIDRADEC_COLOR_PARAM = COLOR_DEFAULT;
+	static constexpr char GHIDRADEC_COLOR_STRING = COLOR_DSTR;
+	static constexpr char GHIDRADEC_COLOR_CHAR = COLOR_DCHAR;
+
 	//types depend on types - circular only through structure resolved by forward declarations
 	//function declarations depend on types
 	//data depends on types and other data or functions due to pointers - circular resolved by extern keyword
@@ -627,9 +635,17 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		//msg("%0X%0X%0X%0X %0X%0X%0X%0X\n", ptr[0], ptr[1], ptr[2], ptr[3], ptr[4], ptr[5], ptr[6], ptr[7]);
 		return i;
 	}
+	std::string sanitizeIdaSymbolName(std::string str)
+	{
+		while (!str.empty() && str[0] == '.')
+			str.erase(str.begin());
+		std::replace(str.begin(), str.end(), '.', '_');
+		std::replace(str.begin(), str.end(), '@', '_');
+		return str;
+	}
 	std::string getSymbolName(unsigned long long offset)
 	{
-		std::string str = get_name((ea_t)offset).c_str();
+		std::string str = sanitizeIdaSymbolName(get_name((ea_t)offset).c_str());
 		if (str.size() == 0) {
 			str = to_string(offset, std::hex);
 			str = ("ram0x" + std::string((inf_is_64bit() ? 16 : 8) - str.size(), '0') + str);
@@ -659,7 +675,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			if (name.size() == 0) name = imports[(ea_t)addr.offset].name;
 		}
 		if (name.size() == 0) name = get_short_name((ea_t)addr.offset, GN_STRICT).c_str();
-		if (name.size() != 0) name = name.substr(0, name.find("(", 0));
+		if (name.size() != 0) name = sanitizeIdaSymbolName(name.substr(0, name.find("(", 0)));
 		else name = getSymbolName(addr.offset);
 		func.isInline = false;
 		bool bFuncTinfo = getFuncTypeInfoByAddr(f != nullptr ? f->start_ea : (ea_t)addr.offset, func);
@@ -1026,7 +1042,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 						if (msi.name.size() == 0) msi.name = imports[(ea_t)addr.offset].name;
 					}
 					if (msi.name.size() == 0) msi.name = get_short_name((ea_t)addr.offset, GN_STRICT).c_str();
-					if (msi.name.size() != 0) msi.name = msi.name.substr(0, msi.name.find("(", 0));
+					if (msi.name.size() != 0) msi.name = sanitizeIdaSymbolName(msi.name.substr(0, msi.name.find("(", 0)));
 					else msi.name = getSymbolName(addr.offset);
 				}
 				/*fixup_data_t fd;
@@ -1211,7 +1227,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 						qstring name;
 						//get_func_name(&name, f->start_ea);
 						name = get_short_name((ea_t)offset, GN_STRICT);
-						if (name.size() != 0) name = name.substr(0, name.find("(", 0));
+						if (name.size() != 0) name = sanitizeIdaSymbolName(name.substr(0, name.find("(", 0)).c_str()).c_str();
 						else name = getSymbolName(offset).c_str();
 						funcProtoInfos[u] = FuncInfo{ name.c_str(), false, innerFunc };
 					}
@@ -1246,7 +1262,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 							qstring name;
 							//get_func_name(&name, f->start_ea);
 							name = get_short_name((ea_t)offset, GN_STRICT);
-							if (name.size() != 0) name = name.substr(0, name.find("(", 0));
+							if (name.size() != 0) name = sanitizeIdaSymbolName(name.substr(0, name.find("(", 0)).c_str()).c_str();
 							else name = getSymbolName(offset).c_str();
 							funcProtoInfos[u] = FuncInfo{ name.c_str(), false, innerFunc };
 						}
@@ -1527,17 +1543,23 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		//} else if (type == "variable" && color == "param") { //dont track arguments
 		//}
 		if (color == "comment") return std::string({ COLOR_ON, COLOR_AUTOCMT }) + str + std::string({ COLOR_OFF, COLOR_AUTOCMT });
-		else if (color == "param") return std::string({ COLOR_ON, COLOR_LOCNAME }) + str + std::string({ COLOR_OFF, COLOR_LOCNAME });
-		else if (color == "var") return std::string({ COLOR_ON, COLOR_LOCNAME }) + str + std::string({ COLOR_OFF, COLOR_LOCNAME });
-		else if (color == "global") return std::string({ COLOR_ON, COLOR_DEFAULT }) + str + std::string({ COLOR_OFF, COLOR_DEFAULT });
-		else if (color == "const") return std::string({ COLOR_ON, (char)(str.find('\"') == -1 ? COLOR_NUMBER : COLOR_STRING) }) + str + std::string({ COLOR_OFF, (char)(str.find('\"') == -1 ? COLOR_NUMBER : COLOR_STRING) });
+		else if (color == "param") return std::string({ COLOR_ON, GHIDRADEC_COLOR_PARAM }) + str + std::string({ COLOR_OFF, GHIDRADEC_COLOR_PARAM });
+		else if (color == "var") return std::string({ COLOR_ON, GHIDRADEC_COLOR_LOCAL }) + str + std::string({ COLOR_OFF, GHIDRADEC_COLOR_LOCAL });
+		else if (color == "global") return std::string({ COLOR_ON, GHIDRADEC_COLOR_GLOBAL }) + str + std::string({ COLOR_OFF, GHIDRADEC_COLOR_GLOBAL });
+		else if (color == "const") {
+			const char constColor =
+				str.find('"') != std::string::npos ? GHIDRADEC_COLOR_STRING :
+				str.find('\'') != std::string::npos ? GHIDRADEC_COLOR_CHAR :
+				COLOR_NUMBER;
+			return std::string({ COLOR_ON, constColor }) + str + std::string({ COLOR_OFF, constColor });
+		}
 		else if (color == "funcname") {
 			if (importNames.find(str) != importNames.end()) {
 				return std::string({ COLOR_ON, COLOR_IMPNAME }) + str + std::string({ COLOR_OFF, COLOR_IMPNAME });
 			} else {
-				return std::string({ COLOR_ON, COLOR_DEFAULT }) + str + std::string({ COLOR_OFF, COLOR_DEFAULT });
+				return std::string({ COLOR_ON, GHIDRADEC_COLOR_FUNCTION }) + str + std::string({ COLOR_OFF, GHIDRADEC_COLOR_FUNCTION });
 			}
-		} else if (color == "type") return std::string({ COLOR_ON, COLOR_LOCNAME }) + str + std::string({ COLOR_OFF, COLOR_LOCNAME });
+		} else if (color == "type") return std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + str + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE });
 		else if (color == "keyword") return std::string({ COLOR_ON, COLOR_KEYWORD }) + str + std::string({ COLOR_OFF, COLOR_KEYWORD });
 		else return std::string({ COLOR_ON, COLOR_DEFAULT }) + str + std::string({ COLOR_OFF, COLOR_DEFAULT });
 		//COLOR_DREF
@@ -2205,7 +2227,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			const tinfo_t& ti = std::get<1>(item);
 			qstring qs;
 			ti.get_type_name(&qs);
-			if ((!bTop || t != ti) && qs.size() != 0) out += (ti.is_const() ? colorize("const", bColor, COLOR_KEYWORD) + " " : "") + colorize(qs.c_str(), bColor, COLOR_LOCNAME) + (std::get<0>(item).size() != 0 ? " " : "") + colorize(std::get<0>(item), bColor, NameColor);
+			if ((!bTop || t != ti) && qs.size() != 0) out += (ti.is_const() ? colorize("const", bColor, COLOR_KEYWORD) + " " : "") + colorize(qs.c_str(), bColor, GHIDRADEC_COLOR_TYPE) + (std::get<0>(item).size() != 0 ? " " : "") + colorize(std::get<0>(item), bColor, NameColor);
 			else if (ti.is_ptr() && !ti.is_funcptr()) {
 				ptr_type_data_t ptd;
 				ti.get_ptr_details(&ptd);
@@ -2226,7 +2248,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					if (ftd[i].cmt.size() != 0) str += colorize(" /*" + std::string(ftd[i].cmt.c_str()) + "*/", bColor, COLOR_AUTOCMT);
 				}
 				std::string model = ccToStr(GHIDRADEC_FTD_CC(ftd), ftd.get_call_method(), false);
-				out += printTypeForCode(ftd.rettype, "", bColor, NameColor, false, indnt) + " (" + (model != "default" && model != "unknown" ? colorize(model, bColor, COLOR_KEYWORD) + " " : "") + "*" + colorize(std::get<0>(item), bColor, COLOR_LOCNAME) + ")(" + str + ")";
+				out += printTypeForCode(ftd.rettype, "", bColor, NameColor, false, indnt) + " (" + (model != "default" && model != "unknown" ? colorize(model, bColor, COLOR_KEYWORD) + " " : "") + "*" + colorize(std::get<0>(item), bColor, NameColor) + ")(" + str + ")";
 			} else if (ti.is_udt()) {
 				udt_type_data_t utd;
 				ti.get_udt_details(&utd);
@@ -2286,7 +2308,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					}
 				}
 			}
-			if ((!bTop || item.second != 0) && ti.typeName.size() != 0) out += (ti.isReadOnly ? colorize("const", bColor, COLOR_KEYWORD) + " " : "") + colorize(ti.typeName, bColor, COLOR_LOCNAME) + (item.first.size() != 0 ? " " : "") + colorize(item.first, bColor, NameColor);
+			if ((!bTop || item.second != 0) && ti.typeName.size() != 0) out += (ti.isReadOnly ? colorize("const", bColor, COLOR_KEYWORD) + " " : "") + colorize(ti.typeName, bColor, GHIDRADEC_COLOR_TYPE) + (item.first.size() != 0 ? " " : "") + colorize(item.first, bColor, NameColor);
 			else if (bTop &&
 					(ti.metaType == "int" || ti.metaType == "uint" || ti.metaType == "void" ||
 						ti.metaType == "bool" || ti.metaType == "float" || ti.metaType == "unknown") ||
@@ -2304,7 +2326,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					if (i != 0) str += ", ";
 					str += printTypeForCode(ti.funcInfo.syminfo[i].pi.ti, ti.funcInfo.syminfo[i].pi.name, bColor, NameColor, false, indnt);
 				}
-				out += printTypeForCode(ti.funcInfo.retType.pi.ti, "", bColor, NameColor, false, indnt) + " (" + (ti.funcInfo.model != "default" && ti.funcInfo.model != "unknown" ? colorize(ti.funcInfo.model, bColor, COLOR_KEYWORD) + " " : "") + "*" + colorize(item.first, bColor, COLOR_LOCNAME) + ")(" + str + ")";
+				out += printTypeForCode(ti.funcInfo.retType.pi.ti, "", bColor, NameColor, false, indnt) + " (" + (ti.funcInfo.model != "default" && ti.funcInfo.model != "unknown" ? colorize(ti.funcInfo.model, bColor, COLOR_KEYWORD) + " " : "") + "*" + colorize(item.first, bColor, NameColor) + ")(" + str + ")";
 			} else if (ti.metaType == "struct") { //note: bitfields and unions are not handled here except as byte arrays
 				std::string str;
 				for (size_t i = 0; i < ti.structMembers.size(); i++) {
@@ -2386,7 +2408,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					ti.get_array_details(&atd);
 					str = std::string(atd.elem_type.get_size() == sizeof(wchar_t) ? "L" : (atd.elem_type.get_size() == sizeof(char32_t) ? "U" : "")) + "\"" + std::string(qs.c_str()) + "\"";
 				} else str = std::string(ti.get_size() == sizeof(wchar_t) ? "L" : (ti.get_size() == sizeof(char32_t) ? "U" : "")) + "\"" + std::string(qs.c_str()) + "\"";
-				str = colorize(str, bColor, COLOR_STRING);
+				str = colorize(str, bColor, GHIDRADEC_COLOR_STRING);
 			} else if (ti.is_array()) {
 				array_type_data_t atd;
 				ti.get_array_details(&atd);
@@ -2436,7 +2458,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				//tinfo_t tif;
 				//get_tinfo(&tif, u);
 				qstring qs = get_name(u);
-				str = qs.size() == 0 ? "0x" + to_string(u, std::hex) : "&" + colorize(std::string(qs.c_str()), bColor, COLOR_DEFAULT);//initForType(tif, addr);
+				str = qs.size() == 0 ? "0x" + to_string(u, std::hex) : "&" + colorize(std::string(qs.c_str()), bColor, GHIDRADEC_COLOR_GLOBAL);//initForType(tif, addr);
 			}
 			out += str;
 		}
@@ -2484,7 +2506,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					//if ((ti + 1)->size == -1) //in case a chain of type refs until the size needs to be consumed which would require recursion since its the typeref case above, just divide
 					str = std::string((ti.size / ti.arraySize) == sizeof(wchar_t) ? "L" : ((ti.size / ti.arraySize) == sizeof(char32_t) ? "U" : "")) + "\"" + std::string(qs.c_str()) + "\"";
 				} else str = std::string(ti.size == sizeof(wchar_t) ? "L" : (ti.size == sizeof(char32_t) ? "U" : "")) + "\"" + std::string(qs.c_str()) + "\"";
-				str = colorize(str, bColor, COLOR_STRING);
+				str = colorize(str, bColor, GHIDRADEC_COLOR_STRING);
 			} else if (ti.metaType == "array") {
 				str = "{ ";
 				s.push(std::pair<ea_t, int>(item.first, -1));
@@ -2533,7 +2555,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				//tinfo_t tif;
 				//get_tinfo(&tif, u);
 				qstring qs = get_name(u);
-				str = qs.size() == 0 ? "0x" + to_string(u, std::hex) : "&" + colorize(std::string(qs.c_str()), bColor, COLOR_DEFAULT);//initForType(tif, item.first, bColor);
+				str = qs.size() == 0 ? "0x" + to_string(u, std::hex) : "&" + colorize(std::string(qs.c_str()), bColor, GHIDRADEC_COLOR_GLOBAL);//initForType(tif, item.first, bColor);
 			}
 			out += str;
 		}
@@ -2543,8 +2565,8 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	std::string IdaCallback::print_func(ea_t ea, std::string& forDisplay, char NameColor)
 	{
 		//does model go before or after return type - seems to be compiler specific what about C language spec?
-		std::string definitions = printTypeForCode(funcProtoInfos[ea].fpi.retType.pi.ti, "", false, COLOR_LOCNAME, false, 0) + (funcProtoInfos[ea].fpi.model != "default" && funcProtoInfos[ea].fpi.model != "unknown" ? " " + funcProtoInfos[ea].fpi.model : "") + " " + funcProtoInfos[ea].name + "(";
-		forDisplay += printTypeForCode(funcProtoInfos[ea].fpi.retType.pi.ti, "", true, COLOR_LOCNAME, false, 0) +
+		std::string definitions = printTypeForCode(funcProtoInfos[ea].fpi.retType.pi.ti, "", false, GHIDRADEC_COLOR_FUNCTION, false, 0) + (funcProtoInfos[ea].fpi.model != "default" && funcProtoInfos[ea].fpi.model != "unknown" ? " " + funcProtoInfos[ea].fpi.model : "") + " " + funcProtoInfos[ea].name + "(";
+		forDisplay += printTypeForCode(funcProtoInfos[ea].fpi.retType.pi.ti, "", true, GHIDRADEC_COLOR_FUNCTION, false, 0) +
 			(funcProtoInfos[ea].fpi.model != "default" && funcProtoInfos[ea].fpi.model != "unknown" ? " " + std::string({ COLOR_ON, COLOR_KEYWORD }) + funcProtoInfos[ea].fpi.model + std::string({ COLOR_OFF, COLOR_KEYWORD }) : "") + " " +
 			std::string({ COLOR_ON, NameColor }) + funcProtoInfos[ea].name + std::string({ COLOR_OFF, NameColor }) + "(";
 		bool bFirst = true;
@@ -2554,8 +2576,8 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					definitions += ", "; forDisplay += ", ";
 				}
 				bFirst = false;
-				definitions += printTypeForCode(funcProtoInfos[ea].fpi.syminfo[i].pi.ti, funcProtoInfos[ea].fpi.syminfo[i].pi.name, false, COLOR_LOCNAME, false, 0);
-				forDisplay += printTypeForCode(funcProtoInfos[ea].fpi.syminfo[i].pi.ti, funcProtoInfos[ea].fpi.syminfo[i].pi.name, true, COLOR_LOCNAME, false, 0);
+				definitions += printTypeForCode(funcProtoInfos[ea].fpi.syminfo[i].pi.ti, funcProtoInfos[ea].fpi.syminfo[i].pi.name, false, GHIDRADEC_COLOR_PARAM, false, 0);
+				forDisplay += printTypeForCode(funcProtoInfos[ea].fpi.syminfo[i].pi.ti, funcProtoInfos[ea].fpi.syminfo[i].pi.name, true, GHIDRADEC_COLOR_PARAM, false, 0);
 			}
 		}
 		definitions += ")";
@@ -2604,13 +2626,13 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				if (qs.size() == 0) qs = imports[it->first].name.c_str();
 			}
 			if (qs.size() == 0) qs = get_short_name(it->first, GN_STRICT);
-			if (qs.size() != 0) qs = qs.substr(0, qs.find("(", 0));
+			if (qs.size() != 0) qs = sanitizeIdaSymbolName(qs.substr(0, qs.find("(", 0)).c_str()).c_str();
 			else qs = getSymbolName(it->first).c_str();
 			if (finalFuncs.find(qs.c_str()) != finalFuncs.end()) usedRefFuncs[it->first] = true;
 		}
 		for (std::map<ea_t, bool>::iterator it = usedFuncs.begin(); it != usedFuncs.end(); it++) {
 			qs = get_short_name(it->first, GN_STRICT);
-			if (qs.size() != 0) qs = qs.substr(0, qs.find("(", 0));
+			if (qs.size() != 0) qs = sanitizeIdaSymbolName(qs.substr(0, qs.find("(", 0)).c_str()).c_str();
 			else qs = getSymbolName(it->first).c_str();
 			if (finalFuncs.find(qs.c_str()) != finalFuncs.end()) usedRefFuncs[it->first] = true;
 		}
@@ -2696,9 +2718,9 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			if (coreTypeUsed[i] && szCoreTypeDefs[i] != nullptr) {
 				definitions += "typedef " + std::string(szCoreTypeDefs[i]) + " " + defaultCoreTypes[i].name + ";\n";
 				forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + "typedef" + std::string({ COLOR_OFF, COLOR_KEYWORD }) + " " +
-					std::string({ COLOR_ON, COLOR_LOCNAME }) + std::string(szCoreTypeDefs[i]) + std::string({ COLOR_OFF, COLOR_LOCNAME }) +
+					std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + std::string(szCoreTypeDefs[i]) + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) +
 					" " +
-					std::string({ COLOR_ON, COLOR_LOCNAME }) + defaultCoreTypes[i].name + std::string({ COLOR_OFF, COLOR_LOCNAME }) +
+					std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + defaultCoreTypes[i].name + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) +
 					";\n";
 			}
 		}
@@ -2723,7 +2745,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					}
 					definitions += std::string(t.is_union() ? "union " : "struct ") + iter->first + ";\n";
 					forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + std::string(t.is_union() ? "union" : "struct") + std::string({ COLOR_OFF, COLOR_KEYWORD }) +
-						" " + std::string({ COLOR_ON, COLOR_LOCNAME }) + iter->first + std::string({ COLOR_OFF, COLOR_LOCNAME }) + ";\n";
+						" " + std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + iter->first + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) + ";\n";
 					if (usedRefTypes.find(*it) == usedRefTypes.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
 					alreadyDefined[iter->first] = true;
 				}
@@ -2736,7 +2758,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				}
 				definitions += std::string(ti.is_decl_union() ? "union " : "struct ") + " " + std::string(qt.c_str()) + ";\n";
 				forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + std::string(ti.is_decl_union() ? "union" : "struct") + std::string({ COLOR_OFF, COLOR_KEYWORD }) +
-					" " + std::string({ COLOR_ON, COLOR_LOCNAME }) + std::string(qt.c_str()) + std::string({ COLOR_OFF, COLOR_LOCNAME }) + ";\n";
+					" " + std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + std::string(qt.c_str()) + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) + ";\n";
 				if (usedRefTypes.find(*it) == usedRefTypes.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
 			} else {
 				//ti.print(&qs, nullptr, (ti.is_udt() ? PRTYPE_MULTI : PRTYPE_1LINE) | PRTYPE_DEF | PRTYPE_TYPE | PRTYPE_RESTORE);				
@@ -2747,17 +2769,17 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				std::vector<TypeInfo> typeChain = typeDatabase[it->c_str()];
 				//wchar_t is special exception with no entries since its also a core type but nice to have the comment regarding its IDA detected C integral definition
 				if (typeChain.size() == 0) {
-					definitions += "typedef " + printTypeForCode(ti, "", false, COLOR_LOCNAME, true, 0) + " " + std::string(qt.c_str()) + ";";
+					definitions += "typedef " + printTypeForCode(ti, "", false, GHIDRADEC_COLOR_TYPE, true, 0) + " " + std::string(qt.c_str()) + ";";
 					//str = std::string((ti.is_udt() ? qs.rtrim('\n') : qs).c_str()) + " " + std::string(qt.c_str()) + ";";
 					str = std::string({ COLOR_ON, COLOR_KEYWORD }) + "typedef" + std::string({ COLOR_OFF, COLOR_KEYWORD }) +
-						" " + printTypeForCode(ti, "", true, COLOR_LOCNAME, true, 0) + " " +
-						std::string({ COLOR_ON, COLOR_LOCNAME }) + std::string(qt.c_str()) + std::string({ COLOR_OFF, COLOR_LOCNAME }) + ";";
+						" " + printTypeForCode(ti, "", true, GHIDRADEC_COLOR_TYPE, true, 0) + " " +
+						std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + std::string(qt.c_str()) + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) + ";";
 				} else {
-					definitions += "typedef " + printTypeForCode(typeChain, "", false, COLOR_LOCNAME, typeChain.begin()->typeName == qt.c_str(), 0) + " " + std::string(qt.c_str()) + ";";
+					definitions += "typedef " + printTypeForCode(typeChain, "", false, GHIDRADEC_COLOR_TYPE, typeChain.begin()->typeName == qt.c_str(), 0) + " " + std::string(qt.c_str()) + ";";
 					//str = std::string((ti.is_udt() ? qs.rtrim('\n') : qs).c_str()) + " " + std::string(qt.c_str()) + ";";
 					str = std::string({ COLOR_ON, COLOR_KEYWORD }) + "typedef" + std::string({ COLOR_OFF, COLOR_KEYWORD }) +
-						" " + printTypeForCode(typeChain, "", true, COLOR_LOCNAME, typeChain.begin()->typeName == qt.c_str(), 0) + " " +
-						std::string({ COLOR_ON, COLOR_LOCNAME }) + std::string(qt.c_str()) + std::string({ COLOR_OFF, COLOR_LOCNAME }) + ";";
+						" " + printTypeForCode(typeChain, "", true, GHIDRADEC_COLOR_TYPE, typeChain.begin()->typeName == qt.c_str(), 0) + " " +
+						std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + std::string(qt.c_str()) + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) + ";";
 				}
 				if (usedRefTypes.find(*it) == usedRefTypes.end()) {
 					std::string finalstr;
@@ -2809,11 +2831,11 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					if (qs.size() == 0) qs = imports[*it].name.c_str();
 					if (qs.size() == 0) get_long_name(&qs, *it, GN_STRICT);
 					if (qs.size() == 0) qs = getSymbolName(*it).c_str();
-					//str = get_name(*it).c_str();				
+					//str = get_name(*it).c_str();
 					if (qs.find("(", 0) == qstring::npos) {
 						definitions += "void" " " + std::string(qs.c_str()) + "(" "void" ")";
-						forDisplay += std::string({ COLOR_ON, COLOR_LOCNAME }) + "void" + std::string({ COLOR_OFF, COLOR_LOCNAME }) + " " + 
-							std::string({ COLOR_ON, COLOR_IMPNAME }) + std::string(qs.c_str()) + std::string({ COLOR_OFF, COLOR_IMPNAME }) + "(" + std::string({ COLOR_ON, COLOR_LOCNAME }) + "void" + std::string({ COLOR_OFF, COLOR_LOCNAME }) + ")";
+						forDisplay += std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + "void" + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) + " " +
+							std::string({ COLOR_ON, COLOR_IMPNAME }) + std::string(qs.c_str()) + std::string({ COLOR_OFF, COLOR_IMPNAME }) + "(" + std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + "void" + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) + ")";
 					} else {
 						definitions += qs.c_str();
 						forDisplay += std::string({ COLOR_ON, COLOR_IMPNAME }) + qs.c_str() + std::string({ COLOR_OFF, COLOR_IMPNAME });
@@ -2837,7 +2859,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				definitions += funcProtos[it->first];
 				forDisplay += funcColorProtos[it->first];
 			} else if (funcProtoInfos.find(it->first) != funcProtoInfos.end()) {
-				definitions += print_func(it->first, forDisplay, COLOR_DEFAULT);
+				definitions += print_func(it->first, forDisplay, GHIDRADEC_COLOR_FUNCTION);
 			} else { //only function pointers currently but after fixed this case should never occur
 				tinfo_t tif;
 				qs.clear(); //first check decompiler prototypes, then type info, then demangler, then void <name>(void)
@@ -2847,7 +2869,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				if (qs.find("(", 0) == qstring::npos) qs = qstring("void ") + qs + "(void)";
 				//most of the names are not mangled, and thus do not have the needed C declaration information attached
 				definitions += qs.c_str();
-				forDisplay += std::string({ COLOR_ON, COLOR_DEFAULT }) + qs.c_str() + std::string({ COLOR_OFF, COLOR_DEFAULT });
+				forDisplay += std::string({ COLOR_ON, GHIDRADEC_COLOR_FUNCTION }) + qs.c_str() + std::string({ COLOR_OFF, GHIDRADEC_COLOR_FUNCTION });
 			}
 			definitions += ";\n";
 			forDisplay += ";\n";
@@ -2870,8 +2892,9 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				if (usedRefData.find(*it) == usedRefData.end()) {
 					definitions += "//"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//";
 				}
-				definitions += "extern " + printTypeForCode(usedData[iter->first], std::string(get_name(iter->first).c_str()), false, COLOR_DEFAULT, false, 0) + ";\n";
-				forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + "extern" + std::string({ COLOR_OFF, COLOR_KEYWORD }) + " " + printTypeForCode(usedData[iter->first], std::string(get_name(iter->first).c_str()), true, COLOR_DEFAULT, false, 0) + ";\n";
+				std::string name = getSymbolName(iter->first);
+				definitions += "extern " + printTypeForCode(usedData[iter->first], name, false, GHIDRADEC_COLOR_GLOBAL, false, 0) + ";\n";
+				forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + "extern" + std::string({ COLOR_OFF, COLOR_KEYWORD }) + " " + printTypeForCode(usedData[iter->first], name, true, GHIDRADEC_COLOR_GLOBAL, false, 0) + ";\n";
 				if (usedRefData.find(*it) == usedRefData.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
 				alreadyDefData[iter->first] = true;
 			}
@@ -2879,8 +2902,8 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				definitions += "//"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//";
 			}
 			str = getSymbolName(*it);
-			definitions += printTypeForCode(usedData[*it], str.c_str(), false, COLOR_DEFAULT, false, 0);
-			forDisplay += printTypeForCode(usedData[*it], str.c_str(), true, COLOR_DEFAULT, false, 0);
+			definitions += printTypeForCode(usedData[*it], str.c_str(), false, GHIDRADEC_COLOR_GLOBAL, false, 0);
+			forDisplay += printTypeForCode(usedData[*it], str.c_str(), true, GHIDRADEC_COLOR_GLOBAL, false, 0);
 			//if (get_tinfo(&ti, *it)) {
 				/*qstring qt;
 				ti.get_type_name(&qt);
@@ -3130,10 +3153,10 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		for (std::map<ea_t, ImportInfo>::iterator it = imports.begin(); it != imports.end(); it++) {
 			if (it->second.name.size() == 0) {
 				std::string name = get_short_name(it->first, GN_STRICT).c_str();
-				if (name.size() != 0) name = name.substr(0, name.find("(", 0));
+				if (name.size() != 0) name = sanitizeIdaSymbolName(name.substr(0, name.find("(", 0)));
 				else name = getSymbolName(it->first);
 				importNames[name] = true;
-			} else importNames[it->second.name] = true;
+			} else importNames[sanitizeIdaSymbolName(it->second.name)] = true;
 		}
 		/*num = get_ordinal_qty(nullptr);
 		for (size_t i = 1; i <= num; i++) {
@@ -3259,7 +3282,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			TRACE_MSG("Preloaded byte cache for " << std::dec << allFuncRanges.size()
 				<< " all-decompile functions\n");
 		} else {
-			allFuncNames[di->decompiledFunction->start_ea] = get_name(di->decompiledFunction->start_ea).c_str();
+			allFuncNames[di->decompiledFunction->start_ea] = getSymbolName(di->decompiledFunction->start_ea);
 			allFuncRanges[di->decompiledFunction->start_ea] = getFunctionRanges(di->decompiledFunction, "ram");
 			preloadFunctionByteCache(this);
 			qstring batchOutputEnv;
@@ -4318,12 +4341,21 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 {
 	RdGlobalInfo* di = (RdGlobalInfo*)user_data;
+	auto getCurrentGraph = [di]() -> const std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>* {
+		if (di == nullptr || di->decompiledFunction == nullptr)
+			return nullptr;
+		auto fit = di->fnc2code.find(di->decompiledFunction);
+		if (fit == di->fnc2code.end())
+			return nullptr;
+		return &fit->second.blockGraph;
+	};
+
 	if (notification_code == grcode_user_refresh) {
 		mutable_graph_t* mg = va_arg(va, mutable_graph_t*);
-		rect_t r;
-		ea_t ea = di->decompiledFunction->start_ea;
-		const std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph =
-			di->fnc2code[get_func(ea)].blockGraph;
+		const auto* currentGraph = getCurrentGraph();
+		if (currentGraph == nullptr)
+			return 0;
+		const auto& blockGraph = *currentGraph;
 		mg->resize((int)blockGraph.size());
 		/*for (size_t i = 0; i < blockGraph.size(); i++) {
 			int node = mg->add_node(&r);
@@ -4337,6 +4369,8 @@ ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 		}*/
 		for (size_t i = 0; i < blockGraph.size(); i++) {
 			for (size_t j = 0; j < std::get<0>(blockGraph[i]).size(); j++) {
+				if (std::get<0>(blockGraph[i])[j] >= blockGraph.size())
+					continue;
 				edge_info_t ei;
 				mg->add_edge(std::get<0>(blockGraph[i])[j], (int)i, &ei);
 			}
@@ -4351,11 +4385,12 @@ ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 		return 1;
 	} else if (notification_code == grcode_user_gentext) {
 		mutable_graph_t* mg = va_arg(va, mutable_graph_t*);
-		ea_t ea = di->decompiledFunction->start_ea;
-		const std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph =
-			di->fnc2code[get_func(ea)].blockGraph;
+		const auto* currentGraph = getCurrentGraph();
+		if (currentGraph == nullptr)
+			return 0;
+		const auto& blockGraph = *currentGraph;
 #endif
-		di->graphText.resize(blockGraph.size());
+		di->graphText.assign(blockGraph.size(), std::string());
 		for (size_t i = 0; i < blockGraph.size(); i++) {
 			if (std::get<1>(blockGraph[i]).size() != 0)
 				di->graphText[i] = ("  //" + std::to_string(std::get<2>(blockGraph[i])) + "\n" + std::get<1>(blockGraph[i])).c_str();
@@ -4366,6 +4401,11 @@ ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 		int node = va_argi(va, int);
 		const char** text = va_arg(va, const char**);
 		bgcolor_t* bgcolor = va_arg(va, bgcolor_t*);
+		if (node < 0 || (size_t)node >= di->graphText.size())
+		{
+			*text = nullptr;
+			return 1;
+		}
 		*text = (di->graphText[node].size() == 0) ? nullptr : di->graphText[node].c_str();
 		return 1;
 		//} else if (notification_code == grcode_user_hint) {
@@ -4413,15 +4453,20 @@ void displayBlockGraph(RdGlobalInfo* di, ea_t ea)
 			if (find_widget((di->viewerName + " Graph").c_str()) != nullptr)
 				close_widget(di->graphWidget, 0);
 			di->graphWidget = nullptr;
-			delete_mutable_graph(di->mg);
+			if (di->mg != nullptr)
+			{
+				delete_mutable_graph(di->mg);
+				di->mg = nullptr;
+			}
 			di->graphText.clear();
 			netnode nn("GhidraGraph", 0, true);
 			nn.kill();
 		}
-		ea_t ea = di->decompiledFunction->start_ea;
-		const std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph =
-			di->fnc2code[get_func(ea)].blockGraph;
-		if (blockGraph.size() == 0) return;
+		if (di->decompiledFunction == nullptr)
+			return;
+		auto fit = di->fnc2code.find(di->decompiledFunction);
+		if (fit == di->fnc2code.end() || fit->second.blockGraph.empty())
+			return;
 
 		di->graphWidget = create_empty_widget((di->viewerName + " Graph").c_str());
 		netnode nn("GhidraGraph", 0, true);

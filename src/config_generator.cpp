@@ -13,6 +13,17 @@
 
 namespace idaplugin {
 
+static std::string sanitizeIdaIdentifier(std::string name)
+{
+	while (!name.empty() && name[0] == '.')
+	{
+		name.erase(name.begin());
+	}
+	std::replace(name.begin(), name.end(), '.', '_');
+	std::replace(name.begin(), name.end(), '@', '_');
+	return name;
+}
+
 /**
  * Initialize config with empty content.
  */
@@ -236,8 +247,7 @@ void ConfigGenerator::generateFunctions()
 		qstring qFncName;
 		get_func_name(&qFncName, fnc->start_ea);
 
-		std::string fncName = qFncName.c_str();
-		std::replace(fncName.begin(), fncName.end(), '.', '_');
+		std::string fncName = sanitizeIdaIdentifier(qFncName.c_str());
 
 		DBG_MSG("\t" << fncName << " @ " << std::hex << fnc->start_ea
 				<< ", #args = " << std::dec << fnc->regargqty << "\n");
@@ -349,7 +359,8 @@ void ConfigGenerator::generateSegmentsAndGlobals()
 
 			auto s = retdec::config::Storage::inMemory(
 					retdec::utils::Address(head));
-			retdec::config::Object global(buff.c_str(), s);
+			std::string globalName = sanitizeIdaIdentifier(buff.c_str());
+			retdec::config::Object global(globalName, s);
 
 			// Get type.
 			//
@@ -363,8 +374,7 @@ void ConfigGenerator::generateSegmentsAndGlobals()
 					continue;
 				}
 
-				std::string fncName = buff.c_str();
-				std::replace(fncName.begin(), fncName.end(), '.', '_');
+				std::string fncName = sanitizeIdaIdentifier(buff.c_str());
 
 				retdec::config::Function ccFnc(fncName);
 				ccFnc.setStart(head);

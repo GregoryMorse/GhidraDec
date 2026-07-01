@@ -54,6 +54,7 @@ namespace idaplugin {
 			const std::string& word,
 			int color);
 		func_t* getIdaFunction(const std::string& word, int color);
+		func_t* getAddressAdjacentFunction(bool forward) const;
 		bool isCurrentFunction(func_t* fnc);
 		func_t* getCurrentFunction();
 		bool isWordCurrentParameter(const std::string& word, int color);

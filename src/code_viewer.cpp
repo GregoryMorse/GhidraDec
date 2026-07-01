@@ -40,6 +40,16 @@ static bool hasValidNavigationPosition(const RdGlobalInfo* decompInfo)
 			&& decompInfo->navigationActual != decompInfo->navigationList.end();
 }
 
+static bool isFunctionColor(int color)
+{
+	return color == COLOR_DEFAULT || color == COLOR_CNAME || color == COLOR_IMPNAME;
+}
+
+static bool isGlobalColor(int color)
+{
+	return color == COLOR_DEFAULT || color == COLOR_DNAME;
+}
+
 //
 //==============================================================================
 //
@@ -182,20 +192,20 @@ static bool get_current_word(
 
 bool GhidraDec::isWordGlobal(const std::string& word, int color)
 {
-	return color == COLOR_DEFAULT
+	return isGlobalColor(color)
 			&& getGlobalByNameOrRealName(decompInfo->configDB, word) != nullptr;
 }
 
 const retdec::config::Object* GhidraDec::getWordGlobal(const std::string& word, int color)
 {
-	return !word.empty() && color == COLOR_DEFAULT
+	return !word.empty() && isGlobalColor(color)
 			? getGlobalByNameOrRealName(decompInfo->configDB, word)
 			: nullptr;
 }
 
 bool GhidraDec::isWordFunction(const std::string& word, int color)
 {
-	return color == COLOR_DEFAULT
+	return isFunctionColor(color)
 			&& decompInfo->configDB.functions.hasFunction(word);
 }
 
@@ -208,7 +218,7 @@ const retdec::config::Function* GhidraDec::getWordFunction(
 		const std::string& word,
 		int color)
 {
-	return !word.empty() && color == COLOR_DEFAULT
+	return !word.empty() && isFunctionColor(color)
 			? decompInfo->configDB.functions.getFunctionByName(word)
 			: nullptr;
 }
@@ -314,27 +324,17 @@ void GhidraDec::decompileFunction(
 		return;
 	}
 
-	if (cfgFnc->isUserDefined())
+	func_t* fnc = get_func((ea_t)cfgFnc->getStart());
+	if (fnc != nullptr)
 	{
-		for (unsigned i = 0; i < get_func_qty(); ++i)
+		if (!force && isCurrentFunction(fnc))
 		{
-			func_t *fnc = getn_func(i);
-
-			if (fnc->start_ea != cfgFnc->getStart())
-			{
-				continue;
-			}
-			if (!force && isCurrentFunction(fnc))
-			{
-				INFO_MSG("The current function is not decompiled/shown again.\n");
-				return;
-			}
-
-			// Decompile found function.
-			//
-			runSelectiveDecompilation(fnc, forceDec);
+			INFO_MSG("The current function is not decompiled/shown again.\n");
 			return;
 		}
+
+		runSelectiveDecompilation(fnc, forceDec);
+		return;
 	}
 
 	// Such function exists in config file, but not in IDA functions.
@@ -345,11 +345,11 @@ void GhidraDec::decompileFunction(
 }
 
 const char* GhidraDec::move_backward_ah_t::actionName = "ghidradec:ActionMoveBackward";
-const char* GhidraDec::move_backward_ah_t::actionLabel = "Move backward";
+const char* GhidraDec::move_backward_ah_t::actionLabel = "Previous function";
 const char* GhidraDec::move_backward_ah_t::actionHotkey = "ESC";
 
 const char* GhidraDec::move_forward_ah_t::actionName = "ghidradec:ActionMoveForward";
-const char* GhidraDec::move_forward_ah_t::actionLabel = "Move forward";
+const char* GhidraDec::move_forward_ah_t::actionLabel = "Next function";
 const char* GhidraDec::move_forward_ah_t::actionHotkey = "Ctrl+F";
 
 const char* GhidraDec::change_fnc_comment_ah_t::actionName = "ghidradec:ActionChangeFncComment";
@@ -388,37 +388,49 @@ bool idaapi GhidraDec::moveToPrevious()
 		return false;
 	}
 
-	DBG_MSG("\t ESC : [");
-	for (auto& fnc : decompInfo->navigationList)
+	if (hasValidNavigationPosition(decompInfo)
+			&& decompInfo->navigationActual != decompInfo->navigationList.begin())
 	{
-		DBG_MSG(" " << std::hex << fnc->start_ea);
-	}
-	DBG_MSG(" ] (# " << std::dec << decompInfo->navigationList.size()
-			<< ") : from " << std::hex << (*decompInfo->navigationActual)->start_ea
-			<< " => BACK\n");
+		DBG_MSG("\t ESC : [");
+		for (auto& fnc : decompInfo->navigationList)
+		{
+			DBG_MSG(" " << std::hex << fnc->start_ea);
+		}
+		DBG_MSG(" ] (# " << std::dec << decompInfo->navigationList.size()
+				<< ") : from " << std::hex << (*decompInfo->navigationActual)->start_ea
+				<< " => BACK\n");
 
-	decompInfo->navigationActual--;
+		decompInfo->navigationActual--;
 
-	DBG_MSG("\t\t=> " << std::hex
-			<< (*decompInfo->navigationActual)->start_ea << "\n");
+		DBG_MSG("\t\t=> " << std::hex
+				<< (*decompInfo->navigationActual)->start_ea << "\n");
 
-	auto fit = decompInfo->fnc2code.find(*decompInfo->navigationActual);
-	if (fit == decompInfo->fnc2code.end())
-	{
+		auto fit = decompInfo->fnc2code.find(*decompInfo->navigationActual);
+		if (fit == decompInfo->fnc2code.end())
+		{
+			runSelectiveDecompilation(*decompInfo->navigationActual);
+			return false;
+		}
+
+		decompInfo->decompiledFunction = fit->first;
+		ShowOutput show(decompInfo);
+		show.execute();
 		return false;
 	}
 
-	decompInfo->decompiledFunction = fit->first;
-	ShowOutput show(decompInfo);
-	show.execute();
+	if (auto* fnc = getAddressAdjacentFunction(false))
+	{
+		runSelectiveDecompilation(fnc);
+	}
 
 	return false;
 }
 
 bool GhidraDec::canMoveToPrevious() const
 {
-	return hasValidNavigationPosition(decompInfo)
-			&& decompInfo->navigationActual != decompInfo->navigationList.begin();
+	return (hasValidNavigationPosition(decompInfo)
+				&& decompInfo->navigationActual != decompInfo->navigationList.begin())
+			|| getAddressAdjacentFunction(false) != nullptr;
 }
 
 //
@@ -432,26 +444,45 @@ bool idaapi GhidraDec::moveToNext()
 		return false;
 	}
 
-	DBG_MSG("\t CTRL + F : [");
-	for (auto& fnc : decompInfo->navigationList)
+	if (hasValidNavigationPosition(decompInfo))
 	{
-		DBG_MSG(" " << std::hex << fnc->start_ea);
+		auto last = decompInfo->navigationList.end();
+		--last;
+		if (decompInfo->navigationActual != last)
+		{
+			DBG_MSG("\t CTRL + F : [");
+			for (auto& fnc : decompInfo->navigationList)
+			{
+				DBG_MSG(" " << std::hex << fnc->start_ea);
+			}
+			DBG_MSG(" ] (#" << std::dec << decompInfo->navigationList.size()
+					<< ") : from " << std::hex << (*decompInfo->navigationActual)->start_ea
+					<< " => FORWARD\n");
+
+			decompInfo->navigationActual++;
+
+			DBG_MSG("\t\t=> " << std::hex
+					<< (*decompInfo->navigationActual)->start_ea << "\n");
+
+			auto fit = decompInfo->fnc2code.find(*decompInfo->navigationActual);
+			if (fit != decompInfo->fnc2code.end())
+			{
+				decompInfo->decompiledFunction = fit->first;
+				ShowOutput show(decompInfo);
+				show.execute();
+			}
+			else
+			{
+				runSelectiveDecompilation(*decompInfo->navigationActual);
+			}
+
+			return false;
+		}
 	}
-	DBG_MSG(" ] (#" << std::dec << decompInfo->navigationList.size()
-			<< ") : from " << std::hex << (*decompInfo->navigationActual)->start_ea
-			<< " => FORWARD\n");
 
-	decompInfo->navigationActual++;
-
-	DBG_MSG("\t\t=> " << std::hex
-			<< (*decompInfo->navigationActual)->start_ea << "\n");
-
-	auto fit = decompInfo->fnc2code.find(*decompInfo->navigationActual);
-	if (fit != decompInfo->fnc2code.end())
+	if (auto* fnc = getAddressAdjacentFunction(true))
 	{
-		decompInfo->decompiledFunction = fit->first;
-		ShowOutput show(decompInfo);
-		show.execute();
+		runSelectiveDecompilation(fnc);
 	}
 
 	return false;
@@ -459,14 +490,72 @@ bool idaapi GhidraDec::moveToNext()
 
 bool GhidraDec::canMoveToNext() const
 {
-	if (!hasValidNavigationPosition(decompInfo))
+	if (hasValidNavigationPosition(decompInfo))
 	{
-		return false;
+		auto last = decompInfo->navigationList.end();
+		--last;
+		if (decompInfo->navigationActual != last)
+		{
+			return true;
+		}
 	}
 
-	auto last = decompInfo->navigationList.end();
-	--last;
-	return decompInfo->navigationActual != last;
+	return getAddressAdjacentFunction(true) != nullptr;
+}
+
+func_t* GhidraDec::getAddressAdjacentFunction(bool forward) const
+{
+	if (get_func_qty() == 0)
+	{
+		return nullptr;
+	}
+
+	ea_t current = BADADDR;
+	if (decompInfo != nullptr && decompInfo->decompiledFunction != nullptr)
+	{
+		current = decompInfo->decompiledFunction->start_ea;
+	}
+	else
+	{
+		func_t* screenFunc = get_func(get_screen_ea());
+		if (screenFunc != nullptr)
+		{
+			current = screenFunc->start_ea;
+		}
+	}
+
+	if (current == BADADDR)
+	{
+		return nullptr;
+	}
+
+	func_t* previous = nullptr;
+	for (unsigned i = 0; i < get_func_qty(); ++i)
+	{
+		func_t* fnc = getn_func(i);
+		if (fnc == nullptr)
+		{
+			continue;
+		}
+
+		if (forward)
+		{
+			if (fnc->start_ea > current)
+			{
+				return fnc;
+			}
+		}
+		else if (fnc->start_ea < current)
+		{
+			previous = fnc;
+		}
+		else
+		{
+			break;
+		}
+	}
+
+	return forward ? nullptr : previous;
 }
 
 //
@@ -941,7 +1030,7 @@ bool idaapi ct_double(TWidget* cv, int shift, void* ud)
 		return false;
 	}
 
-	if (color == COLOR_DEFAULT || color == COLOR_IMPNAME)
+	if (isFunctionColor(color))
 	{
 		di->pm->decompileFunction(cv, word);
 		return false;
