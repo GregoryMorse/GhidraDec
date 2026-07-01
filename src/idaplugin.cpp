@@ -6,13 +6,12 @@
 
  //Build Dependencies:
  //IDA Pro 7.2 SDK
- //RetDec v3.3: https://github.com/avast/retdec config and utils libraries
+ //RetDec v5.0: https://github.com/avast/retdec config/common/serdes/utils libraries
  //RetDec IDA Plugin v0.9: https://github.com/avast/retdec-idaplugin
- //jsoncpp library v1.8.4: https://github.com/open-source-parsers/jsoncpp
- //whereami library: https://github.com/gpakosz/whereami
+ //jsoncpp library v1.9.8: https://github.com/open-source-parsers/jsoncpp
 
- //Runtime Dependencies: Ghidra 9.0.4 path specified (JDK v11+ not necessary for decompile.exe/sleigh.exe in Ghidra/Features/Decompiler/os/*/decompile[.exe], sleigh modules in Ghidra/Processors)
- //Plugin copied to IDA Pro 7.2 plugins folder
+ //Runtime Dependencies: Ghidra path specified (JDK is not necessary for decompile.exe/sleigh.exe in Ghidra/Features/Decompiler/os/*/decompile[.exe], sleigh modules in Ghidra/Processors)
+ //Plugin copied to IDA Pro plugins folder
 //conversion.h in x86 needs a fix for adding __cdecl to the ios_base return pointer format as in std::ios_base &(__cdecl* format)(std::ios_base &) = std::dec
 
 #include <cstdint>

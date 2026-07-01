@@ -89,7 +89,7 @@ if(NOT CMAKE_BUILD_TYPE)
 	set(CMAKE_BUILD_TYPE "${default_build_type}" CACHE STRING "Choose the type of build." FORCE)
 endif()
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
@@ -233,49 +233,6 @@ set(IDAPLUGIN_SOURCES
 	src/plugin_config.cpp
 	src/sleighinterface.cpp
 )
-
-##config and utils
-#set(RETDEC_CONFIG_SOURCES
-#	architecture.cpp
-#	base.cpp
-#	calling_convention.cpp
-#	classes.cpp
-#	config.cpp
-#	file_format.cpp
-#	file_type.cpp
-#	functions.cpp
-#	language.cpp
-#	objects.cpp
-#	parameters.cpp
-#	patterns.cpp
-#	segments.cpp
-#	storage.cpp
-#	tool_info.cpp
-#	types.cpp
-#	vtables.cpp
-#)
-
-#set(RETDEC_UTILS_SOURCES
-#	address.cpp
-#	alignment.cpp
-#	binary_path.cpp
-#	byte_value_storage.cpp
-#	conversion.cpp
-#	dynamic_buffer.cpp
-#	file_io.cpp
-#	filesystem_path.cpp
-#	math.cpp
-#	memory.cpp
-#	string.cpp 
-#	system.cpp
-#	time.cpp
-#)
-
-#set(JSON_CPP_SOURCES
-#	json_reader.cpp
-#	json_value.cpp
-#	json_writer.cpp
-#)
 
 set(GHIDRA_SLEIGH_SOURCES
 	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/sleigh.cc"

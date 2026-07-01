@@ -13,6 +13,26 @@
 
 namespace idaplugin {
 
+static const retdec::config::Object* getGlobalByNameOrRealName(
+		const retdec::config::Config& config,
+		const std::string& name)
+{
+	if (auto* global = config.globals.getObjectByName(name))
+	{
+		return global;
+	}
+
+	for (const auto& global : config.globals)
+	{
+		if (global.getRealName() == name)
+		{
+			return &global;
+		}
+	}
+
+	return nullptr;
+}
+
 //
 //==============================================================================
 //
@@ -156,14 +176,13 @@ static bool get_current_word(
 bool GhidraDec::isWordGlobal(const std::string& word, int color)
 {
 	return color == COLOR_DEFAULT
-			&& decompInfo->configDB.globals.getObjectByNameOrRealName(word)
-					!= nullptr;
+			&& getGlobalByNameOrRealName(decompInfo->configDB, word) != nullptr;
 }
 
 const retdec::config::Object* GhidraDec::getWordGlobal(const std::string& word, int color)
 {
 	return !word.empty() && color == COLOR_DEFAULT
-			? decompInfo->configDB.globals.getObjectByNameOrRealName(word)
+			? getGlobalByNameOrRealName(decompInfo->configDB, word)
 			: nullptr;
 }
 
@@ -271,8 +290,7 @@ void GhidraDec::decompileFunction(
 		bool force,
 		bool forceDec)
 {
-	auto* globVar = decompInfo->configDB.globals.getObjectByNameOrRealName(
-			calledFnc);
+	auto* globVar = getGlobalByNameOrRealName(decompInfo->configDB, calledFnc);
 
 	if (globVar && globVar->getStorage().isMemory())
 	{
@@ -532,7 +550,7 @@ bool idaapi GhidraDec::changeFunctionGlobalName(TWidget* cv)
 			+ SCOLOR_OFF
 			+ ".");
 
-	if (decompInfo->configDB.globals.getObjectByNameOrRealName(newName) != nullptr
+	if (getGlobalByNameOrRealName(decompInfo->configDB, newName) != nullptr
 			|| decompInfo->configDB.functions.hasFunction(newName)
 			|| std::regex_search(fit->second.code, e))
 	{

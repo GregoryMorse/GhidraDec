@@ -45,13 +45,12 @@ std::string ConfigGenerator::generate()
  */
 void ConfigGenerator::generateHeader()
 {
-	config.setInputFile(decompInfo.workIdb);
+	config.parameters.setInputFile(decompInfo.workIdb);
 #ifdef __X64__
-	config.setEntryPoint(inf_start_ea);
+	config.parameters.setEntryPoint(inf_start_ea);
 #else
-	config.setEntryPoint(inf.beginEA);
+	config.parameters.setEntryPoint(inf.beginEA);
 #endif
-	config.setIsIda(true);
 }
 
 /**
@@ -184,7 +183,7 @@ void ConfigGenerator::generateFunctionType(
 			retdec::config::Object arg(name, s);
 			arg.type.setLlvmIr( type2string(a.type) );
 
-			ccFnc.parameters.insert(arg);
+			ccFnc.parameters.push_back(arg);
 
 			++cntr;
 		}
@@ -301,7 +300,7 @@ void ConfigGenerator::generateFunctions()
 }
 
 /**
- * Generate segments, and generate all global data from segments.
+ * Walk IDA segments and generate all global data found inside them.
  */
 void ConfigGenerator::generateSegmentsAndGlobals()
 {
@@ -320,11 +319,6 @@ void ConfigGenerator::generateSegmentsAndGlobals()
 		{
 			continue;
 		}
-
-		retdec::config::Segment segment(retdec::utils::Address(seg->start_ea));
-		segment.setName(buff.c_str());
-		segment.setEnd(seg->end_ea);
-		config.segments.insert(segment);
 
 		ea_t head = seg->start_ea - 1;
 		while ( (head = next_head(head, seg->end_ea)) != BADADDR)

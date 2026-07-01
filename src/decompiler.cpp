@@ -19,6 +19,7 @@
 #include <iostream>
 #include <set>
 #include <sstream>
+#include <stack>
 #include <memory>
 
 #include "retdec/utils/os.h"

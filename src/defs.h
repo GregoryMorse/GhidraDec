@@ -1039,10 +1039,27 @@ inline TWidget* open_calls_window(ea_t ea)
 // RetDec includes.
 //
 #include "retdec/config/config.h"
+#include "retdec/common/calling_convention.h"
+#include "retdec/common/function.h"
+#include "retdec/common/object.h"
+#include "retdec/common/storage.h"
+#include "retdec/common/type.h"
 #include "retdec/utils/address.h"
 #include "retdec/utils/filesystem_path.h"
 #include "retdec/utils/os.h"
 #include "retdec/utils/time.h"
+
+namespace retdec {
+namespace config {
+
+using CallingConvention = retdec::common::CallingConvention;
+using Function = retdec::common::Function;
+using Object = retdec::common::Object;
+using Storage = retdec::common::Storage;
+using Type = retdec::common::Type;
+
+} // namespace config
+} // namespace retdec
 
 namespace idaplugin {
 

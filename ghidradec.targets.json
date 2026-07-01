@@ -8,14 +8,14 @@
   },
   "dependencies": {
     "jsoncpp": {
-      "version": "1.8.4",
-      "url": "https://github.com/open-source-parsers/jsoncpp/archive/1.8.4.zip",
-      "sha256": "2979436dbd4c48a3284dca9fa8f212298425ba3920ed6bacdda8905a94b111a8"
+      "version": "1.9.8",
+      "url": "https://github.com/open-source-parsers/jsoncpp/archive/refs/tags/1.9.8.zip",
+      "sha256": "822b68a364ca7a6ae1d9a222c1e5f2bc3aca1666ddde297348b0841418f44feb"
     },
     "retdec": {
-      "version": "10c0ddcf5e0fdb8ee4c5256787a0fa74bd069883",
-      "url": "https://github.com/avast/retdec/archive/10c0ddcf5e0fdb8ee4c5256787a0fa74bd069883.zip",
-      "sha256": "2e2112ac8d5a31721c2cafe3d7657b13b5efaed9b22486e20fd2ac8de79a7311"
+      "version": "v5.0",
+      "url": "https://github.com/avast/retdec/archive/refs/tags/v5.0.zip",
+      "sha256": "6b5c1282fde80ee8f6c8031f2cd633f118857dfc0611d366294c99a842aae019"
     }
   },
   "idaSdks": [

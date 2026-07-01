@@ -6,8 +6,8 @@ ExternalProject_Add(jsoncpp-project
 	DOWNLOAD_NAME jsoncpp.zip
 	DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 	# We build the three jsoncpp sources as part of the top-level project.
-	# jsoncpp 1.8.4's own CMake hard-codes Clang -Werror flags that fail on
-	# newer AppleClang versions.
+	# This keeps the vendored build independent from jsoncpp's own CMake
+	# warning policy on newer compilers.
 	CONFIGURE_COMMAND ""
 	# Disable the update step.
 	UPDATE_COMMAND ""
