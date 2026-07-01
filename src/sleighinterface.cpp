@@ -639,44 +639,220 @@ static std::pair<std::string, std::string> getPackedUnimplementedInstruction(Add
 	return std::pair<std::string, std::string>(packedStream.str(), xml);
 }
 
-static int4 readJvmSwitchLength(DecompileCallback* callback, const AddrInfo& addr,
-	unsigned long long functionEntry, uchar opcode)
+struct JvmSwitchInfo
+{
+	uchar opcode = 0;
+	int4 length = 0;
+	uint4 padding = 0;
+	int4 defaultOffset = 0;
+	uintb defaultTarget = 0;
+	int4 low = 0;
+	int4 high = 0;
+	int4 npairs = 0;
+};
+
+static int4 readJvmS4(const std::vector<uchar>& bytes, size_t offset)
+{
+	uint4 value =
+		(static_cast<uint4>(bytes[offset]) << 24) |
+		(static_cast<uint4>(bytes[offset + 1]) << 16) |
+		(static_cast<uint4>(bytes[offset + 2]) << 8) |
+		static_cast<uint4>(bytes[offset + 3]);
+	return static_cast<int4>(value);
+}
+
+static bool readJvmSwitchInfo(DecompileCallback* callback, const AddrInfo& addr,
+	unsigned long long functionEntry, uchar opcode, JvmSwitchInfo& info)
 {
 	if (callback == nullptr || (opcode != 0xaa && opcode != 0xab) || addr.offset < functionEntry)
-		return 0;
+		return false;
 
 	unsigned long long bytecodeOffset = addr.offset - functionEntry;
 	size_t padding = (4 - ((bytecodeOffset + 1) & 3)) & 3;
 	size_t headerSize = opcode == 0xaa ? 1 + padding + 12 : 1 + padding + 8;
 	std::vector<uchar> header(headerSize);
 	if (callback->getBytes(header.data(), static_cast<int>(header.size()), addr) != header.size())
-		return 0;
+		return false;
 
-	auto readS4 = [&header](size_t offset) -> int4 {
-		uint4 value =
-			(static_cast<uint4>(header[offset]) << 24) |
-			(static_cast<uint4>(header[offset + 1]) << 16) |
-			(static_cast<uint4>(header[offset + 2]) << 8) |
-			static_cast<uint4>(header[offset + 3]);
-		return static_cast<int4>(value);
-	};
-
-	size_t pos = 1 + padding + 4; // Skip opcode, padding, and default offset.
+	size_t pos = 1 + padding;
+	info = JvmSwitchInfo();
+	info.opcode = opcode;
+	info.padding = static_cast<uint4>(padding);
+	info.defaultOffset = readJvmS4(header, pos);
+	info.defaultTarget = static_cast<uintb>(static_cast<intb>(addr.offset) + info.defaultOffset);
+	pos += 4;
 	if (opcode == 0xaa) {
-		int4 low = readS4(pos);
-		int4 high = readS4(pos + 4);
-		if (high < low)
-			return 0;
-		uint8 cases = static_cast<uint8>(high) - static_cast<uint8>(low) + 1;
+		info.low = readJvmS4(header, pos);
+		info.high = readJvmS4(header, pos + 4);
+		if (info.high < info.low)
+			return false;
+		uint8 cases = static_cast<uint8>(info.high) - static_cast<uint8>(info.low) + 1;
 		if (cases > 65536)
-			return 0;
-		return static_cast<int4>(1 + padding + 12 + cases * 4);
+			return false;
+		info.length = static_cast<int4>(1 + padding + 12 + cases * 4);
+		return true;
 	}
 
-	int4 pairs = readS4(pos);
-	if (pairs < 0 || pairs > 65536)
-		return 0;
-	return static_cast<int4>(1 + padding + 8 + static_cast<uint8>(pairs) * 8);
+	info.npairs = readJvmS4(header, pos);
+	if (info.npairs < 0 || info.npairs > 65536)
+		return false;
+	info.length = static_cast<int4>(1 + padding + 8 + static_cast<uint8>(info.npairs) * 8);
+	return true;
+}
+
+static int4 findUserOpIndex(Translate& trans, const std::string& name)
+{
+	std::vector<std::string> userOpNames;
+	trans.getUserOpNames(userOpNames);
+	for (size_t i = 0; i < userOpNames.size(); ++i) {
+		if (userOpNames[i] == name)
+			return static_cast<int4>(i);
+	}
+	return -1;
+}
+
+static void appendXmlPcode(std::string& xml, OpCode opc,
+	VarnodeData* outvar, VarnodeData* vars, int4 isize)
+{
+	std::string inpstr;
+	for (int i = opc == CPUI_LOAD || opc == CPUI_STORE ? 1 : 0; i < isize; i++) {
+		inpstr += "    <addr space=\"" + vars[i].space->getName() + "\" offset=\"0x" +
+			to_string(vars[i].offset, hex) +
+			"\" size=\"" + std::to_string(vars[i].size) + "\"/>\n";
+	}
+	xml += "  <op code=\"" + std::to_string(opc) + "\">\n" +
+		(outvar != nullptr ? "    <addr space=\"" + outvar->space->getName() + "\" offset=\"0x" +
+			to_string(outvar->offset, hex) +
+			"\" size=\"" + std::to_string(outvar->size) + "\"/>\n" : "    <void/>\n") +
+		(opc == CPUI_LOAD || opc == CPUI_STORE ?
+			"    <spaceid name=\"" + vars[0].getSpaceFromConst()->getName() + "\"/>\n" : "") +
+		inpstr + "  </op>\n";
+}
+
+static void writeJvmSwitchOp(PackedEncode& encoder, std::string& xml, OpCode opc,
+	VarnodeData* outvar, VarnodeData* vars, int4 isize)
+{
+	writePackedPcodeOp(encoder, opc, outvar, vars, isize);
+	appendXmlPcode(xml, opc, outvar, vars, isize);
+}
+
+static std::pair<std::string, std::string> getPackedJvmSwitchPcode(Translate& trans,
+	AddrInfo addr, const JvmSwitchInfo& info, uintb& uniqueBase)
+{
+	AddrSpace* ramSpace = trans.getSpaceByName(addr.space);
+	AddrSpace* registerSpace = trans.getSpaceByName("register");
+	AddrSpace* uniqueSpace = trans.getUniqueSpace();
+	AddrSpace* constSpace = trans.getConstantSpace();
+	if (ramSpace == nullptr || registerSpace == nullptr ||
+		uniqueSpace == nullptr || constSpace == nullptr)
+		throw DecompError("Cannot build JVM switch pcode without required address spaces");
+
+	VarnodeData sp = trans.getRegister("SP");
+	const uint4 wordSize = 4;
+	VarnodeData key{ uniqueSpace, uniqueBase, wordSize };
+	uniqueBase += 16;
+	VarnodeData target{ uniqueSpace, uniqueBase, wordSize };
+	uniqueBase += 16;
+	VarnodeData loadInputs[2] = {
+		{ constSpace, reinterpret_cast<uintb>(ramSpace), wordSize },
+		sp
+	};
+	VarnodeData addSpInputs[2] = {
+		sp,
+		{ constSpace, wordSize, wordSize }
+	};
+
+	std::ostringstream packedStream;
+	PackedEncode encoder(packedStream);
+	encoder.openElement(ELEM_RESPONSE_INST);
+	encoder.writeSignedInteger(ATTRIB_OFFSET, info.length);
+	Address(ramSpace, addr.offset).encode(encoder);
+
+	std::string xml = "<inst offset=\"" + std::to_string(info.length) + "\">\n  <addr space=\"" +
+		ramSpace->getName() + "\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>\n";
+	writeJvmSwitchOp(encoder, xml, CPUI_LOAD, &key, loadInputs, 2);
+	writeJvmSwitchOp(encoder, xml, CPUI_INT_ADD, &sp, addSpInputs, 2);
+
+	if (info.opcode == 0xab) {
+		int4 switchAssistIndex = findUserOpIndex(trans, "switchAssist");
+		if (switchAssistIndex < 0)
+			throw DecompError("JVM switchAssist userop was not found");
+		VarnodeData callInputs[6] = {
+			{ constSpace, static_cast<uintb>(switchAssistIndex), wordSize },
+			key,
+			{ constSpace, addr.offset, wordSize },
+			{ constSpace, info.padding, 1 },
+			{ constSpace, info.defaultTarget, wordSize },
+			{ constSpace, static_cast<uintb>(info.npairs), wordSize }
+		};
+		writeJvmSwitchOp(encoder, xml, CPUI_CALLOTHER, &target, callInputs, 6);
+		VarnodeData branchInputs[1] = { target };
+		writeJvmSwitchOp(encoder, xml, CPUI_BRANCHIND, nullptr, branchInputs, 1);
+	} else {
+		VarnodeData condLow{ uniqueSpace, uniqueBase, 1 };
+		uniqueBase += 16;
+		VarnodeData condHigh{ uniqueSpace, uniqueBase, 1 };
+		uniqueBase += 16;
+		VarnodeData index{ uniqueSpace, uniqueBase, wordSize };
+		uniqueBase += 16;
+		VarnodeData offset{ uniqueSpace, uniqueBase, wordSize };
+		uniqueBase += 16;
+		VarnodeData tableAddr{ uniqueSpace, uniqueBase, wordSize };
+		uniqueBase += 16;
+
+		VarnodeData lessLowInputs[2] = {
+			key,
+			{ constSpace, static_cast<uintb>(static_cast<intb>(info.low)), wordSize }
+		};
+		VarnodeData branchDefaultInputs1[2] = {
+			{ ramSpace, info.defaultTarget, wordSize },
+			condLow
+		};
+		VarnodeData lessHighInputs[2] = {
+			{ constSpace, static_cast<uintb>(static_cast<intb>(info.high)), wordSize },
+			key
+		};
+		VarnodeData branchDefaultInputs2[2] = {
+			{ ramSpace, info.defaultTarget, wordSize },
+			condHigh
+		};
+		VarnodeData subInputs[2] = {
+			key,
+			{ constSpace, static_cast<uintb>(static_cast<intb>(info.low)), wordSize }
+		};
+		VarnodeData multInputs[2] = {
+			index,
+			{ constSpace, 4, wordSize }
+		};
+		VarnodeData addTableInputs[2] = {
+			index,
+			{ constSpace, addr.offset + 1 + info.padding + 12, wordSize }
+		};
+		VarnodeData loadOffsetInputs[2] = {
+			{ constSpace, reinterpret_cast<uintb>(ramSpace), wordSize },
+			tableAddr
+		};
+		VarnodeData addTargetInputs[2] = {
+			offset,
+			{ constSpace, addr.offset, wordSize }
+		};
+		VarnodeData branchInputs[1] = { target };
+
+		writeJvmSwitchOp(encoder, xml, CPUI_INT_SLESS, &condLow, lessLowInputs, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_CBRANCH, nullptr, branchDefaultInputs1, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_INT_SLESS, &condHigh, lessHighInputs, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_CBRANCH, nullptr, branchDefaultInputs2, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_INT_SUB, &index, subInputs, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_INT_MULT, &index, multInputs, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_INT_ADD, &tableAddr, addTableInputs, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_LOAD, &offset, loadOffsetInputs, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_INT_ADD, &target, addTargetInputs, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_BRANCHIND, nullptr, branchInputs, 1);
+	}
+
+	encoder.closeElement(ELEM_RESPONSE_INST);
+	xml += "</inst>\n";
+	return std::pair<std::string, std::string>(packedStream.str(), xml);
 }
 
 static std::string getPackedEmptyPcodeInject(Translate& trans, AddrInfo addr)
@@ -2195,14 +2371,20 @@ std::vector<uchar> DecompInterface::readResponse() {
 							if (isJvm && owner.kind == KIND_FUNCTION &&
 								callback->getBytes(&opcode, 1, addr) == 1 &&
 								(opcode == 0xaa || opcode == 0xab)) {
-								int4 switchLength = readJvmSwitchLength(callback, addr, owner.entryPoint, opcode);
-								std::tie(packed, xml) = getPackedUnimplementedInstruction(addr, switchLength);
-								callback->protocolRecorder("query(command_getpcode JVM switch fallback addr=\"" +
+								JvmSwitchInfo switchInfo;
+								if (!readJvmSwitchInfo(callback, addr, owner.entryPoint, opcode, switchInfo))
+									throw DecompError("Unable to decode JVM switch at " + addr.space +
+										":0x" + to_string(addr.offset, hex));
+								std::tie(packed, xml) = getPackedJvmSwitchPcode(*trans, addr, switchInfo, uniqueBase);
+								int4 caseCount = opcode == 0xaa ?
+									(switchInfo.high - switchInfo.low + 1) : switchInfo.npairs;
+								callback->protocolRecorder("query(command_getpcode JVM switch pcode addr=\"" +
 									addr.space + ":0x" + to_string(addr.offset, hex) + "\" opcode=\"0x" +
 									to_string(static_cast<uint4>(opcode), hex) + "\" length=\"" +
-									std::to_string(switchLength <= 0 ? 1 : switchLength) + "\")", true);
+									std::to_string(switchInfo.length) + "\" cases=\"" +
+									std::to_string(caseCount) + "\")", true);
 							} else {
-							std::tie(packed, xml) = getPackedPcode(*trans, addr);
+								std::tie(packed, xml) = getPackedPcode(*trans, addr);
 							}
 							callback->protocolRecorder("query(command_getpcode translate end addr=\"" +
 								addr.space + ":0x" + to_string(addr.offset, hex) + "\" bytes=\"" +

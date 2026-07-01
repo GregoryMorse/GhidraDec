@@ -200,7 +200,7 @@ Current JVM/Dalvik status from the pinned angr set:
   IDA's ZIP loader otherwise opens archive metadata rather than the class
   loader. The enabled Java smoke/extended lane currently passes `4/4` with no
   `graceful_fail` or `dangerous_fail` results. Report:
-  `build/corpus-reports/angr-java-classes-switchfix/ida-batch-summary.json`.
+  `build/corpus-reports/angr-java-classes-switchsemantic/ida-batch-summary.json`.
 * The initial Dalvik target is staged as `classes.dex` extracted from
   `tests/java/android1.apk`. It currently passes `1/1`, decompiling `12,285`
   functions with no `graceful_fail` or `dangerous_fail` results. Report:
@@ -209,11 +209,12 @@ Current JVM/Dalvik status from the pinned angr set:
   12.x protocol queries. Empty JVM/Dalvik dynamic p-code injections are handled
   with a side-effect-free no-op fallback so missing semantic implementations do
   not crash the decompiler.
-* JVM `lookupswitch` and `tableswitch` translation is guarded locally because
-  Ghidra's native SLEIGH translator can access-violate on these variable-length
-  bytecodes in this embedding. The guard emits a length-correct
-  unimplemented-instruction response, preserving stability while leaving exact
-  switch semantics as future quality work.
+* JVM `lookupswitch` and `tableswitch` translation is handled locally before
+  calling native SLEIGH because Ghidra's translator can access-violate on these
+  variable-length bytecodes in this embedding. The local encoder emits packed
+  p-code matching Ghidra's JVM semantics: `lookupswitch` uses `switchAssist`,
+  and `tableswitch` emits signed bounds checks, table lookup, and an indirect
+  branch.
 
 On Windows, `tools/ida_batch.py` also watches IDA-owned dialogs and sends the
 default confirmation action for common startup, warning, crash, and recovery
