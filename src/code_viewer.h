@@ -89,15 +89,15 @@ struct ShowOutput : public exec_request_t
 			return 0;
 		}
 
-		if (di->custViewer != nullptr)
-		{
-			close_widget(di->custViewer, 0);
-			di->custViewer = nullptr;
-		}
 		if (di->codeViewer != nullptr)
 		{
 			close_widget(di->codeViewer, 0);
 			di->codeViewer = nullptr;
+		}
+		if (di->custViewer != nullptr)
+		{
+			close_widget(di->custViewer, 0);
+			di->custViewer = nullptr;
 		}
 
 		di->custViewer = create_custom_viewer(
@@ -112,19 +112,27 @@ struct ShowOutput : public exec_request_t
 				nullptr                 // widget to hold viewer
 		);
 
-		di->codeViewer = create_code_viewer(di->custViewer);
-
-		set_code_viewer_is_source(di->codeViewer);
-
-		display_widget(
-				di->codeViewer,
-				WOPN_DP_TAB |
+		int displayOptions = WOPN_DP_TAB |
 #if !defined(IDA_SDK_VERSION) || IDA_SDK_VERSION < 720
 				WOPN_MENU |
 #endif
 				/// we want to catch ESC and use it for navigation
-				WOPN_NOT_CLOSED_BY_ESC
-		);
+				WOPN_NOT_CLOSED_BY_ESC;
+
+		qstring plainViewerEnv;
+		const bool plainViewer =
+			qgetenv("GHIDRADEC_PLAIN_VIEWER", &plainViewerEnv) &&
+			std::string(plainViewerEnv.c_str()) != "0";
+
+		if (!plainViewer)
+		{
+			di->codeViewer = create_code_viewer(di->custViewer);
+			set_code_viewer_is_source(di->codeViewer);
+			display_widget(di->codeViewer, displayOptions);
+			return 0;
+		}
+
+		display_widget(di->custViewer, displayOptions);
 
 		return 0;
 	}

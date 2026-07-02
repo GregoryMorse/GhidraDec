@@ -41,9 +41,9 @@
 using namespace retdec;
 
 namespace idaplugin {
-	static constexpr char GHIDRADEC_COLOR_TYPE = COLOR_REG;
-	static constexpr char GHIDRADEC_COLOR_FUNCTION = COLOR_CNAME;
-	static constexpr char GHIDRADEC_COLOR_GLOBAL = COLOR_DNAME;
+	static constexpr char GHIDRADEC_COLOR_TYPE = COLOR_DEFAULT;
+	static constexpr char GHIDRADEC_COLOR_FUNCTION = COLOR_DEFAULT;
+	static constexpr char GHIDRADEC_COLOR_GLOBAL = COLOR_DEFAULT;
 	static constexpr char GHIDRADEC_COLOR_LOCAL = COLOR_DEFAULT;
 	static constexpr char GHIDRADEC_COLOR_PARAM = COLOR_DEFAULT;
 	static constexpr char GHIDRADEC_COLOR_STRING = COLOR_DSTR;
@@ -493,7 +493,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		if (type == DecompInterface::CALLMECHANISM_TYPE) {
 			if ((name == "__stdcall16far@@inject_uponreturn" || name == "__cdecl16far@@inject_uponreturn") && addr.space == "ram") {
 				sel_t s;
-				executeOnMainThread([&s, addr]() { s = getseg((ea_t)addr.offset)->sel; });
+				executeOnMainThread([&s, addr]() { s = getseg((ea_t)addr.offset)->sel; }, "segment-selector");
 				return "CS = " + std::to_string(s) + ";";
 			} else return "";
 		} else return "";
@@ -621,7 +621,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 						}
 						page += CACHEPAGESIZE;
 					} while (page < addr.offset + size);
-				});
+				}, "byte-cache-fetch");
 			page = addr.offset & (~(CACHEPAGESIZE - 1));
 			pgoffs = addr.offset & (CACHEPAGESIZE - 1);
 			std::map<ea_t, std::pair<unsigned long long, std::vector<unsigned short>>>::iterator cacheIt =
@@ -990,7 +990,9 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				msi.ranges.begin()->endoffset - msi.ranges.begin()->beginoffset + 1;
 			return;
 		}
-		if (!di->outputFile.empty()) {
+		qstring batchOutputEnv;
+		const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
+		if (!batchMappedSymbols.empty()) {
 			std::map<ea_t, MappedSymbolInfo>::iterator cached = batchMappedSymbols.find((ea_t)addr.offset);
 			if (cached != batchMappedSymbols.end()) {
 				msi = cached->second;
@@ -998,13 +1000,23 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					usedData[(ea_t)addr.offset] = msi.typeChain;
 				} else if (msi.kind == KIND_EXTERNALREFERENCE) {
 					usedImports[(ea_t)addr.offset] = true;
+				} else if (msi.kind == KIND_FUNCTION &&
+					msi.entryPoint == addr.offset &&
+					definedFuncs.find((ea_t)addr.offset) == definedFuncs.end() &&
+					imports.find((ea_t)addr.offset) == imports.end()) {
+					usedFuncs[(ea_t)addr.offset] = true;
 				}
-			} else {
+				return;
+			}
+			if (batchOutput) {
 				msi.kind = KIND_HOLE;
 				msi.readonly = false;
 				msi.volatil = false;
+				return;
+			} else {
+				TRACE_MSG("mapped-symbol cache miss, falling back to IDA callback for ram:0x"
+					<< std::hex << addr.offset << "\n");
 			}
-			return;
 		}
 		executeOnMainThread([this, &msi, addr]() {
 			msi.kind = KIND_HOLE;
@@ -1117,7 +1129,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					}
 				}
 			}
-		});
+		}, "mapped-symbol-query");
 		if (msi.kind == KIND_HOLE && addr.space == "ram") {
 			std::map<ea_t, std::string>::iterator knownName = allFuncNames.find((ea_t)addr.offset);
 			if (knownName != allFuncNames.end()) {
@@ -1424,7 +1436,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				AddrInfo targetAddr{ "ram", (unsigned long long)target };
 				func_t* f = get_func(target);
 				getFuncInfo(targetAddr, f, callName, func);
-				});
+				}, "call-target-info");
 			funcProtoInfos[target] = FuncInfo{ callName.c_str(), false, func };
 		}
 	}
@@ -1567,7 +1579,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					typeChain.push_back(TypeInfo{ "void", 0, "void" });
 					coreTypeUsed[0] = true;
 				}
-			});
+			}, "meta-type-query");
 			typeDatabase[typeName] = typeChain;
 		} else {
 			usedTypes[typeName] = true;
@@ -1643,7 +1655,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					offs += itemSize;
 				}
 			}
-		});
+		}, "comments-query");
 	}
 	std::string IdaCallback::getSymbol(AddrInfo addr)
 	{
@@ -1651,11 +1663,14 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		if (addr.space == "ram") {
 			qstring batchOutputEnv;
 			if (qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty()) {
-				return "ram0x" + to_string(addr.offset, std::hex);
+				std::map<ea_t, std::string>::iterator knownName = allFuncNames.find((ea_t)addr.offset);
+				if (knownName != allFuncNames.end())
+					return knownName->second;
+				return getSymbolName(addr.offset);
 			}
 			executeOnMainThread([&name, addr]() {
 				name = getSymbolName(addr.offset);
-			});
+			}, "symbol-query");
 		}
 		return name;
 	}
@@ -1669,7 +1684,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					get_strlit_contents(&qs, (ea_t)addr.offset, -1, get_str_type((ea_t)addr.offset), nullptr, 0);
 					res.insert(res.begin(), qs.begin(), qs.end());
 				}
-				});
+				}, "string-data-query");
 		}
 		return res;
 	}
@@ -1970,7 +1985,10 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			if (usdData.find(e) == usdData.end()) frefs[e] = true;
 			else {
 				refs[e] = true;
-				const std::vector<ea_t>& vec = depData.at(e);
+				auto depIt = depData.find(e);
+				if (depIt == depData.end())
+					continue;
+				const std::vector<ea_t>& vec = depIt->second;
 				for (size_t i = 0; i < vec.size(); i++) {
 					if (usdData.find(vec[i]) != usdData.end()) isDependee[vec[i]] = true;
 					s.push(vec[i]);
@@ -2003,11 +2021,14 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		while (s.size() != 0) {
 			ea_t e = s.top();
 			bool hasUnvisitChdrn = false;
-			const std::vector<ea_t>& vec = depData.at(e);
-			for (size_t i = 0; i < vec.size(); i++) {
-				if (usdData.find(vec[i]) != usdData.end()) {
-					if (unvisited.find(vec[i]) == unvisited.end() || unvisited[vec[i]]) {
-						unvisited[vec[i]] = false; s.push(vec[i]); hasUnvisitChdrn = true;
+			auto depIt = depData.find(e);
+			if (depIt != depData.end()) {
+				const std::vector<ea_t>& vec = depIt->second;
+				for (size_t i = 0; i < vec.size(); i++) {
+					if (usdData.find(vec[i]) != usdData.end()) {
+						if (unvisited.find(vec[i]) == unvisited.end() || unvisited[vec[i]]) {
+							unvisited[vec[i]] = false; s.push(vec[i]); hasUnvisitChdrn = true;
+						}
 					}
 				}
 			}
@@ -2031,15 +2052,22 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		const std::map<ea_t, bool>& alreadyDefined, std::map<ea_t, bool>& needDecl)
 	{
 		std::stack<ea_t> s;
+		std::map<ea_t, bool> seen;
 		s.push(ea);
 		while (s.size() != 0) {
 			ea_t e = s.top();
 			s.pop();
+			if (seen.find(e) != seen.end())
+				continue;
+			seen[e] = true;
 			if (ea == e) {}
 			else if (depData.find(e) == depData.end()) continue; //function pointers not in here
 			else if (alreadyDefined.find(e) != alreadyDefined.end()) continue;
 			else needDecl[e] = true;
-			const std::vector<ea_t>& vec = depData.at(e);
+			auto depIt = depData.find(e);
+			if (depIt == depData.end())
+				continue;
+			const std::vector<ea_t>& vec = depIt->second;
 			for (size_t i = 0; i < vec.size(); i++) {
 				s.push(vec[i]);
 			}
@@ -2633,6 +2661,11 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 
 	std::string IdaCallback::getHeaderDefFromAnalysis(bool allImports, std::string & forDisplay)
 	{
+		TRACE_MSG("analysis header begin: imports=" << std::dec << imports.size()
+			<< ", usedImports=" << usedImports.size()
+			<< ", usedFuncs=" << usedFuncs.size()
+			<< ", usedData=" << usedData.size()
+			<< ", usedTypes=" << usedTypes.size() << "\n");
 		qstring qs;
 		std::string definitions;
 		std::vector<std::vector<ea_t>> impByMod;
@@ -2648,6 +2681,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				impByMod[imports[it->first].idx].push_back(it->first);
 			}
 		}
+		TRACE_MSG("analysis header imports grouped\n");
 
 		//get_c_header_path, get_c_macros
 
@@ -2689,6 +2723,9 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				usedRefFuncs[it->first] = true;
 			}
 		}
+		TRACE_MSG("analysis header refs: usedRefData=" << std::dec << usedRefData.size()
+			<< ", usedRefFuncs=" << usedRefFuncs.size()
+			<< ", dataDependee=" << dataDependee.size() << "\n");
 
 		std::map<std::string, bool> usedRefTypes;
 		//presumably this is already in reverse dependency order as the decompiler must query in this order
@@ -2712,6 +2749,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		for (std::map<ea_t, bool>::iterator it = usedRefData.begin(); it != usedRefData.end(); it++) {
 			refTypes(usedData[it->first], usedRefTypes);
 		}
+		TRACE_MSG("analysis header ref types=" << std::dec << usedRefTypes.size() << "\n");
 
 		std::map<std::string, bool> isDependee;
 		std::for_each(usedTypes.begin(), usedTypes.end(), [&isDependee, &usedRefTypes, this](std::pair<std::string, bool> it) { buildDependents(it.first, usedRefTypes, isDependee); });
@@ -2734,6 +2772,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 				dfsTypeVisit(it->first, usedTypes, sortedTypes);
 				//dfsVisit(it->first, sortedTypes);
 		}
+		TRACE_MSG("analysis header sorted types=" << std::dec << sortedTypes.size() << "\n");
 
 		//pointer initizations can lead to a dependency ordering here, otherwise address ordering is ideal perhaps
 		//functions can be pointed to as well making their declarations need to go prior to the data
@@ -2752,6 +2791,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			if (dataDependee.find(it->first) != dataDependee.end())
 				dfsVisitData(it->first, dependentData, usedData, sortedData, visited);
 		}
+		TRACE_MSG("analysis header sorted data=" << std::dec << sortedData.size() << "\n");
 
 		std::string str = "//Default calling convention set to: " + (di->customCallStyle.empty() ? ccToStr(inf_cc_cm, is_code_far(inf_cc_cm) ? FTI_FARCALL : FTI_NEARCALL, true) : di->customCallStyle) + "\n\n";
 		definitions += str; //should really use callback interface to get cspec variant
@@ -2771,7 +2811,11 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 		}
 		//print_decls(); //could print all suitable for header file
-		for (std::vector<std::string>::iterator it = sortedTypes.begin(); it != sortedTypes.end(); it++) {
+		size_t emittedTypeCount = 0;
+		for (std::vector<std::string>::iterator it = sortedTypes.begin(); it != sortedTypes.end(); it++, emittedTypeCount++) {
+			if (emittedTypeCount != 0 && emittedTypeCount % 100 == 0)
+				TRACE_MSG("analysis header emitted types=" << std::dec << emittedTypeCount
+					<< "/" << sortedTypes.size() << "\n");
 			tinfo_t ti;
 			ti.get_named_type(get_idati(), it->c_str());
 			qstring qt = it->c_str();
@@ -2853,6 +2897,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		if (definitions.size() != 0) {
 			definitions += "\n"; forDisplay += "\n";
 		}
+		TRACE_MSG("analysis header types emitted\n");
 		//these are sorted by library and have a comment to remind that libraries are link time imported
 		for (size_t i = 0; i < modNames.size(); i++) {
 			if (impByMod[i].size() != 0) {
@@ -2924,7 +2969,12 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		if (usedFuncs.size() != 0) {
 			definitions += "\n"; forDisplay += "\n";
 		}
-		for (std::vector<ea_t>::iterator it = sortedData.begin(); it != sortedData.end(); it++) {
+		TRACE_MSG("analysis header funcs/imports emitted\n");
+		size_t emittedDataCount = 0;
+		for (std::vector<ea_t>::iterator it = sortedData.begin(); it != sortedData.end(); it++, emittedDataCount++) {
+			if (emittedDataCount != 0 && emittedDataCount % 100 == 0)
+				TRACE_MSG("analysis header emitted data=" << std::dec << emittedDataCount
+					<< "/" << sortedData.size() << "\n");
 			tinfo_t ti;
 			//segment_t* seg = getseg(*it);
 			//msg("EA: %llX Flags: %lX\n", *it, get_full_flags(*it));
@@ -3046,6 +3096,8 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		}
 
 		//definitions += '\n';
+		TRACE_MSG("analysis header complete, definitions bytes=" << std::dec
+			<< definitions.size() << ", display bytes=" << forDisplay.size() << "\n");
 		return definitions;
 	}
 	void IdaCallback::analysisDump(std::string& definitions, std::string& forDisplay, std::string& idaInfo)
@@ -3053,30 +3105,38 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		executeOnMainThread([this, &definitions, &forDisplay, &idaInfo]() {
 			definitions = getHeaderDefFromAnalysis(di->decompiledFunction == nullptr, forDisplay);
 			if (PRINT_DEBUG) idaInfo = dumpIdaInfo();
-			});
+			}, "analysis-dump");
 	}
 	/// Execute code in the main thread - to be used with execute_sync().
 	struct execFunctor : public exec_request_t
 	{
 		std::function<void()> fun;
+		const char* label;
 		qsemaphore_t finishSem;
 		int* taskNo;
-		execFunctor(std::function<void()> f, qsemaphore_t qs, int* tsk) : fun(f), finishSem(qs), taskNo(tsk) {}
+		execFunctor(std::function<void()> f, const char* taskLabel, qsemaphore_t qs, int* tsk) :
+			fun(f), label(taskLabel), finishSem(qs), taskNo(tsk) {}
 		virtual ~execFunctor(void) override {}
 		/// Callback to be executed.
-		/// If this function raises an exception, execute_sync() never returns.
+		/// Never let plugin exceptions escape through IDA's UI dispatcher.
 		virtual GHIDRADEC_EXEC_RETURN idaapi execute(void)
 		{
-			fun();
+			try {
+				fun();
+			} catch (const std::exception& e) {
+				WARNING_MSG("Main-thread GhidraDec task failed (" << label << "): " << e.what() << "\n");
+			} catch (...) {
+				WARNING_MSG("Main-thread GhidraDec task failed (" << label << ") with an unknown exception\n");
+			}
 			*taskNo = -1;
 			qsem_post(finishSem);
 			return 0;
 		}
 	};
-	void IdaCallback::executeOnMainThread(std::function<void()> fun)
+	void IdaCallback::executeOnMainThread(std::function<void()> fun, const char* label)
 	{
 		qsemaphore_t finishSem = qsem_create(nullptr, 0);
-		execFunctor* ef = new execFunctor(fun, finishSem, &di->uiExecutingTask);
+		execFunctor* ef = new execFunctor(fun, label, finishSem, &di->uiExecutingTask);
 		//int id = execute_sync(a, MFF_READ);
 		{ //must be a locked unit otherwise race condition can occur
 			qmutex_locker_t lock(di->qm);
@@ -3101,9 +3161,6 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	}
 	void IdaCallback::preloadBatchMappedSymbols()
 	{
-		if (di->outputFile.empty())
-			return;
-
 		for (std::map<ea_t, ImportInfo>::iterator it = imports.begin(); it != imports.end(); ++it) {
 			MappedSymbolInfo msi = { KIND_EXTERNALREFERENCE };
 			msi.entryPoint = it->first;
@@ -3113,6 +3170,21 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			msi.name = it->second.name.empty() ?
 				("imp_" + to_string((unsigned long long)it->first, std::hex)) : it->second.name;
 			batchMappedSymbols[it->first] = msi;
+		}
+
+		for (size_t i = 0; i < get_func_qty(); ++i) {
+			func_t* f = getn_func((int)i);
+			if (f == nullptr || imports.find(f->start_ea) != imports.end())
+				continue;
+			MappedSymbolInfo msi = { KIND_FUNCTION };
+			msi.entryPoint = f->start_ea;
+			msi.ranges = getFunctionRanges(f, "ram");
+			msi.size = msi.ranges.empty() ? f->size() :
+				msi.ranges.begin()->endoffset - msi.ranges.begin()->beginoffset + 1;
+			msi.readonly = true;
+			msi.volatil = false;
+			msi.name = getSymbolName(f->start_ea);
+			batchMappedSymbols[f->start_ea] = msi;
 		}
 
 		for (ea_t ea = inf_min_ea; ; ) {
@@ -3329,7 +3401,8 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			}
 			preloadFunctionByteCache(this);
 			qstring batchOutputEnv;
-			if (qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty()) {
+			if (di->decompiledFunction != nullptr ||
+				(qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty())) {
 				bool limited = false;
 				size_t pages = preloadMappedSegmentByteCache(this, BATCH_SEGMENT_PRELOAD_LIMIT, &limited);
 				TRACE_MSG("Preloaded byte cache for " << std::dec << pages
@@ -3343,7 +3416,8 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 			allFuncRanges[di->decompiledFunction->start_ea] = getFunctionRanges(di->decompiledFunction, "ram");
 			preloadFunctionByteCache(this);
 			qstring batchOutputEnv;
-			if (qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty()) {
+			if (di->decompiledFunction != nullptr ||
+				(qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty())) {
 				bool limited = false;
 				size_t pages = preloadMappedSegmentByteCache(this, BATCH_SEGMENT_PRELOAD_LIMIT, &limited);
 				TRACE_MSG("Preloaded byte cache for " << std::dec << pages
@@ -3877,10 +3951,10 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		//however sometimes specifically IDA will choose a wrong data model for libraries - far instead of near, and the frame and type both have bad information
 		//perhaps this peculiar case should be solved by a simple database script which correlates the stack frame pointers to its specific usages
 		//as largely it is just working around and fixing a bug in this particular area
-		if (di->outputFile.empty()) {
-			executeOnMainThread([ea]() { checkNearFarFuncModelInfo(ea); });
+		if (di->outputFile.empty() && isX86() && !inf_is_32bit() && !inf_is_64bit()) {
+			executeOnMainThread([ea]() { checkNearFarFuncModelInfo(ea); }, "near-far-preflight");
 		} else {
-			TRACE_MSG("skipping near/far model preflight during unattended paramid\n");
+			TRACE_MSG("skipping near/far model preflight during paramid\n");
 		}
 		DecMode dm = defaultDecMode;
 		dm.actionname = "paramid";
@@ -3891,7 +3965,9 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		//should turn off eliminate unreachable option switch
 		Options opt = getOpts();
 		bool bChangeOpt = false;
-		if (di->outputFile.empty() && !opt.decompileUnreachable) {
+		const bool needsGuiUnreachableParamid =
+			di->outputFile.empty() && isX86() && !inf_is_32bit() && !inf_is_64bit();
+		if (needsGuiUnreachableParamid && !opt.decompileUnreachable) {
 			opt.decompileUnreachable = true;
 			TRACE_MSG("paramid enabling decompile-unreachable option\n");
 			decInt->setOptions(opt);
@@ -4134,7 +4210,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 					}
 				}
 			}
-			});
+			}, "apply-paramid-results");
 #endif
 	}
 	std::string IdaCallback::tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err,
@@ -4386,7 +4462,11 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 		<< code.size() << ", display bytes=" << display.size() << "\n");
 	qstring batchOutputEnv;
 	const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
-	if (batchOutput) {
+	qstring forceAnalysisDumpEnv;
+	const bool forceAnalysisDump =
+		qgetenv("GHIDRADEC_TEST_FORCE_ANALYSIS_DUMP", &forceAnalysisDumpEnv) &&
+		std::string(forceAnalysisDumpEnv.c_str()) != "0";
+	if (batchOutput && !forceAnalysisDump) {
 		code += "\n";
 		display += "\n";
 	} else {
@@ -4428,6 +4508,7 @@ static void idaapi localDecompilation(RdGlobalInfo *di)
 
 ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 {
+	try {
 	RdGlobalInfo* di = (RdGlobalInfo*)user_data;
 	auto getCurrentGraph = [di]() -> const std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>* {
 		if (di == nullptr || di->decompiledFunction == nullptr)
@@ -4460,7 +4541,7 @@ ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 				if (std::get<0>(blockGraph[i])[j] >= blockGraph.size())
 					continue;
 				edge_info_t ei;
-				mg->add_edge(std::get<0>(blockGraph[i])[j], (int)i, &ei);
+				mg->add_edge((int)i, std::get<0>(blockGraph[i])[j], &ei);
 			}
 		}
 		//for (size_t i = blockGraph.size() - 1; i != -1; i--) {
@@ -4525,6 +4606,13 @@ ssize_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
 	//} else if (notification_code == grcode_destroyed) {
 	//} else if (notification_code == grcode_changed_graph) {
 	}
+	} catch (const std::exception& e) {
+		WARNING_MSG("GhidraDec graph callback failed: " << e.what() << "\n");
+		return 0;
+	} catch (...) {
+		WARNING_MSG("GhidraDec graph callback failed with an unknown exception\n");
+		return 0;
+	}
 	return 0;
 }
 
@@ -4561,14 +4649,18 @@ void displayBlockGraph(RdGlobalInfo* di, ea_t ea)
 		di->mg = create_mutable_graph(nn);
 		di->graphViewer = create_graph_viewer((di->viewerName + "_Graph").c_str(),
 			nn, GraphCallback, di, 12, di->graphWidget);
+#if !defined(IDA_SDK_VERSION) || IDA_SDK_VERSION < 750
 		display_widget(di->graphWidget,
 			WOPN_DP_TAB
 #if !defined(IDA_SDK_VERSION) || IDA_SDK_VERSION < 720
 			| WOPN_MENU
 #endif
 		);
+#else
+		display_widget(di->graphWidget, WOPN_DP_TAB, di->viewerName.c_str());
+#endif
 		viewer_fit_window(di->graphViewer);
-	});
+	}, "display-graph");
 }
 
 /**
@@ -4588,12 +4680,16 @@ static int idaapi threadFunc(void* ud)
 	{
 		//showDecompiledCode(di);
 		ShowOutput show(di);
+		TRACE_MSG("show decompiled output begin\n");
 		di->idacb->executeOnMainThread([&show]() {
 			show.execute();
-			});
+			}, "show-output");
+		TRACE_MSG("show decompiled output complete\n");
 		if (di->decompiledFunction != nullptr &&
 			di->fnc2code.find(di->decompiledFunction) != di->fnc2code.end()) {
+			TRACE_MSG("display block graph begin\n");
 			displayBlockGraph(di, di->decompiledFunction->start_ea);
+			TRACE_MSG("display block graph complete\n");
 		}
 	}
 

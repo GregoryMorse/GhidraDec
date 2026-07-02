@@ -41,6 +41,8 @@ WINDOW_DIALOG_PATTERNS = (
 )
 DEFAULT_FAILURE_PATTERNS = (
     "[GhidraDec error]",
+    "Main-thread GhidraDec task failed",
+    "GhidraDec graph callback failed",
     "Low-level Error:",
     "Marshaling error:",
     "Unhandled exception:",
@@ -59,9 +61,19 @@ GRACEFUL_FAILURE_PATTERNS = (
 )
 DANGEROUS_FAILURE_PATTERNS = (
     "Unhandled exception:",
+    "Main-thread GhidraDec task failed",
+    "GhidraDec graph callback failed",
     "access violation",
     "crash",
     "minidump",
+)
+QUALITY_FAILURE_PATTERNS = (
+    "WARNING: This function may have set the stack pointer",
+    "WARNING: Read-only address (register",
+    "WARNING: Removing unreachable block",
+    "func_0x",
+    "ram0x",
+    "uRam0000000000000000",
 )
 
 
@@ -262,9 +274,6 @@ def read_text_if_exists(path: Path, max_bytes: int = 256 * 1024) -> str:
 
 
 def classify_run_result(exit_code: int, log_path: Path, output_path: Path) -> tuple[str, str]:
-    if exit_code == 0:
-        return "success", ""
-
     log_text = read_text_if_exists(log_path)
     output_text = read_text_if_exists(output_path)
     combined = log_text + "\n" + output_text
@@ -288,9 +297,32 @@ def classify_run_result(exit_code: int, log_path: Path, output_path: Path) -> tu
     for pattern in GRACEFUL_FAILURE_PATTERNS:
         if pattern in combined:
             return "graceful_fail", pattern
+    for pattern in QUALITY_FAILURE_PATTERNS:
+        if pattern in combined:
+            return "graceful_fail", pattern
     incomplete = find_incomplete_decompile_all(combined)
     if incomplete is not None:
         return "graceful_fail", incomplete
+    if exit_code == 0:
+        return "success", ""
+    return "dangerous_fail", f"exit code {exit_code}"
+
+
+def classify_gui_like_result(exit_code: int, log_path: Path) -> tuple[str, str]:
+    log_text = read_text_if_exists(log_path)
+    lowered = log_text.lower()
+    if exit_code == 124:
+        return "dangerous_fail", "IDA process timeout"
+    for pattern in DANGEROUS_FAILURE_PATTERNS:
+        if pattern.lower() in lowered:
+            return "dangerous_fail", pattern
+    for pattern in GRACEFUL_FAILURE_PATTERNS:
+        if pattern in log_text:
+            return "graceful_fail", pattern
+    if exit_code == 0 and "Decompilation completed:" in log_text:
+        return "success", ""
+    if exit_code == 0:
+        return "dangerous_fail", "GUI-like run exited without a decompilation completion message"
     return "dangerous_fail", f"exit code {exit_code}"
 
 
@@ -343,7 +375,10 @@ def run_one(
 
     env = os.environ.copy()
     env["GHIDRADEC_BATCH_INPUT"] = str(work_input)
-    env["GHIDRADEC_BATCH_OUTPUT"] = str(output_path)
+    if not args.gui_like:
+        env["GHIDRADEC_BATCH_OUTPUT"] = str(output_path)
+    else:
+        env.pop("GHIDRADEC_BATCH_OUTPUT", None)
     env["GHIDRADEC_BATCH_DONE"] = str(done_path)
     env["GHIDRADEC_BATCH_SAVE_IDB"] = str(idb_path) if args.save_database else ""
     env["GHIDRADEC_BATCH_PLUGIN"] = plugin_names
@@ -355,6 +390,10 @@ def run_one(
     env["GHIDRADEC_BATCH_FUNCTION_MAX"] = str(args.function_max)
     env["GHIDRADEC_BATCH_CLEAN_OUTPUT"] = "1"
     env["GHIDRADEC_TEST_SKIP_PARAMID"] = "0" if args.paramid else "1"
+    env["GHIDRADEC_TEST_GUI_LIKE"] = "1" if args.gui_like else "0"
+    env["GHIDRADEC_TEST_SHOW_VIEWER"] = "1" if args.show_viewer else "0"
+    env["GHIDRADEC_TEST_FORCE_ANALYSIS_DUMP"] = "1" if args.force_analysis_dump else "0"
+    env["GHIDRADEC_TEST_ASYNC"] = "1" if args.gui_like or args.force_analysis_dump else "0"
     env["GHIDRADEC_TEST_TIMEOUT"] = str(args.timeout)
     env["GHIDRADEC_TRACE"] = "1" if args.trace else "0"
     env["GHIDRADEC_PROTOCOL_LOG"] = str(protocol_log_path)
@@ -483,11 +522,16 @@ def run_individual_functions(args: argparse.Namespace, input_path: Path) -> int:
                 protocol_log_override=protocol_path,
                 log_name=log_name,
                 plugin_arg_override=4,
+                validate_output_file=not args.gui_like,
             )
         finally:
             args.min_output_bytes = original_min_output_bytes
         size = output_path.stat().st_size if output_path.exists() else 0
-        outcome, reason = classify_run_result(code, case_dir / log_name, output_path)
+        log_path = case_dir / log_name
+        if args.gui_like:
+            outcome, reason = classify_gui_like_result(code, log_path)
+        else:
+            outcome, reason = classify_run_result(code, log_path, output_path)
         counts[outcome] += 1
         passed = outcome == "success"
         if not passed:
@@ -498,7 +542,7 @@ def run_individual_functions(args: argparse.Namespace, input_path: Path) -> int:
             "name": name,
             "output": str(output_path),
             "protocol_log": str(protocol_path),
-            "log": str(case_dir / log_name),
+            "log": str(log_path),
             "exit_code": code,
             "outcome": outcome,
             "reason": reason,
@@ -613,6 +657,21 @@ def main() -> int:
     parser.add_argument("--stable-polls", type=int, default=3)
     parser.add_argument("--min-output-bytes", type=int, default=64)
     parser.add_argument("--individual-min-output-bytes", type=int, default=1)
+    parser.add_argument(
+        "--gui-like",
+        action="store_true",
+        help="For individual functions, exercise the GUI selective path without batch outputFile",
+    )
+    parser.add_argument(
+        "--show-viewer",
+        action="store_true",
+        help="In GUI-like individual runs, do not suppress the decompiler viewer",
+    )
+    parser.add_argument(
+        "--force-analysis-dump",
+        action="store_true",
+        help="For individual function runs, prepend the GUI analysis header/prologue even when writing a batch output file",
+    )
     parser.add_argument("--save-database", action="store_true", help="Save the analyzed IDB/I64 before decompiling")
     parser.add_argument("--save-idb", help="Explicit save path for a single input database")
     parser.add_argument("--refresh", action="store_true", help="Refresh copied inputs in the work directory")

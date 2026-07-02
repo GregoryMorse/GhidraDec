@@ -84,7 +84,7 @@ namespace idaplugin {
 		std::map<ea_t, std::string> funcColorProtos;
 		IdaCallback(RdGlobalInfo* rdgi) : di(rdgi) {}
 		virtual ~IdaCallback();
-		void executeOnMainThread(std::function<void()> fun);
+		void executeOnMainThread(std::function<void()> fun, const char* label = "unnamed");
 
 		void launchDecompiler();
 		size_t readDec(void* Buf, size_t MaxCharCount);

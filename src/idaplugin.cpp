@@ -788,6 +788,14 @@ bool GhidraDec::canDecompileInput()
 			const bool skipRegressionParamId =
 				!qgetenv("GHIDRADEC_TEST_SKIP_PARAMID", &skipParamIdEnv) ||
 				std::string(skipParamIdEnv.c_str()) != "0";
+			qstring guiLikeEnv;
+			const bool guiLikeRegression =
+				qgetenv("GHIDRADEC_TEST_GUI_LIKE", &guiLikeEnv) &&
+				std::string(guiLikeEnv.c_str()) != "0";
+			qstring showViewerEnv;
+			const bool showViewerRegression =
+				qgetenv("GHIDRADEC_TEST_SHOW_VIEWER", &showViewerEnv) &&
+				std::string(showViewerEnv.c_str()) != "0";
 			for (unsigned i = 0; i < get_func_qty(); ++i)
 			{
 				qstring qCmt;
@@ -801,7 +809,9 @@ bool GhidraDec::canDecompileInput()
 				if (cmt.find("<ghidradec_select>") != std::string::npos)
 				{
 					qstring outputFileEnv;
-					if (qgetenv("GHIDRADEC_BATCH_OUTPUT", &outputFileEnv) && !outputFileEnv.empty())
+					if (guiLikeRegression)
+						decompInfo->outputFile.clear();
+					else if (qgetenv("GHIDRADEC_BATCH_OUTPUT", &outputFileEnv) && !outputFileEnv.empty())
 						decompInfo->outputFile = outputFileEnv.c_str();
 					else
 						decompInfo->outputFile = decompInfo->inputPath + ".c";
@@ -814,7 +824,7 @@ bool GhidraDec::canDecompileInput()
 					}
 					decompInfo->setIsUseThreads(runAsyncRegression);
 					decompInfo->skipParamIdentification = skipRegressionParamId;
-					decompInfo->suppressViewer = true;
+					decompInfo->suppressViewer = !showViewerRegression;
 					decompInfo->pm->runSelectiveDecompilation(fnc);
 					if (!runAsyncRegression)
 						decompInfo->skipParamIdentification = false;

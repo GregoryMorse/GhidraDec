@@ -2266,7 +2266,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 								queryAddr.getSpace()->getName() == "register") {
 								first = 0;
 								last = queryAddr.getSpace()->getHighest();
-								readOnly = true;
+								readOnly = false;
 								volatil = false;
 							}
 							if (msi.kind == KIND_FUNCTION && msi.entryPoint != addr.offset) {
