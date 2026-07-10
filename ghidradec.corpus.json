@@ -1,0 +1,717 @@
+{
+  "schema": 1,
+  "corpora": [
+    {
+      "name": "angr-binaries",
+      "kind": "github-raw",
+      "repository": "angr/binaries",
+      "ref": "ec5fd26d01d8db05d109945fb64502a67d013d5c",
+      "baseUrl": "https://raw.githubusercontent.com/angr/binaries/ec5fd26d01d8db05d109945fb64502a67d013d5c",
+      "licenseNote": "Public upstream regression corpus. Keep only selected staged copies in build artifacts.",
+      "targets": [
+        {
+          "id": "angr-x86_64-fauxware",
+          "arch": "x86_64",
+          "tier": "smoke",
+          "path": "tests/x86_64/fauxware",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_64-test_arrays",
+          "arch": "x86_64",
+          "tier": "smoke",
+          "path": "tests/x86_64/test_arrays",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_64-test_loops",
+          "arch": "x86_64",
+          "tier": "extended",
+          "path": "tests/x86_64/test_loops",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_64-test_division",
+          "arch": "x86_64",
+          "tier": "extended",
+          "path": "tests/x86_64/test_division",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_64-decompiler-call-expr-folding",
+          "arch": "x86_64",
+          "tier": "extended",
+          "path": "tests/x86_64/decompiler/call_expr_folding",
+          "enabled": true,
+          "notes": "Small angr decompiler-corpus target for call expression ordering and folding quality."
+        },
+        {
+          "id": "angr-x86_64-decompiler-struct-access",
+          "arch": "x86_64",
+          "tier": "extended",
+          "path": "tests/x86_64/decompiler/struct_access",
+          "enabled": true,
+          "notes": "Small angr decompiler-corpus target for field/structure recovery output quality."
+        },
+        {
+          "id": "angr-x86_64-decompiler-switch-default-abort",
+          "arch": "x86_64",
+          "tier": "extended",
+          "path": "tests/x86_64/switch_default_abort.o",
+          "enabled": true,
+          "notes": "Object-file target for switch/default and no-return abort handling."
+        },
+        {
+          "id": "angr-x86_64-decompiler-tail-calls",
+          "arch": "x86_64",
+          "tier": "extended",
+          "path": "tests/x86_64/decompiler/tail_calls.o",
+          "enabled": true,
+          "notes": "Object-file target for tail-call edge handling and named call recovery."
+        },
+        {
+          "id": "angr-x86_64-cfg-switches",
+          "arch": "x86_64",
+          "tier": "extended",
+          "path": "tests/x86_64/cfg_switches",
+          "enabled": true,
+          "notes": "Small x86-64 switch/control-flow target for jumptable and structured branch recovery."
+        },
+        {
+          "id": "angr-x86_64-test-return-type",
+          "arch": "x86_64",
+          "tier": "extended",
+          "path": "tests/x86_64/test_return_type_x86_64.elf",
+          "enabled": true,
+          "notes": "x86-64 return-type and prototype recovery target."
+        },
+        {
+          "id": "angr-x86_64-test-structs",
+          "arch": "x86_64",
+          "tier": "extended",
+          "path": "tests/x86_64/test_structs.o",
+          "enabled": true,
+          "notes": "x86-64 object-file target for structure and aggregate access recovery."
+        },
+        {
+          "id": "angr-x86_64-decompiler-struct-member-access",
+          "arch": "x86_64",
+          "tier": "extended",
+          "path": "tests/x86_64/decompiler/struct_member_access",
+          "enabled": true,
+          "notes": "angr decompiler-corpus target for struct member access quality."
+        },
+        {
+          "id": "angr-x86_64-cgc-budgit",
+          "arch": "x86_64",
+          "tier": "extended",
+          "path": "tests/x86_64/cgc-linux64/BudgIT",
+          "enabled": true,
+          "testMode": "individual-functions",
+          "individualMax": 20,
+          "notes": "CGC-derived Linux x86-64 target from angr. Keep sampled because these are larger real-world-style challenge binaries."
+        },
+        {
+          "id": "angr-x86_32-fauxware",
+          "arch": "x86_32",
+          "tier": "smoke",
+          "path": "tests/i386/fauxware",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_32-test_arrays",
+          "arch": "x86_32",
+          "tier": "smoke",
+          "path": "tests/i386/test_arrays",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_32-test_loops",
+          "arch": "x86_32",
+          "tier": "extended",
+          "path": "tests/i386/test_loops",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_32-test_division",
+          "arch": "x86_32",
+          "tier": "extended",
+          "path": "tests/i386/test_division",
+          "enabled": true
+        },
+        {
+          "id": "angr-x86_32-cfg-switches-o0",
+          "arch": "x86_32",
+          "tier": "extended",
+          "path": "tests/i386/cfg_switches_O0",
+          "enabled": true,
+          "notes": "i386 unoptimized switch/control-flow target."
+        },
+        {
+          "id": "angr-x86_32-calling-convention-0",
+          "arch": "x86_32",
+          "tier": "extended",
+          "path": "tests/i386/calling_convention_0.o",
+          "enabled": true,
+          "notes": "i386 object-file target for calling-convention and prototype recovery."
+        },
+        {
+          "id": "angr-x86_32-decompiler-division3",
+          "arch": "x86_32",
+          "tier": "extended",
+          "path": "tests/i386/decompiler/division3",
+          "enabled": true,
+          "notes": "i386 decompiler-corpus division target for arithmetic expression quality."
+        },
+        {
+          "id": "angr-x86_16-bios-bin-elf",
+          "arch": "x86_16",
+          "tier": "smoke",
+          "path": "tests/i386/bios.bin.elf",
+          "enabled": true,
+          "notes": "BIOS-oriented x86 sample from angr. Use as the initial 16-bit lane until real-mode .COM/.BIN samples are curated."
+        },
+        {
+          "id": "angr-x86_16-hello-syscalls",
+          "arch": "x86_16",
+          "tier": "extended",
+          "path": "tests/x86/hello_syscalls",
+          "enabled": true,
+          "notes": "x86 baseline sample kept in the 16-bit expansion lane for loader/processor smoke coverage."
+        },
+        {
+          "id": "angr-armel-fauxware",
+          "arch": "armel",
+          "tier": "smoke",
+          "path": "tests/armel/fauxware",
+          "enabled": true
+        },
+        {
+          "id": "angr-armel-test_arrays",
+          "arch": "armel",
+          "tier": "smoke",
+          "path": "tests/armel/test_arrays",
+          "enabled": true
+        },
+        {
+          "id": "angr-armel-test_loops",
+          "arch": "armel",
+          "tier": "extended",
+          "path": "tests/armel/test_loops",
+          "enabled": true
+        },
+        {
+          "id": "angr-armel-test_division",
+          "arch": "armel",
+          "tier": "extended",
+          "path": "tests/armel/test_division",
+          "enabled": true
+        },
+        {
+          "id": "angr-armel-cfg-switches",
+          "arch": "armel",
+          "tier": "extended",
+          "path": "tests/armel/cfg_switches",
+          "enabled": true,
+          "notes": "ARM little-endian switch/control-flow target."
+        },
+        {
+          "id": "angr-armel-test-pass-struct-by-value",
+          "arch": "armel",
+          "tier": "extended",
+          "path": "tests/armel/test_pass_struct_by_value",
+          "enabled": true,
+          "notes": "ARM little-endian ABI target for aggregate arguments."
+        },
+        {
+          "id": "angr-armel-two-cond-func-call-const-arg",
+          "arch": "armel",
+          "tier": "extended",
+          "path": "tests/armel/two_cond_func_call_with_const_arg",
+          "enabled": true,
+          "notes": "ARM little-endian conditional-call target for branch and argument propagation quality."
+        },
+        {
+          "id": "angr-armel-start-ordering",
+          "arch": "armel",
+          "tier": "extended",
+          "path": "tests/armel/start_ordering",
+          "enabled": true,
+          "notes": "ARM little-endian startup/control-flow target."
+        },
+        {
+          "id": "angr-armhf-fauxware",
+          "arch": "armhf",
+          "tier": "smoke",
+          "path": "tests/armhf/fauxware",
+          "enabled": true
+        },
+        {
+          "id": "angr-armhf-test_arrays",
+          "arch": "armhf",
+          "tier": "smoke",
+          "path": "tests/armhf/test_arrays",
+          "enabled": true
+        },
+        {
+          "id": "angr-armhf-test_loops",
+          "arch": "armhf",
+          "tier": "extended",
+          "path": "tests/armhf/test_loops",
+          "enabled": true
+        },
+        {
+          "id": "angr-armhf-test_division",
+          "arch": "armhf",
+          "tier": "extended",
+          "path": "tests/armhf/test_division",
+          "enabled": true
+        },
+        {
+          "id": "angr-armhf-float-int-conversion",
+          "arch": "armhf",
+          "tier": "extended",
+          "path": "tests/armhf/float_int_conversion.elf",
+          "enabled": true,
+          "notes": "ARM hard-float target for float/int conversions and ABI register coverage."
+        },
+        {
+          "id": "angr-aarch64-test_arrays",
+          "arch": "aarch64",
+          "tier": "smoke",
+          "path": "tests/aarch64/test_arrays",
+          "enabled": true
+        },
+        {
+          "id": "angr-aarch64-test_loops",
+          "arch": "aarch64",
+          "tier": "extended",
+          "path": "tests/aarch64/test_loops",
+          "enabled": true
+        },
+        {
+          "id": "angr-aarch64-test_division",
+          "arch": "aarch64",
+          "tier": "extended",
+          "path": "tests/aarch64/test_division",
+          "enabled": true
+        },
+        {
+          "id": "angr-aarch64-func-chain",
+          "arch": "aarch64",
+          "tier": "extended",
+          "path": "tests/aarch64/func-chain-aarch64",
+          "enabled": true,
+          "notes": "AArch64 control-flow and interprocedural call-chain target."
+        },
+        {
+          "id": "angr-aarch64-test-return-type",
+          "arch": "aarch64",
+          "tier": "extended",
+          "path": "tests/aarch64/test_return_type_aarch64.elf",
+          "enabled": true,
+          "notes": "AArch64 return-type and prototype recovery target."
+        },
+        {
+          "id": "angr-mips-fauxware",
+          "arch": "mips",
+          "tier": "smoke",
+          "path": "tests/mips/fauxware",
+          "enabled": true,
+          "notes": "Big-endian MIPS."
+        },
+        {
+          "id": "angr-mips-test_arrays",
+          "arch": "mips",
+          "tier": "smoke",
+          "path": "tests/mips/test_arrays",
+          "enabled": true,
+          "notes": "Big-endian MIPS."
+        },
+        {
+          "id": "angr-mips-test_loops",
+          "arch": "mips",
+          "tier": "extended",
+          "path": "tests/mips/test_loops",
+          "enabled": true,
+          "notes": "Big-endian MIPS."
+        },
+        {
+          "id": "angr-mips-test_division",
+          "arch": "mips",
+          "tier": "extended",
+          "path": "tests/mips/test_division",
+          "enabled": true,
+          "notes": "Big-endian MIPS."
+        },
+        {
+          "id": "angr-mips-test_ioctl",
+          "arch": "mips",
+          "tier": "extended",
+          "path": "tests/mips/test_ioctl",
+          "enabled": true,
+          "notes": "Big-endian MIPS syscall/ioctl-style target."
+        },
+        {
+          "id": "angr-mipsel-fauxware",
+          "arch": "mipsel",
+          "tier": "smoke",
+          "path": "tests/mipsel/fauxware",
+          "enabled": true,
+          "notes": "Little-endian MIPS."
+        },
+        {
+          "id": "angr-mipsel-test_arrays",
+          "arch": "mipsel",
+          "tier": "smoke",
+          "path": "tests/mipsel/test_arrays",
+          "enabled": true,
+          "notes": "Little-endian MIPS."
+        },
+        {
+          "id": "angr-mipsel-test_loops",
+          "arch": "mipsel",
+          "tier": "extended",
+          "path": "tests/mipsel/test_loops",
+          "enabled": true,
+          "notes": "Little-endian MIPS."
+        },
+        {
+          "id": "angr-mipsel-jumptable-0",
+          "arch": "mipsel",
+          "tier": "blocked",
+          "path": "tests/mipsel/jumptable_0",
+          "enabled": false,
+          "notes": "Little-endian MIPS jumptable target for switch recovery; all functions decompile, but strict quality gating still catches unreachable-block and unrecovered-jumptable warnings."
+        },
+        {
+          "id": "angr-mipsel-test_division",
+          "arch": "mipsel",
+          "tier": "extended",
+          "path": "tests/mipsel/test_division",
+          "enabled": true,
+          "notes": "Little-endian MIPS."
+        },
+        {
+          "id": "angr-mipsel-test_ioctl",
+          "arch": "mipsel",
+          "tier": "extended",
+          "path": "tests/mipsel/test_ioctl",
+          "enabled": true,
+          "notes": "Little-endian MIPS syscall/ioctl-style target."
+        },
+        {
+          "id": "angr-ppc-fauxware",
+          "arch": "ppc",
+          "tier": "smoke",
+          "path": "tests/ppc/fauxware",
+          "enabled": true,
+          "notes": "PowerPC big-endian smoke target."
+        },
+        {
+          "id": "angr-ppc-brancher",
+          "arch": "ppc",
+          "tier": "extended",
+          "path": "tests/ppc/brancher",
+          "enabled": true,
+          "notes": "PowerPC big-endian branch/control-flow target."
+        },
+        {
+          "id": "angr-ppc-test_arrays",
+          "arch": "ppc",
+          "tier": "smoke",
+          "path": "tests/ppc/test_arrays",
+          "enabled": true,
+          "notes": "PowerPC big-endian smoke target."
+        },
+        {
+          "id": "angr-ppc-test_loops",
+          "arch": "ppc",
+          "tier": "extended",
+          "path": "tests/ppc/test_loops",
+          "enabled": true,
+          "notes": "PowerPC big-endian extended target."
+        },
+        {
+          "id": "angr-ppc-test_division",
+          "arch": "ppc",
+          "tier": "extended",
+          "path": "tests/ppc/test_division",
+          "enabled": true,
+          "notes": "PowerPC big-endian extended target."
+        },
+        {
+          "id": "angr-ppc-test_ioctl",
+          "arch": "ppc",
+          "tier": "extended",
+          "path": "tests/ppc/test_ioctl",
+          "enabled": true,
+          "notes": "PowerPC big-endian syscall/ioctl-style target."
+        },
+        {
+          "id": "angr-ppc64-fauxware",
+          "arch": "ppc64",
+          "tier": "smoke",
+          "path": "tests/ppc64/fauxware",
+          "enabled": true,
+          "notes": "PowerPC 64 big-endian smoke target. Validates default-prototype pcode injection handling in PPC64 cspecs."
+        },
+        {
+          "id": "angr-ppc64-test_arrays",
+          "arch": "ppc64",
+          "tier": "smoke",
+          "path": "tests/ppc64/test_arrays",
+          "enabled": true,
+          "notes": "PowerPC 64 big-endian smoke target. Validates default-prototype pcode injection handling in PPC64 cspecs."
+        },
+        {
+          "id": "angr-ppc64-test_loops",
+          "arch": "ppc64",
+          "tier": "extended",
+          "path": "tests/ppc64/test_loops",
+          "enabled": true,
+          "notes": "PowerPC 64 big-endian extended target. Validates default-prototype pcode injection handling in PPC64 cspecs."
+        },
+        {
+          "id": "angr-ppc64-test_division",
+          "arch": "ppc64",
+          "tier": "extended",
+          "path": "tests/ppc64/test_division",
+          "enabled": true,
+          "notes": "PowerPC 64 big-endian extended target. Validates default-prototype pcode injection handling in PPC64 cspecs."
+        },
+        {
+          "id": "angr-ppc64-test_ioctl",
+          "arch": "ppc64",
+          "tier": "extended",
+          "path": "tests/ppc64/test_ioctl",
+          "enabled": true,
+          "notes": "PowerPC 64 big-endian syscall/ioctl-style target."
+        },
+        {
+          "id": "angr-ppc64el-fauxware",
+          "arch": "ppc64el",
+          "tier": "smoke",
+          "path": "tests/ppc64el/fauxware",
+          "enabled": true,
+          "notes": "PowerPC 64 little-endian smoke target. Validates default-prototype pcode injection handling in PPC64 cspecs."
+        },
+        {
+          "id": "angr-ppc64el-fauxware-static",
+          "arch": "ppc64el",
+          "tier": "extended",
+          "path": "tests/ppc64el/fauxware_static",
+          "enabled": true,
+          "testMode": "individual-functions",
+          "individualMax": 10,
+          "notes": "PowerPC 64 little-endian static target. Monolithic decompile-all is too large for routine runs, but sampled individual-function coverage currently passes without graceful or dangerous failures."
+        },
+        {
+          "id": "angr-m68k-mul-add-sub-xor",
+          "arch": "m68k",
+          "tier": "smoke",
+          "path": "tests/m68k/mul_add_sub_xor_m68k_be",
+          "enabled": true,
+          "testMode": "individual-functions",
+          "individualMax": 10,
+          "notes": "Motorola 68000 big-endian static-style target. Monolithic decompile-all is too large for routine runs, so default coverage is sampled individual-function testing. Current strict smoke sample is close but still has a naming-quality graceful failure."
+        },
+        {
+          "id": "angr-hppa-test-instr",
+          "arch": "hppa",
+          "tier": "smoke",
+          "path": "tests/hppa/test-instr_hppa",
+          "enabled": true,
+          "testMode": "individual-functions",
+          "individualMax": 20,
+          "notes": "PA-RISC static-style target. Monolithic decompile-all is too large for routine smoke runs and can stall in libc-style routines, so default coverage is sampled individual-function testing. Current strict smoke sample has control-flow warning quality failures but no dangerous failures."
+        },
+        {
+          "id": "angr-sh4-test-instr",
+          "arch": "sh4",
+          "tier": "smoke",
+          "path": "tests/sh4/test-instr_sh4",
+          "enabled": true,
+          "testMode": "individual-functions",
+          "individualMax": 10,
+          "notes": "SuperH4 binding resolves through IDA sh3/sh4 aliases. Monolithic decompile-all is too large for routine runs, so default coverage is sampled individual-function testing. Current strict smoke sample is close but still has one unreachable-block quality failure."
+        },
+        {
+          "id": "angr-riscv64-test-return-type",
+          "arch": "riscv64",
+          "tier": "smoke",
+          "path": "tests/riscv64/test_return_type_riscv64.elf",
+          "enabled": true,
+          "notes": "RISC-V 64 little-endian smoke target. Uses local IDA-PRO aliasing until Ghidra's RISCV ldefs advertise the riscv external name upstream."
+        },
+        {
+          "id": "angr-riscv64-branch-reloc",
+          "arch": "riscv64",
+          "tier": "blocked",
+          "path": "tests/riscv64/riscv-branch.rv64.o",
+          "enabled": false,
+          "notes": "RISC-V 64 object-file branch relocation target. The batch harness can seed .text, but strict quality gating still catches Ghidra unreachable/infinite-loop output."
+        },
+        {
+          "id": "angr-riscv64-call-reloc",
+          "arch": "riscv64",
+          "tier": "extended",
+          "path": "tests/riscv64/riscv-call.rv64.o",
+          "enabled": true,
+          "minOutputBytes": 32,
+          "notes": "Tiny RISC-V 64 object-file call relocation target. The batch harness seeds .text when IDA only creates import stubs, and this target intentionally produces a sub-64-byte clean decompile."
+        },
+        {
+          "id": "angr-riscv64-jal-reloc",
+          "arch": "riscv64",
+          "tier": "blocked",
+          "path": "tests/riscv64/riscv-jal.rv64.o",
+          "enabled": false,
+          "notes": "RISC-V 64 JAL relocation target. IDA/Ghidra decompile one function, but strict quality gating catches unimplemented-instruction output."
+        },
+        {
+          "id": "angr-java-simple1-class1",
+          "arch": "java",
+          "tier": "smoke",
+          "path": "tests/java/simple1.jar",
+          "archiveMember": "simple1/Class1.class",
+          "outputName": "simple1_Class1.class",
+          "enabled": true,
+          "notes": "Small JVM class from angr simple1.jar. Exercises IDA java processor and Ghidra JVM p-code/decompiler protocol support."
+        },
+        {
+          "id": "angr-java-simple1-class2",
+          "arch": "java",
+          "tier": "smoke",
+          "path": "tests/java/simple1.jar",
+          "archiveMember": "simple1/Class2.class",
+          "outputName": "simple1_Class2.class",
+          "enabled": true,
+          "notes": "Second JVM class from angr simple1.jar."
+        },
+        {
+          "id": "angr-java-array-operations",
+          "arch": "java",
+          "tier": "extended",
+          "path": "tests/java/array_operations/mixedjava.jar",
+          "archiveMember": "MixedJava.class",
+          "outputName": "MixedJava.class",
+          "enabled": true,
+          "notes": "JVM array-operation class from angr. Good first target for constant-pool and JVM p-code query coverage."
+        },
+        {
+          "id": "angr-java-simple2-class1",
+          "arch": "java",
+          "tier": "extended",
+          "path": "tests/java/simple2.jar",
+          "archiveMember": "simple2/Class1.class",
+          "outputName": "simple2_Class1.class",
+          "enabled": true,
+          "notes": "JVM class from angr simple2.jar. Exercises interface and inner-class metadata adjacent to the code model."
+        },
+        {
+          "id": "angr-java-method-calls",
+          "arch": "java",
+          "tier": "extended",
+          "path": "tests/java/method_calls/mixedjava.jar",
+          "archiveMember": "MixedJava.class",
+          "outputName": "method_calls_MixedJava.class",
+          "enabled": true,
+          "notes": "JVM method-call target from angr. Extends constant-pool and invoke query coverage."
+        },
+        {
+          "id": "angr-java-multiarray-operations",
+          "arch": "java",
+          "tier": "extended",
+          "path": "tests/java/multiarray_operations/mixedjava.jar",
+          "archiveMember": "MixedJava.class",
+          "outputName": "multiarray_operations_MixedJava.class",
+          "enabled": true,
+          "notes": "JVM multiarray target from angr. Good coverage for array types and JVM helper p-code paths."
+        },
+        {
+          "id": "angr-java-object-tracking",
+          "arch": "java",
+          "tier": "extended",
+          "path": "tests/java/object_tracking/mixedjava.jar",
+          "archiveMember": "MixedJava.class",
+          "outputName": "object_tracking_MixedJava.class",
+          "enabled": true,
+          "notes": "JVM object tracking target from angr."
+        },
+        {
+          "id": "angr-java-exceptions1-main",
+          "arch": "java",
+          "tier": "extended",
+          "path": "tests/java/exceptions1.jar",
+          "archiveMember": "exceptions1/Main.class",
+          "outputName": "exceptions1_Main.class",
+          "enabled": true,
+          "notes": "JVM exception-handling target from angr."
+        },
+        {
+          "id": "angr-dalvik-android1-apk",
+          "arch": "dalvik",
+          "tier": "smoke",
+          "path": "tests/java/android1.apk",
+          "archiveMember": "classes.dex",
+          "outputName": "android1_classes.dex",
+          "enabled": true,
+          "notes": "Small Android DEX extracted from angr android1.apk. Exercises IDA dalvik loader/processor and Ghidra Dalvik protocol paths; local aliasing is used until Ghidra's Dalvik ldefs expose IDA-PRO dalvik."
+        },
+        {
+          "id": "angr-mips64-test_arrays",
+          "arch": "mips64",
+          "tier": "smoke",
+          "path": "tests/mips64/test_arrays",
+          "enabled": true,
+          "notes": "Big-endian MIPS64."
+        },
+        {
+          "id": "angr-mips64-test_loops",
+          "arch": "mips64",
+          "tier": "extended",
+          "path": "tests/mips64/test_loops",
+          "enabled": true,
+          "notes": "Big-endian MIPS64."
+        },
+        {
+          "id": "angr-mips64-test_division",
+          "arch": "mips64",
+          "tier": "extended",
+          "path": "tests/mips64/test_division",
+          "enabled": true,
+          "notes": "Big-endian MIPS64."
+        },
+        {
+          "id": "angr-mips64-test_ioctl",
+          "arch": "mips64",
+          "tier": "extended",
+          "path": "tests/mips64/test_ioctl",
+          "enabled": true,
+          "notes": "Big-endian MIPS64 syscall/ioctl-style target."
+        },
+        {
+          "id": "angr-alpha-test-instr",
+          "arch": "alpha",
+          "tier": "upstream",
+          "path": "tests/alpha/test-instr_alpha",
+          "enabled": false,
+          "notes": "Upstream inventory only: angr has an Alpha target, but the local Ghidra 12.1.2 processor audit found no stock decompilable Alpha package/binding for IDA 9.3."
+        },
+        {
+          "id": "angr-s390x-test_arrays",
+          "arch": "s390x",
+          "tier": "upstream",
+          "path": "tests/s390x/test_arrays",
+          "enabled": false,
+          "notes": "Upstream inventory only: angr has S/390x targets, but the local Ghidra 12.1.2 processor audit found no stock decompilable S/390 package/binding for IDA 9.3."
+        }
+      ]
+    }
+  ],
+  "orders": {
+    "x86-first": ["x86_64", "x86_32", "x86_16"],
+    "baseline-expansion": ["x86_64", "x86_32", "x86_16", "armel", "armhf", "aarch64", "mips", "mipsel", "mips64", "ppc", "ppc64", "ppc64el", "riscv64", "java", "dalvik", "m68k", "hppa", "sh4"]
+  }
+}

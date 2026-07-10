@@ -29,26 +29,26 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -70,18 +70,33 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Label="GhidraDecPaths">
+    <X64DBG_SDK_DIR Condition="'$(X64DBG_SDK_DIR)'=='' And '$(X64DBG_DIR)'!=''">$(X64DBG_DIR)\pluginsdk</X64DBG_SDK_DIR>
+    <X64DBG_DEPLOY_DIR Condition="'$(X64DBG_DEPLOY_DIR)'=='' And '$(X64DBG_DIR)'!=''">$(X64DBG_DIR)\release\$(Platform)\plugins</X64DBG_DEPLOY_DIR>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
+    <TargetName>GhidraDec</TargetName>
+    <TargetExt>.dp32</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
+    <TargetName>GhidraDec</TargetName>
+    <TargetExt>.dp32</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
+    <TargetName>GhidraDec</TargetName>
+    <TargetExt>.dp64</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
+    <TargetName>GhidraDec</TargetName>
+    <TargetExt>.dp64</TargetExt>
   </PropertyGroup>
+  <Target Name="ValidateGhidraDecPaths" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(X64DBG_SDK_DIR)'=='' Or !Exists('$(X64DBG_SDK_DIR)\_plugins.h')" Text="Set X64DBG_DIR to an x64dbg snapshot root, or set X64DBG_SDK_DIR directly to the x64dbg pluginsdk directory." />
+  </Target>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -90,13 +105,19 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>C:\Users\Gregory\Desktop\Apps\x64dbg\pluginsdk;C:\qt\5.15.2\msvc2019\include;C:\qt\5.15.2\msvc2019\include\QtCore;C:\qt\5.15.2\msvc2019\include\QtWidgets</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(X64DBG_SDK_DIR);$(X64DBG_SDK_DIR)\jansson;$(X64DBG_SDK_DIR)\lz4;$(X64DBG_SDK_DIR)\XEDParse;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <AdditionalLibraryDirectories>$(X64DBG_SDK_DIR);$(X64DBG_SDK_DIR)\jansson;$(X64DBG_SDK_DIR)\lz4;$(X64DBG_SDK_DIR)\XEDParse;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>x32bridge.lib;x32dbg.lib;jansson_x86.lib;lz4_x86.lib;XEDParse_x86.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>if not "$(X64DBG_DEPLOY_DIR)"=="" if not exist "$(X64DBG_DEPLOY_DIR)" mkdir "$(X64DBG_DEPLOY_DIR)"
+if not "$(X64DBG_DEPLOY_DIR)"=="" copy /Y "$(TargetPath)" "$(X64DBG_DEPLOY_DIR)\"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -108,7 +129,7 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>C:\Users\Gregory\Desktop\Apps\x64dbg\pluginsdk;C:\qt\5.15.2\msvc2019\include;C:\qt\5.15.2\msvc2019\include\QtCore;C:\qt\5.15.2\msvc2019\include\QtWidgets</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(X64DBG_SDK_DIR);$(X64DBG_SDK_DIR)\jansson;$(X64DBG_SDK_DIR)\lz4;$(X64DBG_SDK_DIR)\XEDParse;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -116,7 +137,13 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <AdditionalLibraryDirectories>$(X64DBG_SDK_DIR);$(X64DBG_SDK_DIR)\jansson;$(X64DBG_SDK_DIR)\lz4;$(X64DBG_SDK_DIR)\XEDParse;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>x32bridge.lib;x32dbg.lib;jansson_x86.lib;lz4_x86.lib;XEDParse_x86.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>if not "$(X64DBG_DEPLOY_DIR)"=="" if not exist "$(X64DBG_DEPLOY_DIR)" mkdir "$(X64DBG_DEPLOY_DIR)"
+if not "$(X64DBG_DEPLOY_DIR)"=="" copy /Y "$(TargetPath)" "$(X64DBG_DEPLOY_DIR)\"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -126,13 +153,19 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>C:\Users\Gregory\Desktop\Apps\x64dbg\pluginsdk;C:\qt\5.15.2\msvc2019_64\include;C:\qt\5.15.2\msvc2019_64\include\QtCore;C:\qt\5.15.2\msvc2019_64\include\QtWidgets</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(X64DBG_SDK_DIR);$(X64DBG_SDK_DIR)\jansson;$(X64DBG_SDK_DIR)\lz4;$(X64DBG_SDK_DIR)\XEDParse;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <AdditionalLibraryDirectories>$(X64DBG_SDK_DIR);$(X64DBG_SDK_DIR)\jansson;$(X64DBG_SDK_DIR)\lz4;$(X64DBG_SDK_DIR)\XEDParse;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>x64bridge.lib;x64dbg.lib;jansson_x64.lib;lz4_x64.lib;XEDParse_x64.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>if not "$(X64DBG_DEPLOY_DIR)"=="" if not exist "$(X64DBG_DEPLOY_DIR)" mkdir "$(X64DBG_DEPLOY_DIR)"
+if not "$(X64DBG_DEPLOY_DIR)"=="" copy /Y "$(TargetPath)" "$(X64DBG_DEPLOY_DIR)\"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -144,7 +177,7 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>C:\Users\Gregory\Desktop\Apps\x64dbg\pluginsdk;C:\qt\5.15.2\msvc2019_64\include;C:\qt\5.15.2\msvc2019_64\include\QtCore;C:\qt\5.15.2\msvc2019_64\include\QtWidgets</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(X64DBG_SDK_DIR);$(X64DBG_SDK_DIR)\jansson;$(X64DBG_SDK_DIR)\lz4;$(X64DBG_SDK_DIR)\XEDParse;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -152,29 +185,21 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <AdditionalLibraryDirectories>$(X64DBG_SDK_DIR);$(X64DBG_SDK_DIR)\jansson;$(X64DBG_SDK_DIR)\lz4;$(X64DBG_SDK_DIR)\XEDParse;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>x64bridge.lib;x64dbg.lib;jansson_x64.lib;lz4_x64.lib;XEDParse_x64.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>if not "$(X64DBG_DEPLOY_DIR)"=="" if not exist "$(X64DBG_DEPLOY_DIR)" mkdir "$(X64DBG_DEPLOY_DIR)"
+if not "$(X64DBG_DEPLOY_DIR)"=="" copy /Y "$(TargetPath)" "$(X64DBG_DEPLOY_DIR)\"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="Branding.h" />
-    <ClInclude Include="config.h" />
-    <ClInclude Include="CppSyntaxHighlighter.h" />
-    <ClInclude Include="CxxView.h" />
     <ClInclude Include="framework.h" />
-    <ClInclude Include="GhidraDecView.h" />
-    <ClInclude Include="MainWindow.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="PluginMain.h" />
-    <ClInclude Include="QtPlugin.h" />
-    <ClInclude Include="TextView.h" />
-    <ClInclude Include="Version.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Branding.cpp" />
-    <ClCompile Include="CppSyntaxHighlighter.cpp" />
-    <ClCompile Include="CxxView.cpp" />
     <ClCompile Include="dllmain.cpp" />
-    <ClCompile Include="GhidraDecView.cpp" />
-    <ClCompile Include="MainWindow.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
@@ -182,11 +207,6 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="PluginMain.cpp" />
-    <ClCompile Include="QtPlugin.cpp" />
-    <ClCompile Include="TextView.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="x64dbg-module.qrc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

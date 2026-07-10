@@ -1,0 +1,898 @@
+#!/usr/bin/env python3
+"""Run IDA batch-analysis regression jobs for GhidraDec."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+IDA_SCRIPT = ROOT / "tools" / "ida_batch_decompile_all.py"
+DEFAULT_IDA_93_DIRS = [
+    Path(r"C:\Program Files\IDA Professional 9.3"),
+    Path(r"C:\Program Files\IDA Pro 9.3"),
+    Path(r"C:\Program Files\IDA Free 9.3"),
+]
+WINDOW_DIALOG_PATTERNS = (
+    "license",
+    "not yet accepted",
+    "python 3 is not configured",
+    "unpacked version",
+    "restore packed",
+    "did not close properly",
+    "warning",
+    "hex-rays",
+    "ida has encountered a problem",
+    "encountered a problem",
+    "minidump",
+    "crash",
+    "access violation",
+    "application error",
+)
+DEFAULT_FAILURE_PATTERNS = (
+    "[GhidraDec error]",
+    "Main-thread GhidraDec task failed",
+    "GhidraDec graph callback failed",
+    "Low-level Error:",
+    "Marshaling error:",
+    "Unhandled exception:",
+    "Caught decompilation error:",
+    "Skipped decompiling import function:",
+    "No matching Ghidra processor found",
+    "[ghidradec-batch] FAIL:",
+)
+GRACEFUL_FAILURE_PATTERNS = (
+    "Caught decompilation error:",
+    "Low-level Error:",
+    "Marshaling error:",
+    "[GhidraDec error]",
+    "Skipped decompiling import function:",
+    "No matching Ghidra processor found",
+)
+DANGEROUS_FAILURE_PATTERNS = (
+    "Unhandled exception:",
+    "Main-thread GhidraDec task failed",
+    "GhidraDec graph callback failed",
+    "access violation",
+    "crash",
+    "minidump",
+)
+QUALITY_FAILURE_PATTERNS = (
+    "GhidraDec: no analyzed functions were available for decompilation.",
+    "WARNING: Control flow encountered bad instruction data",
+    "WARNING: Control flow encountered unimplemented instructions",
+    "WARNING: Bad instruction - Truncating control flow here",
+    "WARNING: This function may have set the stack pointer",
+    "WARNING: Read-only address (register",
+    "WARNING: Removing unreachable block",
+    "func_0x",
+    "ram0x",
+    "uRam0000000000000000",
+)
+RUNTIME_HELPER_PREFIXES = (
+    "__libc_csu_",
+    "__do_global_",
+    "__x86.get_pc_thunk",
+    "__x86_",
+    "__libc_",
+    "__tls_",
+    "__m68k_",
+    "__assert_",
+    "__mpn_",
+    "__nptl_",
+    "__gmon_start",
+    "_dl_",
+    "_nl_",
+    "_IO_",
+    "_ITM_",
+    "j_",
+    "nullsub_",
+    "call___do_global_",
+    "call_frame_dummy",
+)
+RUNTIME_HELPER_EXACT = {
+    "_start",
+    "_init",
+    "_fini",
+    "init_proc",
+    "term_proc",
+    "call_gmon_start",
+    "call_fini",
+    "frame_dummy",
+    "deregister_tm_clones",
+    "register_tm_clones",
+    "__do_global_dtors_aux",
+    "__do_global_ctors_aux",
+    "__libc_start_main",
+    "__stack_chk_fail",
+    "_PROCEDURE_LINKAGE_TABLE_",
+    "load_gp",
+    "_dl_start",
+    "abort",
+}
+
+
+def copy_input(input_path: Path, work_dir: Path, refresh: bool) -> Path:
+    work_dir.mkdir(parents=True, exist_ok=True)
+    target = work_dir / input_path.name
+    if refresh or not target.exists():
+        shutil.copy2(input_path, target)
+    return target
+
+
+def helper_match_name(name: str) -> str:
+    normalized = name[1:] if name.startswith(".") else name
+    match = re.match(r"^(.*)_\d+$", normalized)
+    return match.group(1) if match else normalized
+
+
+def is_runtime_helper_name(name: str) -> bool:
+    normalized = name[1:] if name.startswith(".") else name
+    helper_name = helper_match_name(name)
+    if ".plt_call." in normalized or normalized.startswith("plt_call."):
+        return True
+    if normalized in RUNTIME_HELPER_EXACT or helper_name in RUNTIME_HELPER_EXACT:
+        return True
+    return any(
+        normalized.startswith(prefix) or helper_name.startswith(prefix)
+        for prefix in RUNTIME_HELPER_PREFIXES
+    )
+
+
+def is_import_stub_name(name: str, import_names: set[str]) -> bool:
+    if not name.startswith("."):
+        return False
+    normalized = helper_match_name(name)
+    return normalized in import_names
+
+
+def default_idb_path(work_input: Path) -> Path:
+    if work_input.suffix.lower() in {".idb", ".i64"}:
+        return work_input
+    return work_input.with_suffix(work_input.suffix + ".i64")
+
+
+def remove_if_exists(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+
+
+def clean_ida_database_sidecars(work_input: Path, idb_path: Path) -> None:
+    if work_input.suffix.lower() in {".idb", ".i64"}:
+        return
+    remove_if_exists(idb_path)
+    for suffix in (".id0", ".id1", ".id2", ".nam", ".til"):
+        remove_if_exists(work_input.with_suffix(suffix))
+
+
+def stage_plugin_plugins(plugin_spec: str, case_dir: Path) -> tuple[str, Path | None]:
+    names = []
+    ida_user_dir = None
+    for item in plugin_spec.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        plugin_path = Path(item)
+        if plugin_path.exists() and plugin_path.is_file():
+            if ida_user_dir is None:
+                ida_user_dir = case_dir / "ida-user"
+                if ida_user_dir.exists():
+                    shutil.rmtree(ida_user_dir)
+            plugin_dir = ida_user_dir / "plugins"
+            plugin_dir.mkdir(parents=True, exist_ok=True)
+            staged = plugin_dir / f"{plugin_path.stem}_batch{plugin_path.suffix}"
+            shutil.copy2(plugin_path, staged)
+            names.append(staged.stem)
+        else:
+            names.append(item)
+    return ",".join(names), ida_user_dir
+
+
+def case_name(input_path: Path) -> str:
+    digest = hashlib.sha1(str(input_path.resolve()).encode("utf-8")).hexdigest()[:12]
+    return f"{input_path.stem}-{digest}"
+
+
+def find_ida_executable(args: argparse.Namespace) -> Path:
+    if args.ida:
+        return Path(args.ida).resolve()
+
+    candidate_dirs = []
+    if args.ida_dir:
+        candidate_dirs.append(Path(args.ida_dir))
+    if platform.system().lower() == "windows":
+        candidate_dirs.extend(DEFAULT_IDA_93_DIRS)
+
+    names = ["idat.exe", "ida.exe"] if platform.system().lower() == "windows" else ["idat", "ida"]
+    for directory in candidate_dirs:
+        for name in names:
+            candidate = directory / name
+            if candidate.exists():
+                return candidate.resolve()
+    raise SystemExit("IDA executable was not found. Pass --ida or --ida-dir.")
+
+
+def windows_dialog_automation(process_id: int, allow_global_crash_windows: bool = True) -> None:
+    if platform.system().lower() != "windows":
+        return
+
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    enum_windows_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def get_text(hwnd, fn, size=512):
+        buffer = ctypes.create_unicode_buffer(size)
+        fn(hwnd, buffer, size)
+        return buffer.value
+
+    def callback(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+
+        hwnd_value = int(hwnd)
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        title = get_text(hwnd, user32.GetWindowTextW)
+        class_name = get_text(hwnd, user32.GetClassNameW, 256)
+        haystack = f"{title} {class_name}".lower()
+        is_dialog = class_name == "#32770"
+        matched = any(pattern in haystack for pattern in WINDOW_DIALOG_PATTERNS)
+        owned_by_ida = pid.value == process_id
+        crash_window = allow_global_crash_windows and "werfault" in haystack
+        if not ((owned_by_ida and (is_dialog or matched)) or crash_window):
+            return True
+
+        print(
+            f"[ghidradec-batch] accepting dialog hwnd=0x{hwnd_value:08x} pid={pid.value} "
+            f"class='{class_name}' title='{title}'")
+        user32.SetForegroundWindow(hwnd)
+        user32.SendMessageW(hwnd, 0x0111, 1, 0)
+        user32.PostMessageW(hwnd, 0x0100, 0x0D, 0)
+        user32.PostMessageW(hwnd, 0x0101, 0x0D, 0)
+        return True
+
+    user32.EnumWindows(enum_windows_proc(callback), 0)
+
+
+def run_ida(args: argparse.Namespace, ida_args: list[str], env: dict[str, str], case_dir: Path) -> int:
+    deadline = time.monotonic() + args.timeout + args.launch_grace_seconds
+    process_args = ida_args
+    if args.debugger:
+        process_args = [str(Path(args.debugger).resolve())]
+        if args.debugger_child:
+            process_args.append("-o")
+        if args.debugger_initial_go:
+            process_args.extend(["-g", "-G"])
+        if args.debugger_symbols:
+            process_args.extend(["-y", args.debugger_symbols])
+        if args.debugger_command_file:
+            process_args.extend(["-c", f"$$><{Path(args.debugger_command_file).resolve()}"])
+        if args.debugger_command:
+            process_args.extend(["-c", args.debugger_command])
+        process_args.extend(ida_args)
+    process = subprocess.Popen(process_args, env=env, cwd=str(case_dir))
+    try:
+        while True:
+            exit_code = process.poll()
+            if exit_code is not None:
+                return exit_code
+            if time.monotonic() > deadline:
+                print(f"[ghidradec-batch] FAIL: IDA timed out; stopping pid {process.pid}", file=sys.stderr)
+                process.kill()
+                return 124
+            if args.dialog_automation != "off":
+                windows_dialog_automation(process.pid)
+            time.sleep(1)
+    except KeyboardInterrupt:
+        process.terminate()
+        raise
+
+
+def find_incomplete_decompile_all(text: str) -> str | None:
+    for match in re.finditer(r"Decompilation completed: (\d+) successfully decompiled out of (\d+)", text):
+        succeeded = int(match.group(1))
+        total = int(match.group(2))
+        if succeeded != total:
+            return f"incomplete decompile-all: {succeeded}/{total}"
+    return None
+
+
+def find_failure_pattern(args: argparse.Namespace, log_path: Path) -> str | None:
+    if not log_path.exists():
+        return None
+    patterns = []
+    if not args.no_default_fail_log_patterns:
+        patterns.extend(DEFAULT_FAILURE_PATTERNS)
+    patterns.extend(args.fail_log_pattern or [])
+    if not patterns:
+        return None
+    text = log_path.read_text(encoding="utf-8", errors="replace")
+    for pattern in patterns:
+        if pattern in text:
+            return pattern
+    incomplete = find_incomplete_decompile_all(text)
+    if incomplete is not None:
+        return incomplete
+    return None
+
+
+def scan_failure_patterns(args: argparse.Namespace, log_path: Path) -> bool:
+    pattern = find_failure_pattern(args, log_path)
+    if pattern is not None:
+        print(f"[ghidradec-batch] FAIL: log contains failure pattern: {pattern}", file=sys.stderr)
+        return True
+    return False
+
+
+def read_text_if_exists(path: Path, max_bytes: int = 256 * 1024) -> str:
+    if not path.exists():
+        return ""
+    with path.open("rb") as handle:
+        data = handle.read(max_bytes)
+    return data.decode("utf-8", errors="replace")
+
+
+def classify_run_result(exit_code: int, log_path: Path, output_path: Path) -> tuple[str, str]:
+    log_text = read_text_if_exists(log_path)
+    output_text = read_text_if_exists(output_path)
+    combined = log_text + "\n" + output_text
+    lowered = combined.lower()
+    if exit_code == 124:
+        return "dangerous_fail", "IDA process timeout"
+    if platform.system().lower() == "windows":
+        crash_codes = {
+            0xC0000005: "Windows access violation",
+            0xC00000FD: "Windows stack overflow",
+            0xC0000374: "Windows heap corruption",
+            0xC0000409: "Windows stack buffer overrun",
+        }
+        if exit_code in crash_codes:
+            return "dangerous_fail", crash_codes[exit_code]
+    if not output_path.exists():
+        return "dangerous_fail", "output was not created"
+    for pattern in DANGEROUS_FAILURE_PATTERNS:
+        if pattern.lower() in lowered:
+            return "dangerous_fail", pattern
+    for pattern in GRACEFUL_FAILURE_PATTERNS:
+        if pattern in combined:
+            return "graceful_fail", pattern
+    for pattern in QUALITY_FAILURE_PATTERNS:
+        if pattern in combined:
+            return "graceful_fail", pattern
+    incomplete = find_incomplete_decompile_all(combined)
+    if incomplete is not None:
+        return "graceful_fail", incomplete
+    if exit_code == 0:
+        return "success", ""
+    return "dangerous_fail", f"exit code {exit_code}"
+
+
+def classify_gui_like_result(exit_code: int, log_path: Path) -> tuple[str, str]:
+    log_text = read_text_if_exists(log_path)
+    lowered = log_text.lower()
+    if exit_code == 124:
+        return "dangerous_fail", "IDA process timeout"
+    for pattern in DANGEROUS_FAILURE_PATTERNS:
+        if pattern.lower() in lowered:
+            return "dangerous_fail", pattern
+    for pattern in GRACEFUL_FAILURE_PATTERNS:
+        if pattern in log_text:
+            return "graceful_fail", pattern
+    if exit_code == 0 and "Decompilation completed:" in log_text:
+        return "success", ""
+    if exit_code == 0:
+        return "dangerous_fail", "GUI-like run exited without a decompilation completion message"
+    return "dangerous_fail", f"exit code {exit_code}"
+
+
+def validate_output(args: argparse.Namespace, output_path: Path) -> bool:
+    if not output_path.exists():
+        print(f"[ghidradec-batch] FAIL: output was not created: {output_path}", file=sys.stderr)
+        return False
+    size = output_path.stat().st_size
+    if size < args.min_output_bytes:
+        print(
+            f"[ghidradec-batch] FAIL: output is too small: {output_path} ({size} bytes)",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
+def safe_name(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._") or "function"
+
+
+def run_one(
+    args: argparse.Namespace,
+    input_path: Path,
+    *,
+    extra_env: dict[str, str] | None = None,
+    output_path_override: Path | None = None,
+    protocol_log_override: Path | None = None,
+    log_name: str = "ida-batch.log",
+    plugin_arg_override: int | None = None,
+    validate_output_file: bool = True,
+    scan_log: bool = True,
+) -> int:
+    work_root = Path(args.work_dir).resolve()
+    case_dir = work_root / case_name(input_path)
+    work_input = copy_input(input_path.resolve(), case_dir, args.refresh)
+    output_path = output_path_override or (case_dir / (work_input.name + ".c"))
+    done_path = output_path.with_suffix(output_path.suffix + ".done")
+    idb_path = Path(args.save_idb).resolve() if args.save_idb else default_idb_path(work_input)
+    log_path = case_dir / log_name
+    protocol_log_path = protocol_log_override or (case_dir / "ghidradec-protocol.log")
+    remove_if_exists(log_path)
+    remove_if_exists(done_path)
+    if output_path_override is not None:
+        remove_if_exists(output_path_override)
+    remove_if_exists(protocol_log_path)
+    if not args.reuse_database:
+        clean_ida_database_sidecars(work_input, idb_path)
+    plugin_names, ida_user_dir = stage_plugin_plugins(args.plugin, case_dir)
+
+    env = os.environ.copy()
+    env["GHIDRADEC_BATCH_INPUT"] = str(work_input)
+    if not args.gui_like:
+        env["GHIDRADEC_BATCH_OUTPUT"] = str(output_path)
+    else:
+        env.pop("GHIDRADEC_BATCH_OUTPUT", None)
+    env["GHIDRADEC_BATCH_DONE"] = str(done_path)
+    env["GHIDRADEC_BATCH_SAVE_IDB"] = str(idb_path) if args.save_database else ""
+    env["GHIDRADEC_BATCH_PLUGIN"] = plugin_names
+    env["GHIDRADEC_BATCH_PLUGIN_ARG"] = str(plugin_arg_override if plugin_arg_override is not None else args.plugin_arg)
+    env["GHIDRADEC_BATCH_TIMEOUT"] = str(args.timeout)
+    env["GHIDRADEC_BATCH_STABLE_POLLS"] = str(args.stable_polls)
+    env["GHIDRADEC_BATCH_MIN_OUTPUT_BYTES"] = str(args.min_output_bytes)
+    env["GHIDRADEC_BATCH_FUNCTION_START_INDEX"] = str(args.function_start_index)
+    env["GHIDRADEC_BATCH_FUNCTION_MAX"] = str(args.function_max)
+    env["GHIDRADEC_BATCH_CLEAN_OUTPUT"] = "1"
+    env["GHIDRADEC_TEST_SKIP_PARAMID"] = "0" if args.paramid else "1"
+    env["GHIDRADEC_TEST_GUI_LIKE"] = "1" if args.gui_like else "0"
+    env["GHIDRADEC_TEST_SHOW_VIEWER"] = "1" if args.show_viewer else "0"
+    env["GHIDRADEC_TEST_FORCE_ANALYSIS_DUMP"] = "1" if args.force_analysis_dump else "0"
+    env["GHIDRADEC_TEST_LIVE_CALLBACKS"] = "1" if args.live_callbacks else "0"
+    env["GHIDRADEC_TEST_ASYNC"] = "1" if args.gui_like or args.force_analysis_dump or args.live_callbacks else "0"
+    env["GHIDRADEC_TEST_TIMEOUT"] = str(args.timeout)
+    env["GHIDRADEC_TRACE"] = "1" if args.trace else "0"
+    env["GHIDRADEC_PROTOCOL_LOG"] = str(protocol_log_path)
+    if ida_user_dir is not None:
+        env["IDAUSR"] = str(ida_user_dir)
+        print(f"[ghidradec-batch] staged plugin(s) in IDAUSR={ida_user_dir}")
+    if args.ghidra_dir:
+        env["GHIDRADEC_BATCH_GHIDRA"] = str(Path(args.ghidra_dir).resolve())
+        env["GHIDRADEC_GHIDRA_DIR"] = env["GHIDRADEC_BATCH_GHIDRA"]
+        env["GHIDRA_INSTALL_DIR"] = env["GHIDRADEC_BATCH_GHIDRA"]
+    if extra_env:
+        env.update(extra_env)
+
+    ida_args = [str(Path(args.ida).resolve())]
+    if args.batch:
+        ida_args.append("-A")
+    ida_args.extend([f"-L{log_path}", f"-S{IDA_SCRIPT}", str(work_input)])
+
+    print(f"[ghidradec-batch] {input_path} -> {case_dir}")
+    exit_code = 0
+    try:
+        exit_code = run_ida(args, ida_args, env, case_dir)
+        if scan_log and exit_code == 0 and scan_failure_patterns(args, log_path):
+            exit_code = 8
+        if validate_output_file and exit_code == 0 and not validate_output(args, output_path):
+            exit_code = 9
+        return exit_code
+    finally:
+        if log_path.exists() and args.print_log_tail > 0:
+            lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            for line in lines[-args.print_log_tail:]:
+                print(line)
+
+
+def function_list_path(args: argparse.Namespace, input_path: Path) -> Path:
+    return Path(args.work_dir).resolve() / case_name(input_path) / "functions.json"
+
+
+def list_functions(args: argparse.Namespace, input_path: Path) -> list[dict[str, object]]:
+    path = function_list_path(args, input_path)
+    debugger = args.debugger
+    args.debugger = None
+    try:
+        code = run_one(
+            args,
+            input_path,
+            extra_env={"GHIDRADEC_BATCH_LIST_FUNCTIONS": str(path)},
+            log_name="ida-list-functions.log",
+            validate_output_file=False,
+            scan_log=False,
+        )
+    finally:
+        args.debugger = debugger
+    if code != 0:
+        raise RuntimeError(f"IDA function listing failed with exit code {code}")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return list(data.get("functions", []))
+
+
+def normal_result(args: argparse.Namespace, input_path: Path, exit_code: int) -> dict[str, object]:
+    case_dir = Path(args.work_dir).resolve() / case_name(input_path)
+    work_input = case_dir / input_path.name
+    output_path = case_dir / (work_input.name + ".c")
+    log_path = case_dir / "ida-batch.log"
+    done_path = output_path.with_suffix(output_path.suffix + ".done")
+    outcome, reason = classify_run_result(exit_code, log_path, output_path)
+    return {
+        "input": str(input_path),
+        "case_dir": str(case_dir),
+        "log": str(log_path),
+        "output": str(output_path),
+        "done": str(done_path),
+        "exit_code": exit_code,
+        "outcome": outcome,
+        "reason": reason,
+        "output_bytes": output_path.stat().st_size if output_path.exists() else 0,
+        "passed": outcome == "success",
+    }
+
+
+def run_individual_functions(args: argparse.Namespace, input_path: Path) -> int:
+    functions = list_functions(args, input_path)
+    if args.individual_ea:
+        wanted = set()
+        for value in args.individual_ea:
+            for item in value.split(","):
+                item = item.strip()
+                if item:
+                    wanted.add(int(item, 0))
+        selected = [(index, function) for index, function in enumerate(functions) if int(function["ea"]) in wanted]
+        found = {int(function["ea"]) for _, function in selected}
+        missing = sorted(wanted - found)
+        for ea in missing:
+            print(f"[ghidradec-batch] missing requested function @ 0x{ea:x}", file=sys.stderr)
+    else:
+        start = max(0, args.individual_start_index)
+        import_names = {
+            helper_match_name(str(function.get("name") or ""))
+            for function in functions
+            if bool(function.get("is_import"))
+        }
+        candidates = [
+            (index, function) for index, function in enumerate(functions)
+            if not is_runtime_helper_name(str(function.get("name") or ""))
+            and (
+                args.include_import_functions
+                or (
+                    not bool(function.get("is_import"))
+                    and not is_import_stub_name(str(function.get("name") or ""), import_names)
+                )
+            )
+        ]
+        if not candidates and functions:
+            candidates = [
+                (index, function) for index, function in enumerate(functions)
+                if (
+                    args.include_import_functions
+                    or (
+                        not bool(function.get("is_import"))
+                        and not is_import_stub_name(str(function.get("name") or ""), import_names)
+                    )
+                )
+            ]
+            if candidates:
+                print(
+                    "[ghidradec-batch] all functions were helper-named; "
+                    "including helper names for this tiny target"
+                )
+        skipped = len(functions) - len(candidates)
+        if skipped:
+            print(
+                f"[ghidradec-batch] skipped {skipped} runtime/helper/import function(s) "
+                "before individual sampling"
+            )
+        selected = candidates[start:]
+        if args.individual_max > 0:
+            selected = selected[:args.individual_max]
+    if not selected:
+        print(f"[ghidradec-batch] FAIL: no functions selected for {input_path}", file=sys.stderr)
+        return 1
+
+    case_dir = Path(args.work_dir).resolve() / case_name(input_path)
+    output_dir = case_dir / "individual"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    summary = []
+    counts = {"success": 0, "graceful_fail": 0, "dangerous_fail": 0}
+    for index, function in selected:
+        ea = int(function["ea"])
+        ea_hex = f"0x{ea:x}"
+        name = str(function.get("name") or ea_hex)
+        stem = f"{index:05d}_{ea:x}_{safe_name(name)}"
+        output_path = output_dir / f"{stem}.c"
+        protocol_path = output_dir / f"{stem}.protocol.log"
+        log_name = f"individual/{stem}.log"
+        print(f"[ghidradec-batch] individual {index + 1}/{len(functions)} {name} @ {ea_hex}")
+        original_min_output_bytes = args.min_output_bytes
+        args.min_output_bytes = args.individual_min_output_bytes
+        try:
+            code = run_one(
+                args,
+                input_path,
+                extra_env={"GHIDRADEC_BATCH_SELECT_EA": ea_hex},
+                output_path_override=output_path,
+                protocol_log_override=protocol_path,
+                log_name=log_name,
+                plugin_arg_override=4,
+                validate_output_file=not args.gui_like,
+            )
+        finally:
+            args.min_output_bytes = original_min_output_bytes
+        size = output_path.stat().st_size if output_path.exists() else 0
+        log_path = case_dir / log_name
+        if args.gui_like:
+            outcome, reason = classify_gui_like_result(code, log_path)
+        else:
+            outcome, reason = classify_run_result(code, log_path, output_path)
+        counts[outcome] += 1
+        passed = outcome == "success"
+        if not passed:
+            print(f"[ghidradec-batch] {outcome}: {name} @ {ea_hex}: {reason}", file=sys.stderr)
+        summary.append({
+            "ea": ea,
+            "ea_hex": ea_hex,
+            "name": name,
+            "output": str(output_path),
+            "protocol_log": str(protocol_path),
+            "log": str(log_path),
+            "exit_code": code,
+            "outcome": outcome,
+            "reason": reason,
+            "output_bytes": size,
+            "passed": passed,
+        })
+
+    summary_path = output_dir / "summary.json"
+    summary_path.write_text(json.dumps({
+        "input": str(input_path),
+        "total_functions": len(functions),
+        "selected_functions": len(selected),
+        "passed": counts["success"],
+        "failed": counts["graceful_fail"] + counts["dangerous_fail"],
+        "success": counts["success"],
+        "graceful_fail": counts["graceful_fail"],
+        "dangerous_fail": counts["dangerous_fail"],
+        "results": summary,
+    }, indent=2, sort_keys=True), encoding="utf-8")
+    print(
+        f"[ghidradec-batch] individual summary: {counts['success']}/{len(selected)} success, "
+        f"{counts['graceful_fail']} graceful_fail, {counts['dangerous_fail']} dangerous_fail; "
+        f"{summary_path}"
+    )
+    return 1 if counts["graceful_fail"] or counts["dangerous_fail"] else 0
+
+
+def individual_result(args: argparse.Namespace, input_path: Path, exit_code: int) -> dict[str, object]:
+    case_dir = Path(args.work_dir).resolve() / case_name(input_path)
+    summary_path = case_dir / "individual" / "summary.json"
+    if not summary_path.exists():
+        return {
+            "input": str(input_path),
+            "case_dir": str(case_dir),
+            "summary": str(summary_path),
+            "exit_code": exit_code,
+            "outcome": "dangerous_fail",
+            "reason": "individual summary missing",
+            "passed": False,
+        }
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    graceful = int(summary.get("graceful_fail", 0))
+    dangerous = int(summary.get("dangerous_fail", 0))
+    success = int(summary.get("success", 0))
+    selected = int(summary.get("selected_functions", 0))
+    if dangerous:
+        outcome = "dangerous_fail"
+        reason = f"{dangerous} individual dangerous failure(s)"
+    elif graceful:
+        outcome = "graceful_fail"
+        reason = f"{graceful} individual graceful failure(s)"
+    elif exit_code == 0:
+        outcome = "success"
+        reason = f"{success}/{selected} individual functions passed"
+    else:
+        outcome = "dangerous_fail"
+        reason = f"exit code {exit_code}"
+    return {
+        "input": str(input_path),
+        "case_dir": str(case_dir),
+        "summary": str(summary_path),
+        "exit_code": exit_code,
+        "outcome": outcome,
+        "reason": reason,
+        "selected_functions": selected,
+        "success": success,
+        "graceful_fail": graceful,
+        "dangerous_fail": dangerous,
+        "passed": outcome == "success",
+    }
+
+
+def expand_inputs(values: list[str]) -> list[Path]:
+    result: list[Path] = []
+    for value in values:
+        path = Path(value)
+        if path.is_dir():
+            for child in sorted(path.rglob("*")):
+                if child.is_file():
+                    result.append(child)
+        else:
+            result.append(path)
+    return result
+
+
+def read_input_lists(paths: list[str]) -> list[str]:
+    values = []
+    for path_text in paths:
+        path = Path(path_text)
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip().lstrip("\ufeff")
+            if line and not line.startswith("#"):
+                values.append(line)
+    return values
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser.add_argument("--ida", help="Path to idat/idat64/ida/ida64")
+    parser.add_argument("--ida-dir", help="IDA 9.3 installation directory; used when --ida is omitted")
+    parser.add_argument("--ghidra-dir", help="Ghidra installation used by the plugin")
+    parser.add_argument("--work-dir", default=str(ROOT / "build" / "ida-regression"))
+    parser.add_argument("--plugin", default="ghidradec64,ghidradec")
+    parser.add_argument("--plugin-arg", type=int, default=5, help="Plugin argument; 5 is unattended decompile-all")
+    parser.add_argument(
+        "--paramid",
+        action="store_true",
+        help="Enable Ghidra parameter identification during the run; smoke tests skip it by default",
+    )
+    parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--launch-grace-seconds", type=int, default=30)
+    parser.add_argument("--stable-polls", type=int, default=3)
+    parser.add_argument("--min-output-bytes", type=int, default=64)
+    parser.add_argument("--individual-min-output-bytes", type=int, default=1)
+    parser.add_argument(
+        "--gui-like",
+        action="store_true",
+        help="For individual functions, exercise the GUI selective path without batch outputFile",
+    )
+    parser.add_argument(
+        "--show-viewer",
+        action="store_true",
+        help="In GUI-like individual runs, do not suppress the decompiler viewer",
+    )
+    parser.add_argument(
+        "--force-analysis-dump",
+        action="store_true",
+        help="For individual function runs, prepend the GUI analysis header/prologue even when writing a batch output file",
+    )
+    parser.add_argument(
+        "--live-callbacks",
+        action="store_true",
+        help="Disable broad batch byte/symbol preloads so decompiler queries exercise live IDA callbacks",
+    )
+    parser.add_argument("--save-database", action="store_true", help="Save the analyzed IDB/I64 before decompiling")
+    parser.add_argument("--save-idb", help="Explicit save path for a single input database")
+    parser.add_argument("--refresh", action="store_true", help="Refresh copied inputs in the work directory")
+    parser.add_argument("--reuse-database", action="store_true", help="Reuse an existing IDB/I64 next to the staged input")
+    parser.add_argument("--no-batch", dest="batch", action="store_false")
+    parser.add_argument("--dialog-automation", choices=["auto", "off"], default="auto")
+    parser.add_argument("--fail-log-pattern", action="append", default=[], help="Additional log substring that fails a run")
+    parser.add_argument("--no-default-fail-log-patterns", action="store_true")
+    parser.add_argument("--print-log-tail", type=int, default=80)
+    parser.add_argument("--trace", dest="trace", action="store_true", default=True, help="Enable GhidraDec trace logging in IDA")
+    parser.add_argument("--no-trace", dest="trace", action="store_false", help="Disable GhidraDec trace logging in IDA")
+    parser.add_argument("--input", dest="input_paths", action="append", default=[], help="Input path; repeatable")
+    parser.add_argument("--input-list", action="append", default=[], help="Newline-delimited input path list")
+    parser.add_argument("--summary-json", help="Write a JSON summary for normal decompile-all runs")
+    parser.add_argument(
+        "--individual-functions",
+        action="store_true",
+        help="Run one isolated plugin invocation per analyzed function and write an individual coverage summary",
+    )
+    parser.add_argument("--individual-start-index", type=int, default=0)
+    parser.add_argument("--individual-max", type=int, default=0, help="Maximum individual functions to run; 0 means all")
+    parser.add_argument("--include-import-functions", action="store_true", help="Include import-table entries in individual runs")
+    parser.add_argument("--function-start-index", type=int, default=0, help="First all-decompile function index to process")
+    parser.add_argument("--function-max", type=int, default=0, help="Maximum all-decompile functions to process; 0 means all")
+    parser.add_argument(
+        "--individual-ea",
+        action="append",
+        default=[],
+        help="Run only matching function entry addresses; accepts hex/decimal values and comma-delimited lists",
+    )
+    parser.add_argument("--debugger", help="Launch IDA under a debugger such as cdb.exe")
+    parser.add_argument("--debugger-command", help="Debugger command string passed with cdb/windbg -c")
+    parser.add_argument("--debugger-command-file", help="Debugger command file loaded with cdb/windbg $$><")
+    parser.add_argument("--debugger-symbols", help="Debugger symbol path passed with cdb/windbg -y")
+    parser.add_argument("--debugger-child", action="store_true", help="Ask cdb/windbg to debug child processes")
+    parser.add_argument(
+        "--no-debugger-initial-go",
+        dest="debugger_initial_go",
+        action="store_false",
+        help="Do not pass -g -G to cdb/windbg",
+    )
+    parser.set_defaults(debugger_initial_go=True)
+    parser.add_argument("inputs", nargs="*")
+    args = parser.parse_args()
+
+    args.inputs = read_input_lists(args.input_list) + args.input_paths + args.inputs
+    if not args.inputs:
+        raise SystemExit("No inputs were provided.")
+
+    ida = find_ida_executable(args)
+    args.ida = str(ida)
+    if not ida.exists():
+        raise SystemExit(f"IDA executable was not found: {ida}")
+    if not IDA_SCRIPT.exists():
+        raise SystemExit(f"IDA-side script was not found: {IDA_SCRIPT}")
+    if args.save_idb and len(args.inputs) != 1:
+        raise SystemExit("--save-idb can only be used with a single input")
+
+    failures = 0
+    normal_results = []
+    for input_path in expand_inputs(args.inputs):
+        if not input_path.exists() or not input_path.is_file():
+            print(f"[ghidradec-batch] FAIL: input not found: {input_path}", file=sys.stderr)
+            failures += 1
+            normal_results.append({
+                "input": str(input_path),
+                "exit_code": 1,
+                "outcome": "dangerous_fail",
+                "reason": "input not found",
+                "passed": False,
+            })
+            continue
+        if args.individual_functions:
+            code = run_individual_functions(args, input_path)
+            result = individual_result(args, input_path, code)
+        else:
+            code = run_one(args, input_path)
+            result = normal_result(args, input_path, code)
+        normal_results.append(result)
+        if not bool(result.get("passed", False)):
+            failures += 1
+            reason = str(result.get("reason", "") or f"exit code {code}")
+            print(f"[ghidradec-batch] FAIL: {input_path}: {reason}", file=sys.stderr)
+        else:
+            print(f"[ghidradec-batch] PASS: {input_path}")
+    if args.summary_json:
+        counts = {"success": 0, "graceful_fail": 0, "dangerous_fail": 0}
+        for result in normal_results:
+            outcome = str(result.get("outcome", "dangerous_fail"))
+            counts[outcome] = counts.get(outcome, 0) + 1
+        summary_path = Path(args.summary_json).resolve()
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(json.dumps({
+            "inputs": len(normal_results),
+            "passed": counts.get("success", 0),
+            "failed": counts.get("graceful_fail", 0) + counts.get("dangerous_fail", 0),
+            "success": counts.get("success", 0),
+            "graceful_fail": counts.get("graceful_fail", 0),
+            "dangerous_fail": counts.get("dangerous_fail", 0),
+            "results": normal_results,
+        }, indent=2, sort_keys=True), encoding="utf-8")
+        print(f"[ghidradec-batch] wrote summary {summary_path}")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

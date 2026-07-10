@@ -1,0 +1,230 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      ida_versions:
+        description: "IDA SDK versions to publish: 9.3, latest, 7.7, major groups 6/7/8/9, comma lists, or all"
+        type: string
+        default: "9.3"
+      private_sdk_base_url:
+        description: "Optional temporary base URL for private SDK archives; may include a short-lived path token"
+        type: string
+        default: ""
+      private_sdk_token:
+        description: "Optional bearer token for private SDK downloads; prefer short-lived values"
+        type: string
+        default: ""
+      rebuild_existing_assets:
+        description: "Rebuild versions even when matching release assets already exist"
+        type: boolean
+        default: false
+      macos_host_arches:
+        description: "macOS host architectures to build: all, x64, arm64, or x64,arm64"
+        type: string
+        default: "x64,arm64"
+
+permissions:
+  contents: write
+
+jobs:
+  validate-ref:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require an official tag
+        if: ${{ github.event_name != 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        run: |
+          echo "The release workflow publishes permanent assets only from an existing tag." >&2
+          echo "In Actions, choose Run workflow, then select the official release tag instead of a branch." >&2
+          exit 1
+      - name: Branch run is package-only
+        if: ${{ github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        run: |
+          echo "Manual branch run: building package artifacts only."
+          echo "The publish job is skipped unless the workflow runs on an official tag."
+
+  matrix:
+    needs: validate-ref
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: existing-assets
+        name: Load existing release assets
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG_NAME" --json assets --jq '.assets[].name' > existing-assets.txt 2>/dev/null || true
+          count="$(wc -l < existing-assets.txt | tr -d ' ')"
+          echo "Loaded $count existing release asset names for $TAG_NAME."
+      - id: matrix
+        shell: bash
+        run: |
+          args=()
+          versions="${{ github.event.inputs.ida_versions }}"
+          if [[ -z "$versions" ]]; then
+            versions="9.3"
+          fi
+          if [[ "$versions" == "all" ]]; then
+            args+=(--all)
+          else
+            args+=(--versions "$versions")
+          fi
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            args+=(--include-private)
+          fi
+          if [[ -f existing-assets.txt && "${{ inputs.rebuild_existing_assets }}" != "true" ]]; then
+            args+=(--existing-assets-file existing-assets.txt)
+          fi
+          if [[ "${{ inputs.rebuild_existing_assets }}" == "true" ]]; then
+            args+=(--rebuild-existing)
+          fi
+          if [[ -n "${{ inputs.macos_host_arches }}" && "${{ inputs.macos_host_arches }}" != "all" ]]; then
+            args+=(--macos-host-arches "${{ inputs.macos_host_arches }}")
+          fi
+          if [[ ! -f existing-assets.txt ]]; then
+            args+=(--require-nonempty)
+          fi
+          echo "matrix=$(python tools/ida_sdk.py matrix "${args[@]}")" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: matrix
+    if: ${{ fromJson(needs.matrix.outputs.matrix).include[0] != null }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Mask private SDK URL/token
+        if: ${{ matrix.sdk_source != 'public-release' && matrix.sdk_source != 'public-branch' }}
+        shell: bash
+        env:
+          PRIVATE_SDK_BASE_URL: ${{ inputs.private_sdk_base_url }}
+          PRIVATE_SDK_TOKEN: ${{ inputs.private_sdk_token }}
+        run: |
+          if [[ -n "$PRIVATE_SDK_BASE_URL" ]]; then
+            echo "::add-mask::$PRIVATE_SDK_BASE_URL"
+          fi
+          if [[ -n "$PRIVATE_SDK_TOKEN" ]]; then
+            echo "::add-mask::$PRIVATE_SDK_TOKEN"
+          fi
+
+      - name: Fetch private IDA SDK archive
+        if: ${{ matrix.sdk_source != 'public-release' && matrix.sdk_source != 'public-branch' }}
+        shell: bash
+        env:
+          GHIDRADEC_PRIVATE_SDK_BASE_URL: ${{ inputs.private_sdk_base_url }}
+          GHIDRADEC_PRIVATE_SDK_TOKEN: ${{ inputs.private_sdk_token }}
+          GHIDRADEC_PRIVATE_SDK_FETCH_RETRIES: "12"
+          GHIDRADEC_PRIVATE_SDK_FETCH_RETRY_DELAY: "45"
+        run: |
+          if [[ -z "$GHIDRADEC_PRIVATE_SDK_BASE_URL" ]]; then
+            echo "private_sdk_base_url is required for private IDA SDK ${{ matrix.ida }}." >&2
+            echo "Start tools/private_sdk_server.py, expose it with a short-lived HTTPS tunnel, then rerun this workflow on the release tag." >&2
+            exit 1
+          fi
+          python tools/ida_sdk.py fetch-private --version "${{ matrix.ida }}"
+
+      - name: Prepare IDA SDK
+        shell: bash
+        run: python tools/ida_sdk.py ensure --version "${{ matrix.ida }}"
+
+      - name: Prepare Ghidra decompiler sources
+        shell: bash
+        run: python tools/deps.py ensure-ghidra-sources
+
+      - name: Configure
+        shell: bash
+        run: |
+          configure_args=(
+            -S .
+            -B "build/ida-${{ matrix.ida }}"
+            -DGHIDRADEC_IDA_VERSION="${{ matrix.ida }}"
+            -DCMAKE_BUILD_TYPE=Release
+          )
+          if [[ -n "${{ matrix.cmake_platform }}" ]]; then
+            configure_args+=(-A "${{ matrix.cmake_platform }}")
+          fi
+          if [[ -n "${{ matrix.cmake_osx_arch }}" ]]; then
+            configure_args+=(-DCMAKE_OSX_ARCHITECTURES="${{ matrix.cmake_osx_arch }}")
+          fi
+          cmake "${configure_args[@]}"
+
+      - name: Build package
+        shell: bash
+        run: |
+          cmake --build "build/ida-${{ matrix.ida }}" --config Release --parallel
+          cmake --build "build/ida-${{ matrix.ida }}" --config Release --target package_plugins
+
+      - id: package-name
+        name: Determine package artifact name
+        shell: bash
+        run: |
+          shopt -s nullglob
+          packages=(build/ida-${{ matrix.ida }}/artifacts/*.zip)
+          if [[ "${#packages[@]}" -ne 1 ]]; then
+            echo "Expected exactly one package ZIP, found ${#packages[@]}." >&2
+            printf '  %s\n' "${packages[@]}" >&2
+            exit 1
+          fi
+          package_name="$(basename "${packages[0]}" .zip)"
+          echo "name=$package_name" >> "$GITHUB_OUTPUT"
+          echo "Workflow artifact name: $package_name"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package-name.outputs.name }}
+          path: build/ida-${{ matrix.ida }}/artifacts/*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - id: missing-assets
+        name: Keep only missing release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          mkdir -p upload
+          existing="$(gh release view "$TAG_NAME" --json assets --jq '.assets[].name' 2>/dev/null || true)"
+          shopt -s nullglob
+          for file in dist/*.zip; do
+            name="$(basename "$file")"
+            if grep -Fxq "$name" <<< "$existing"; then
+              echo "Skipping existing release asset: $name"
+            else
+              cp "$file" upload/
+            fi
+          done
+          if compgen -G "upload/*.zip" > /dev/null; then
+            echo "has_uploads=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_uploads=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: softprops/action-gh-release@v2
+        if: ${{ steps.missing-assets.outputs.has_uploads == 'true' }}
+        with:
+          files: upload/*.zip
+          draft: false
+          make_latest: false
+          overwrite_files: false

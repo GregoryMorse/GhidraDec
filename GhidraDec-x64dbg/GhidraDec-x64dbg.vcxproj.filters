@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -6,12 +6,8 @@
       <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
     </Filter>
     <Filter Include="Header Files">
-      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-6259A8D21A66}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
-    </Filter>
-    <Filter Include="Resource Files">
-      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
-      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -22,34 +18,7 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="PluginMain.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="QtPlugin.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="GhidraDecView.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MainWindow.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Branding.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="config.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Version.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="CxxView.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="TextView.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="CppSyntaxHighlighter.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -62,31 +31,5 @@
     <ClCompile Include="PluginMain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="QtPlugin.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="GhidraDecView.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MainWindow.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Branding.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="CxxView.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="TextView.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="CppSyntaxHighlighter.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="x64dbg-module.qrc">
-      <Filter>Source Files</Filter>
-    </None>
   </ItemGroup>
 </Project>

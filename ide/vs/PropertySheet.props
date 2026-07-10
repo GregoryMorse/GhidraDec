@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ImportGroup Label="PropertySheets" />
+  <PropertyGroup Label="UserMacros">
+    <GhidraDecRoot Condition="'$(GhidraDecRoot)'==''">$(MSBuildThisFileDirectory)..\..\</GhidraDecRoot>
+    <WIN_FLEX_BISON_PATH Condition="'$(WIN_FLEX_BISON_PATH)'==''">$(WIN_FLEX_BISON_DIR)</WIN_FLEX_BISON_PATH>
+    <IDA_SDK_DIR Condition="'$(IDA_SDK_DIR)'==''">$(IDA_SDK_93_DIR)</IDA_SDK_DIR>
+    <IDA_SDK_DIR32 Condition="'$(IDA_SDK_DIR32)'==''">$(IDA_SDK_68_DIR)</IDA_SDK_DIR32>
+    <IDA_DEPLOY Condition="'$(IDA_DEPLOY)'==''">$(IDA_DIR)</IDA_DEPLOY>
+    <IDA_DEPLOY32 Condition="'$(IDA_DEPLOY32)'==''">$(IDA32_DIR)</IDA_DEPLOY32>
+  </PropertyGroup>
+  <PropertyGroup>
+    <GhidraDecMsvcBuildRoot Condition="'$(GhidraDecMsvcBuildRoot)'==''">$(GhidraDecRoot)build\msvc\</GhidraDecMsvcBuildRoot>
+    <GhidraDecMsvcProjectName Condition="'$(GhidraDecMsvcProjectName)'==''">$(MSBuildProjectName)</GhidraDecMsvcProjectName>
+    <GhidraDecGeneratedDeps Condition="'$(GhidraDecGeneratedDeps)'==''">$(GhidraDecRoot)build\deps\</GhidraDecGeneratedDeps>
+    <GhidraDecJsoncppSourceDir Condition="'$(GhidraDecJsoncppSourceDir)'==''">$(GhidraDecGeneratedDeps)jsoncpp\jsoncpp-project-prefix\src\jsoncpp-project\</GhidraDecJsoncppSourceDir>
+    <GhidraDecRetdecSourceDir Condition="'$(GhidraDecRetdecSourceDir)'==''">$(GhidraDecGeneratedDeps)retdec\retdec-project-prefix\src\retdec-project\</GhidraDecRetdecSourceDir>
+    <GhidraDecWhereamiSourceDir Condition="'$(GhidraDecWhereamiSourceDir)'==''">$(GhidraDecRetdecSourceDir)deps\whereami\</GhidraDecWhereamiSourceDir>
+    <GhidraDecDecompileSourceDir Condition="'$(GhidraDecDecompileSourceDir)'==''">$(GhidraDecGeneratedDeps)ghidra-decompiler\decompile\</GhidraDecDecompileSourceDir>
+    <OutDir>$(GhidraDecMsvcBuildRoot)bin\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(GhidraDecMsvcBuildRoot)obj\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <GhidraDecIdaSdkInclude Condition="'$(Platform)'=='Win32'">$(IDA_SDK_DIR32)\include</GhidraDecIdaSdkInclude>
+    <GhidraDecIdaSdkInclude Condition="'$(Platform)'!='Win32'">$(IDA_SDK_DIR)\include</GhidraDecIdaSdkInclude>
+    <GhidraDecExternalIncludes>$(GhidraDecIdaSdkInclude);$(GhidraDecJsoncppSourceDir)include;$(GhidraDecRetdecSourceDir)include;$(GhidraDecDecompileSourceDir);$(GhidraDecDecompileSourceDir)zlib;$(GhidraDecWhereamiSourceDir)</GhidraDecExternalIncludes>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <ExternalIncludeDirectories>$(GhidraDecExternalIncludes);%(ExternalIncludeDirectories)</ExternalIncludeDirectories>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <AdditionalOptions>/external:I "$(GhidraDecIdaSdkInclude)" /external:I "$(GhidraDecJsoncppSourceDir)include" /external:I "$(GhidraDecRetdecSourceDir)include" /external:I "$(GhidraDecDecompileSourceDir)" /external:I "$(GhidraDecDecompileSourceDir)zlib" /external:I "$(GhidraDecWhereamiSourceDir)" %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <BuildMacro Include="GhidraDecRoot">
+      <Value>$(GhidraDecRoot)</Value>
+    </BuildMacro>
+    <BuildMacro Include="WIN_FLEX_BISON_PATH">
+      <Value>$(WIN_FLEX_BISON_PATH)</Value>
+    </BuildMacro>
+    <BuildMacro Include="IDA_SDK_DIR">
+      <Value>$(IDA_SDK_DIR)</Value>
+    </BuildMacro>
+    <BuildMacro Include="IDA_SDK_DIR32">
+      <Value>$(IDA_SDK_DIR32)</Value>
+    </BuildMacro>
+    <BuildMacro Include="IDA_DEPLOY">
+      <Value>$(IDA_DEPLOY)</Value>
+    </BuildMacro>
+    <BuildMacro Include="IDA_DEPLOY32">
+      <Value>$(IDA_DEPLOY32)</Value>
+    </BuildMacro>
+  </ItemGroup>
+</Project>

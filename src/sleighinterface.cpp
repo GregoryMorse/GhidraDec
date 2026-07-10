@@ -1,0 +1,5774 @@
+//Java has its own entire Sleigh library implementation used by Ghidra UI app:
+//Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/program/model/lang
+//In C the equivalent is building a custom one starting with:
+//Ghidra/Features/Decompiler/src/decompile/cpp/sleighexample.cc
+//Requires source:
+//SLEIGH=sleigh pcodeparse pcodecompile sleighbase slghsymbol
+//  slghpatexpress slghpattern semantics context filemanage
+//CORE=	xml space float address pcoderaw translate opcodes globalcontext
+//LIBSLA_NAMES=$(CORE) $(SLEIGH) loadimage sleigh memstate emulate opbehavior
+//also types.h error.hh partmap.hh
+//address.cc conflicts with address.cpp of retdec so rename it to address_.cpp
+//pcodeparse.y and xml.y require: https://sourceforge.net/projects/winflexbison/
+//Project->Build Dependencies->Build Customizations... Find Targets win_flex_bison\custom_build_rules\win_flex_bison_custom_build.targets
+//copy win_bison.exe and data folder to Project folder and add *.y files as top level items
+//pcodeparsetab.cpp and xml.tab.cpp conflict requires -p zz bison option to change yy to zz in one of them for:
+//functions yylex, yyerror, yyparse, and variables yychar, yylval, yynerrs
+//
+//sleigh.exe meanwhile merely compiles raw specification files .slaspec into .sla compiled specification files
+//  it appears to be unused in the Ghidra UI app
+//JVM/Dalvik - C Pool Ref and 3 Pcode injection calls dynamic implementation needs to be ripped from Java code
+//Building decompiler: need GNU BFD (binary file descriptor library) - https://sourceware.org/binutils/
+
+#define _CRT_SECURE_NO_WARNINGS
+
+// Dump the raw pcode instructions
+
+// Root include for parsing using SLEIGH
+#include "loadimage.hh"
+#include "sleigh.hh"
+#include "emulate.hh"
+#include "pcodeparse.hh"
+#include "filemanage.hh"
+#include "marshal.hh"
+
+//g++ -std=c++1y -m64 -I include -I . -D__IDP__ -D__PLUGIN__ -DNO_OBSOLETE_FUNCS -D__X64__ -D__LINUX__ -fpermissive sleighinterface.cpp
+#include <iostream>
+#include <memory>
+#include <thread>
+#include <future>
+#include <stack>
+#include <cctype>
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
+
+#include "sleighinterface.h"
+
+using namespace ghidra;
+using namespace std;
+using XmlError = ghidra::DecoderError;
+
+static void setupTrace(DecompileCallback* callback, const std::string& message)
+{
+	const char* protocolLog = std::getenv("GHIDRADEC_PROTOCOL_LOG");
+	if (protocolLog != nullptr && protocolLog[0] != '\0') {
+		std::ofstream fp(protocolLog, std::ios::app | std::ios::binary);
+		fp << "Received: setup " << message << "\n";
+	}
+	if (callback != nullptr)
+		callback->protocolRecorder("setup " + message, false);
+}
+
+static ElementId ELEM_COMMAND_ISNAMEUSED = ElementId("command_isnameused", 239);
+static ElementId ELEM_COMMAND_GETBYTES = ElementId("command_getbytes", 240);
+static ElementId ELEM_COMMAND_GETCALLFIXUP = ElementId("command_getcallfixup", 241);
+static ElementId ELEM_COMMAND_GETCALLMECH = ElementId("command_getcallmech", 242);
+static ElementId ELEM_COMMAND_GETCALLOTHERFIXUP = ElementId("command_getcallotherfixup", 243);
+static ElementId ELEM_COMMAND_GETCODELABEL = ElementId("command_getcodelabel", 244);
+static ElementId ELEM_COMMAND_GETCOMMENTS = ElementId("command_getcomments", 245);
+static ElementId ELEM_COMMAND_GETCPOOLREF = ElementId("command_getcpoolref", 246);
+static ElementId ELEM_COMMAND_GETDATATYPE = ElementId("command_getdatatype", 247);
+static ElementId ELEM_COMMAND_GETEXTERNALREF = ElementId("command_getexternalref", 248);
+static ElementId ELEM_COMMAND_GETMAPPEDSYMBOLS = ElementId("command_getmappedsymbols", 249);
+static ElementId ELEM_COMMAND_GETNAMESPACEPATH = ElementId("command_getnamespacepath", 250);
+static ElementId ELEM_COMMAND_GETPCODE = ElementId("command_getpcode", 251);
+static ElementId ELEM_COMMAND_GETPCODEEXECUTABLE = ElementId("command_getpcodeexecutable", 252);
+static ElementId ELEM_COMMAND_GETREGISTER = ElementId("command_getregister", 253);
+static ElementId ELEM_COMMAND_GETREGISTERNAME = ElementId("command_getregistername", 254);
+static ElementId ELEM_COMMAND_GETSTRINGDATA = ElementId("command_getstringdata", 255);
+static ElementId ELEM_COMMAND_GETTRACKEDREGISTERS = ElementId("command_gettrackedregisters", 256);
+static ElementId ELEM_COMMAND_GETUSEROPNAME = ElementId("command_getuseropname", 257);
+static ElementId ELEM_RESPONSE_SCOPE = ElementId("scope", 80);
+static ElementId ELEM_RESPONSE_MAPSYM = ElementId("mapsym", 76);
+static ElementId ELEM_RESPONSE_SYMBOL = ElementId("symbol", 6);
+static ElementId ELEM_RESPONSE_FUNCTIONSHELL = ElementId("functionshell", 72);
+static ElementId ELEM_RESPONSE_FUNCTION = ElementId("function", 116);
+static ElementId ELEM_RESPONSE_EXTERNREFSYMBOL = ElementId("externrefsymbol", 70);
+static ElementId ELEM_RESPONSE_LABELSYM = ElementId("labelsym", 75);
+static ElementId ELEM_RESPONSE_TYPE = ElementId("type", 60);
+static ElementId ELEM_RESPONSE_TYPEREF = ElementId("typeref", 63);
+static ElementId ELEM_RESPONSE_FIELD = ElementId("field", 49);
+static ElementId ELEM_RESPONSE_ADDR = ElementId("addr", 11);
+static ElementId ELEM_RESPONSE_VAL = ElementId("val", 8);
+static ElementId ELEM_RESPONSE_VALUE = ElementId("value", 9);
+static ElementId ELEM_RESPONSE_DATA = ElementId("data", 1);
+static ElementId ELEM_RESPONSE_CPOOLREC = ElementId("cpoolrec", 110);
+static ElementId ELEM_RESPONSE_TOKEN = ElementId("token", 112);
+static ElementId ELEM_RESPONSE_PARENT = ElementId("parent", 77);
+static ElementId ELEM_RESPONSE_RANGELIST = ElementId("rangelist", 13);
+static ElementId ELEM_RESPONSE_RANGE = ElementId("range", 12);
+static ElementId ELEM_RESPONSE_HOLE = ElementId("hole", 74);
+static ElementId ELEM_RESPONSE_PROTOTYPE = ElementId("prototype", 169);
+static ElementId ELEM_RESPONSE_RETURNSYM = ElementId("returnsym", 172);
+static ElementId ELEM_RESPONSE_TRACKED_POINTSET = ElementId("tracked_pointset", 125);
+static ElementId ELEM_RESPONSE_SET = ElementId("set", 124);
+static ElementId ELEM_RESPONSE_INST = ElementId("inst", 98);
+static ElementId ELEM_RESPONSE_OP = ElementId("op", 27);
+static ElementId ELEM_RESPONSE_UNIMPL = ElementId("unimpl", 114);
+static ElementId ELEM_RESPONSE_SPACEID = ElementId("spaceid", 30);
+static ElementId ELEM_RESPONSE_VOID = ElementId("void", 10);
+static ElementId ELEM_RESPONSE_COMMENTDB = ElementId("commentdb", 87);
+static ElementId ELEM_RESPONSE_COMMENT = ElementId("comment", 86);
+static ElementId ELEM_RESPONSE_TEXT = ElementId("text", 88);
+static ElementId ELEM_RESPONSE_CONTEXT = ElementId("context", 94);
+static AttributeId ATTRIB_RESPONSE_EXTRAPOP = AttributeId("extrapop", 6);
+static AttributeId ATTRIB_RESPONSE_MODEL = AttributeId("model", 13);
+static AttributeId ATTRIB_RESPONSE_NORETURN = AttributeId("noreturn", 123);
+static AttributeId ATTRIB_RESPONSE_VOLATILE = AttributeId("volatile", 65);
+static AttributeId ATTRIB_RESPONSE_CAT = AttributeId("cat", 61);
+static AttributeId ATTRIB_RESPONSE_MAXSIZE = AttributeId("maxsize", 120);
+static AttributeId ATTRIB_RESPONSE_LENGTH = AttributeId("length", 82);
+static AttributeId ATTRIB_RESPONSE_TAG = AttributeId("tag", 83);
+static AttributeId ATTRIB_RESPONSE_ARRAYSIZE = AttributeId("arraysize", 48);
+static AttributeId ATTRIB_RESPONSE_CHAR = AttributeId("char", 49);
+static AttributeId ATTRIB_RESPONSE_UTF = AttributeId("utf", 59);
+static ElementId ELEM_OPTION_READONLY = ElementId("readonly", 151);
+static ElementId ELEM_OPTION_ALIASBLOCK = ElementId("aliasblock", 174);
+static ElementId ELEM_OPTION_ALLOWCONTEXTSET = ElementId("allowcontextset", 175);
+static ElementId ELEM_OPTION_ANALYZEFORLOOPS = ElementId("analyzeforloops", 176);
+static ElementId ELEM_OPTION_COMMENTHEADER = ElementId("commentheader", 177);
+static ElementId ELEM_OPTION_COMMENTINDENT = ElementId("commentindent", 178);
+static ElementId ELEM_OPTION_COMMENTINSTRUCTION = ElementId("commentinstruction", 179);
+static ElementId ELEM_OPTION_COMMENTSTYLE = ElementId("commentstyle", 180);
+static ElementId ELEM_OPTION_CONVENTIONPRINTING = ElementId("conventionprinting", 181);
+static ElementId ELEM_OPTION_CURRENTACTION = ElementId("currentaction", 182);
+static ElementId ELEM_OPTION_ERRORREINTERPRETED = ElementId("errorreinterpreted", 184);
+static ElementId ELEM_OPTION_ERRORTOOMANYINSTRUCTIONS = ElementId("errortoomanyinstructions", 185);
+static ElementId ELEM_OPTION_ERRORUNIMPLEMENTED = ElementId("errorunimplemented", 186);
+static ElementId ELEM_OPTION_IGNOREUNIMPLEMENTED = ElementId("ignoreunimplemented", 188);
+static ElementId ELEM_OPTION_INDENTINCREMENT = ElementId("indentincrement", 189);
+static ElementId ELEM_OPTION_INFERCONSTPTR = ElementId("inferconstptr", 190);
+static ElementId ELEM_OPTION_INPLACEOPS = ElementId("inplaceops", 192);
+static ElementId ELEM_OPTION_INTEGERFORMAT = ElementId("integerformat", 193);
+static ElementId ELEM_OPTION_JUMPLOAD = ElementId("jumpload", 194);
+static ElementId ELEM_OPTION_MAXINSTRUCTION = ElementId("maxinstruction", 195);
+static ElementId ELEM_OPTION_JUMPTABLEMAX = ElementId("jumptablemax", 271);
+static ElementId ELEM_OPTION_MAXLINEWIDTH = ElementId("maxlinewidth", 196);
+static ElementId ELEM_OPTION_NAMESPACESTRATEGY = ElementId("namespacestrategy", 197);
+static ElementId ELEM_OPTION_NOCASTPRINTING = ElementId("nocastprinting", 198);
+static ElementId ELEM_OPTION_NULLPRINTING = ElementId("nullprinting", 200);
+static ElementId ELEM_OPTION_OPTIONSLIST = ElementId("optionslist", 201);
+static ElementId ELEM_OPTION_PARAM1 = ElementId("param1", 202);
+static ElementId ELEM_OPTION_PARAM2 = ElementId("param2", 203);
+static ElementId ELEM_OPTION_PARAM3 = ElementId("param3", 204);
+static ElementId ELEM_OPTION_PROTOEVAL = ElementId("protoeval", 205);
+static ElementId ELEM_OPTION_SETLANGUAGE = ElementId("setlanguage", 207);
+static ElementId ELEM_OPTION_SPLITDATATYPE = ElementId("splitdatatype", 270);
+static ElementId ELEM_OPTION_NANIGNORE = ElementId("nanignore", 272);
+static ElementId ELEM_OPTION_BRACEFORMAT = ElementId("braceformat", 284);
+
+//typeop.cc
+//ZEXT#(I)_#(O) - cast to unsigned #(O) size
+//SEXT#(I)_#(O) - cast to signed #(O) size
+//#define CONCAT(SZI1, SZI2, VAL1, VAL2) (((VAL1) << (SZI2 * 8)) | (VAL2))
+//CONCAT#(I1)_#(I2) - shift left/or idiom
+//#define SUB(SZI, SZO, VAL) (((VAL) >> (SZ1 * 8)) & ((~0ull) >> (64 - SZO * 8)))
+//SUB#(I)_#(O) - shift right/and idiom, careful that 64 bits does not get truncated
+//#define CARRY(SZ, VAL1, VAL2) (((((1ull << (SZ * 8 - 1)) & (VAL1)) != 0) && (((1ull << (SZ * 8 - 1)) & (VAL2)) != 0)) || (((1ull << (SZ * 8 - 1)) & (VAL1)) ^ ((1ull << (SZ * 8 - 1)) & (VAL2))) != 0 && (((VAL1) + (VAL2)) & (1ull << (SZ * 8 - 1))) == 0)
+//CARRY#(I) - addition comparison idiom - both high bits are set or one high bit is set and their addition causes the high bit to clear 0 1 0/1 0 0/1 1 _
+//#define SCARRY(SZ, VAL1, VAL2) (((1ull << (SZ * 8 - 1)) & (VAL1)) == ((1ull << (SZ * 8 - 1)) & (VAL2)) && (((VAL1) + (VAL2)) & (1ull << (SZ * 8 - 1))) != ((1ull << (SZ * 8 - 1)) & (VAL1)))
+//SCARRY#(I) - signed addition comparison idiom - both are positive or both are negative and their addition causes the high bit to be opposite of inputs 0 0 1/1 1 0
+//#define SBORROW(SZ, VAL1, VAL2) (((1ull << (SZ * 8 - 1)) & (VAL1)) != ((1ull << (SZ * 8 - 1)) & (VAL2)) && (((VAL1) - (VAL2)) & (1ull << (SZ * 8 - 1))) != ((1ull << (SZ * 8 - 1)) & (VAL1)))
+//SBORROW#(I) - signed subtraction comparison idiom - one is negative and one is positive and their subtraction causes the high bit to be opposite first input/same as second input 0 1 1/1 0 0
+//NAN - needs math.h along with ABS, SQRT, CEIL, FLOOR, ROUND
+//ABS - fabs, fabsf, fabsl
+//SQRT - sqrtf, sqrt, sqrtl
+//CEIL - ceil, ceilf, ceill
+//FLOOR - floor, floorf, floorl
+//ROUND - round, roundf, roundl
+
+const char* szExtensionMacros[] = { "ZEXT", "SEXT", //2 numeric values for input size, output size
+	"CARRY", "SCARRY", "SBORROW", //1 numeric value for input size
+	"NAN", "ABS", "SQRT",
+	/*"INT2FLOAT", "FLOAT2FLOAT", "TRUNC",*/ //handled with type casts in printc.cc
+	"CEIL", "FLOOR", "ROUND",
+	"CONCAT", //2 numeric values for 1st input size, 2nd input size
+	"SUB" //2 numeric values for input size, output size
+};
+
+const Options defaultOptions = { true, true, true, true, false, true, false, false, true, false,
+	true, true, true, false, false, true, false, 100, 4096, 100000, 2, 20, std::string("c"),
+	false, true, false, false, true, true, true, std::string("best"), std::string("c-language"),
+	std::string(), std::string("array"), std::string("minimal"), std::string("struct"),
+	std::string("array"), std::string("pointer"), std::string("compare"), std::string("skip"),
+	std::string("same"), std::string("same"), std::string("same") };
+const DecMode defaultDecMode = { std::string("decompile"), true, true, false, false };
+
+// Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/program/model/data/ *DataType.java
+// Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/program/model/pcode/PcodeDataTypeManager.java
+// Ghidra/Features/Decompiler/src/decompile/cpp/ghidra_arch.cc setCoreType - specifies default if none are sent
+//type.cc Datatype::hashName produces the IDs - first name of aliases will be the preferred one currently
+CoreType defaultCoreTypes[] = {
+	{ std::string("void"), 0, std::string("void") }, //ghidra_arch.cc
+
+	{ std::string("undefined"), 1, std::string("unknown") }, //ghidra_arch.cc
+	{ std::string("undefined1"), 1, std::string("unknown") },
+	{ std::string("undefined2"), 2, std::string("unknown") }, //ghidra_arch.cc
+	{ std::string("undefined3"), 3, std::string("unknown") },
+	{ std::string("undefined4"), 4, std::string("unknown") }, //ghidra_arch.cc
+	{ std::string("undefined5"), 5, std::string("unknown") },
+	{ std::string("undefined6"), 6, std::string("unknown") },
+	{ std::string("undefined7"), 7, std::string("unknown") },
+	{ std::string("undefined8"), 8, std::string("unknown") }, //ghidra_arch.cc
+
+	{ std::string("sbyte"), 1, std::string("int") }, //ghidra_arch.cc
+	{ std::string("short"), 2, std::string("int") },
+	{ std::string("sword"), 2, std::string("int") }, //ghidra_arch.cc
+	{ std::string("int3"), 3, std::string("int") },
+	{ std::string("int"), 4, std::string("int") },
+	{ std::string("sdword"), 4, std::string("int") }, //ghidra_arch.cc
+	{ std::string("int5"), 5, std::string("int") },
+	{ std::string("int6"), 6, std::string("int") },
+	{ std::string("int7"), 7, std::string("int") },
+	{ std::string("long"), 8, std::string("int") },
+	{ std::string("sqword"), 8, std::string("int") }, //ghidra_arch.cc
+	{ std::string("longlong"), 8, std::string("int") }, //alias
+	{ std::string("int16"), 16, std::string("int") },
+
+	{ std::string("byte"), 1, std::string("uint") }, //ghidra_arch.cc
+	{ std::string("ushort"), 2, std::string("uint") },
+	{ std::string("word"), 2, std::string("uint") }, //ghidra_arch.cc
+	{ std::string("uint3"), 3, std::string("uint") },
+	{ std::string("uint"), 4, std::string("uint") },
+	{ std::string("dword"), 4, std::string("uint") }, //ghidra_arch.cc
+	{ std::string("uint5"), 5, std::string("uint") },
+	{ std::string("uint6"), 6, std::string("uint") },
+	{ std::string("uint7"), 7, std::string("uint") },
+	{ std::string("ulong"), 8, std::string("uint") },
+	{ std::string("qword"), 8, std::string("uint") }, //ghidra_arch.cc
+	{ std::string("ulonglong"), 8, std::string("uint") }, //alias
+	{ std::string("uint16"), 16, std::string("uint") },
+
+	{ std::string("float2"), 2, std::string("float") },
+	{ std::string("float"), 4, std::string("float") }, //ghidra_arch.cc
+	{ std::string("double"), 8, std::string("float") },
+	{ std::string("float8"), 8, std::string("float") }, //ghidra_arch.cc
+	{ std::string("float10"), 10, std::string("float") },
+	{ std::string("float16"), 16, std::string("float") }, //ghidra_arch.cc
+	{ std::string("longdouble"), 16, std::string("float") }, //alias
+
+	{ std::string("code"), 1, std::string("code") }, //ghidra_arch.cc
+
+	{ std::string("char"), sizeof(char), std::string("int"), sizeof(char) == 1, sizeof(char) == 2 }, //metatype=int/uint, size=1 for char/2 for utf  //ghidra_arch.cc
+
+	{ std::string("wchar_t"), sizeof(wchar_t), std::string("int"), false, true }, //size=2/4
+	{ std::string("wchar16"), 2, std::string("int"), false, true },
+	{ std::string("wchar32"), 4, std::string("int"), false, true },
+
+	{ std::string("bool"), 1, std::string("bool") } //ghidra_arch.cc
+};
+const int numDefCoreTypes = sizeof(defaultCoreTypes) / sizeof(defaultCoreTypes[0]);
+
+const char* szCoreTypeDefs[] = {
+nullptr, "__int8", "__int8", "__int16", "__int32",
+	"__int32", "__int64", "__int64", "__int64", "__int64",
+"__int8", nullptr, "__int16", "__int32", nullptr, "__int32", "__int64", "__int64",
+	"__int64", nullptr, "__int64", "__int64", "__int64",
+"unsigned __int8", "unsigned __int16" , "unsigned __int16", "unsigned __int32",
+	"unsigned __int32", "unsigned __int32", "unsigned __int64", "unsigned __int64",
+	"unsigned __int64", "unsigned __int64", "unsigned __int64", "unsigned __int64",
+	"unsigned __int64",
+"float", nullptr, nullptr, "double", "long double", "long double", "long double",
+"void*", nullptr, nullptr, "char16_t", "char32_t", nullptr
+};
+
+const char* cpoolreftags[] = { "primitive", "string", "classref", "method",
+	"field", "arraylength", "instanceof", "checkcast" };
+
+/// If a type id is explicitly provided for a data-type, this routine is used
+/// to produce an id based on a hash of the name.  IDs produced this way will
+/// have their sign-bit set to distinguish it from other IDs.
+/// \param nm is the type name to be hashed
+uint8 hashName(const std::string& nm)
+{
+	uint8 res = 123;
+	for (uint4 i = 0; i < nm.size(); ++i) {
+		res = (res << 8) | (res >> 56);
+		res += (uint8)nm[i];
+		if ((res & 1) == 0)
+			res ^= 0xfeabfeab;	// Some kind of feedback
+	}
+	uint8 tmp = 1;
+	tmp <<= 63;
+	res |= tmp;	// Make sure the hash is negative (to distinguish it from database id's)
+	return res;
+}
+
+template <class T>
+string to_string(T t, ios_base& (*f)(ios_base&))
+{
+	ostringstream oss;
+	oss << f << t;
+	return oss.str();
+}
+
+std::string escapeCStr(std::string input)
+{
+	std::string str;
+	for (int i = 0; i < input.size(); i++) {
+		unsigned char ch = static_cast<unsigned char>(input[i]);
+		if (isprint(ch)) {
+			if (ch == '\\') str += "\\\\";
+			else if (ch == '"') str += "\\\"";
+			else str += static_cast<char>(ch);
+		} else {
+			if (isspace(ch)) str += static_cast<char>(ch);
+			//if (input[i] == '\n') str += "\\n";
+			//else if (input[i] == '\r') str += "\\r";
+			else if (ch == '\a') str += "\\a";
+			else if (ch == '\b') str += "\\b";
+			//else if (input[i] == '\f') str += "\\f";
+			//else if (input[i] == '\t') str += "\\t";
+			//else if (input[i] == '\v') str += "\\v";
+			else {
+				std::string s = to_string((unsigned int)ch, std::hex);
+				str += "0x" + std::string(2 - s.size(), '0') + s;
+			}
+		}
+	}
+	return str;
+}
+
+std::string bytesToHexPreview(const std::string& input, size_t maxBytes = 96)
+{
+	static const char* digits = "0123456789abcdef";
+	std::string out;
+	size_t count = input.size() < maxBytes ? input.size() : maxBytes;
+	out.reserve(count * 3 + 16);
+	for (size_t i = 0; i < count; ++i) {
+		if (i != 0)
+			out += ' ';
+		unsigned char ch = static_cast<unsigned char>(input[i]);
+		out += digits[ch >> 4];
+		out += digits[ch & 0xf];
+	}
+	if (input.size() > maxBytes)
+		out += " ...";
+	return out;
+}
+
+// This is a tiny LoadImage class which feeds the executable bytes to the translator
+class CallbackLoadImage : public LoadImage {
+	DecompileCallback* callback;
+public:
+	CallbackLoadImage(DecompileCallback* cb) : LoadImage("nofile"), callback(cb) { }
+	virtual void loadFill(uint1* ptr, int4 size, const Address& addr);
+	virtual string getArchType(void) const { return "unknown"; } //unused
+	virtual void adjustVma(long adjust) { } //unused
+};
+
+// This is the only important method for the LoadImage. It returns bytes from the static array
+// depending on the address range requested
+void CallbackLoadImage::loadFill(uint1* ptr, int4 size, const Address& addr)
+{
+	AddrInfo request{ addr.getSpace()->getName(), addr.getOffset() };
+	callback->protocolRecorder("loadFill begin addr=\"" + request.space +
+		":0x" + to_string(request.offset, hex) + "\" size=\"" +
+		std::to_string(size) + "\"", false);
+	int loaded = callback->getBytes(ptr, size, request);
+	callback->protocolRecorder("loadFill end addr=\"" + request.space +
+		":0x" + to_string(request.offset, hex) + "\" size=\"" +
+		std::to_string(size) + "\" loaded=\"" + std::to_string(loaded) + "\"", true);
+	if (loaded == 0)
+		throw DecompError("No bytes could be loaded");
+}
+
+// -------------------------------
+//
+// These are the classes/routines relevant to printing a pcode translation
+
+// Here is a simple class for emitting pcode. We simply dump an appropriate string representation
+// straight to standard out.
+class PackedPcodeRawOut : public PcodeEmit {
+	struct OpGroup {
+		OpCode opc;
+		bool hasOut;
+		VarnodeData out;
+		std::vector<VarnodeData> vars;
+	};
+	std::vector<OpGroup> ops;
+public:
+	PackedPcodeRawOut() {}
+	virtual void dump(const Address& addr, OpCode opc,
+		VarnodeData* outvar, VarnodeData* vars, int4 isize);
+	void encodePacked(PackedEncode& encoder, const Address& address, int4 offset);
+	void normalizeTerminalSkippedRelativeBranches();
+	void rewriteDirectCrossFunctionBranchesAsTailCalls(DecompileCallback* callback,
+		const AddrInfo& currentFunction, AddrSpace* constSpace);
+	std::string xmlPcodes;
+	bool hasTerminal = false;
+};
+
+namespace PackedPcodeTag {
+	constexpr uchar unimpl_tag = 0x20;
+	constexpr uchar inst_tag = 0x21;
+	constexpr uchar op_tag = 0x22;
+	constexpr uchar void_tag = 0x23;
+	constexpr uchar spaceid_tag = 0x24;
+	constexpr uchar addrsz_tag = 0x25;
+	constexpr uchar end_tag = 0x60;
+}
+
+std::string dumpOffset(unsigned long long val) {
+	std::string packed;
+	while (val != 0) {
+		uchar chunk = (int)(val & 0x3f);
+		val >>= 6;
+		packed += (chunk + 0x20);
+	}
+	packed += PackedPcodeTag::end_tag;
+	return packed;
+}
+
+std::string dumpVarnodeData(VarnodeData* v) {
+	std::string packed;
+	packed += PackedPcodeTag::addrsz_tag;
+	int spcindex = v->space->getIndex();
+	packed += (spcindex + 0x20);
+	packed += dumpOffset(v->offset);
+	packed += (v->size + 0x20);
+	return packed;
+}
+
+//const int ID_UNIQUE_SHIFT = 7;
+
+std::string dumpSpaceId(VarnodeData* v) {
+	std::string packed;
+	packed += PackedPcodeTag::spaceid_tag;
+	//int spcindex = ((int)v->offset >> ID_UNIQUE_SHIFT);
+	//v->getAddr()->getSpaceFromConst()->getIndex();
+	int spcindex = ((AddrSpace*)v->offset)->getIndex();
+	packed += (spcindex + 0x20);
+	return packed;
+}
+
+/*struct LabelRef
+{
+	int opIndex;		// Index of operation referencing the label
+	int labelIndex;	// Index of label being referenced
+	int labelSize;	// Number of bytes in the label
+	int streampos;	// Position in byte stream where label is getting encoded
+};*/
+
+//std::vector<LabelRef> labelrefs;
+//int numOps = 0;
+//int labelBase = 0;
+//int labelCount = 0;
+//std::vector<int> labeldefs;
+
+static void writePackedVarnode(PackedEncode& encoder, VarnodeData* var)
+{
+	Address(var->space, var->offset).encode(encoder, var->size);
+}
+
+static void writePackedPcodeOp(PackedEncode& encoder, OpCode opc,
+	VarnodeData* outvar, VarnodeData* vars, int4 isize)
+{
+	encoder.openElement(ELEM_RESPONSE_OP);
+	encoder.writeOpcode(ATTRIB_CODE, opc);
+	encoder.writeSignedInteger(ATTRIB_SIZE, isize);
+	if (outvar != (VarnodeData*)0) {
+		writePackedVarnode(encoder, outvar);
+	} else {
+		encoder.openElement(ELEM_RESPONSE_VOID);
+		encoder.closeElement(ELEM_RESPONSE_VOID);
+	}
+	int4 i = 0;
+	if (opc == CPUI_LOAD || opc == CPUI_STORE) {
+		encoder.openElement(ELEM_RESPONSE_SPACEID);
+		encoder.writeSpace(ATTRIB_NAME, vars[0].getSpaceFromConst());
+		encoder.closeElement(ELEM_RESPONSE_SPACEID);
+		i = 1;
+	}
+	for (; i < isize; ++i) {
+		writePackedVarnode(encoder, &vars[i]);
+	}
+	encoder.closeElement(ELEM_RESPONSE_OP);
+}
+
+void PackedPcodeRawOut::dump(const Address& addr, OpCode opc,
+	VarnodeData* outvar, VarnodeData* vars, int4 isize)
+{
+	OpCode emitOpc = opc;
+	//int oldbase = labelBase;
+	//labelBase = labelCount;
+	//labelCount += construct.getNumLabels();
+	//PcodeCacher/PcodeBuilder seems to be already resolving all of this in C - so these issues probably never occur
+	/*if (opc == CPUI_MULTIEQUAL) { throw DecompError("CPUI_MULTIEQUAL"); }
+	else if (opc == CPUI_INDIRECT) { throw DecompError("CPUI_INDIRECT"); }
+	else if (opc == CPUI_PTRADD) {
+		throw DecompError("CPUI_PTRADD");
+		int labelindex = (int)vars[0].offset + labelBase;
+		while (labeldefs.size() <= labelindex) {
+			labeldefs.push_back(-1);
+		}
+		labeldefs[labelindex] = numOps;
+	}
+	else if (opc == CPUI_PTRSUB) { throw DecompError("CPUI_PTRSUB"); }*/
+	// Some spaces are "virtual", like the stack spaces, where addresses are really relative to a
+	// base pointer stored in a register, like the stackpointer.  This routine will return non-zero
+	// if \b this space is virtual and there is 1 (or more) associated pointer registers
+	if ((isize > 0) && (vars[0].space->numSpacebase() != 0)) {
+		//int labelIndex = (int)vars[0].offset + labelBase;
+		//int labelSize = vars[0].size;
+		//labelrefs.push_back(LabelRef{ numOps, labelIndex, labelSize, (int)packedPcodes.size() });
+		// Force the emitter to write out a maximum length encoding (12 bytes) of a long
+		// so that we have space to insert whatever value we need to when this relative is resolved
+		vars[0].offset = -1;
+	}
+	//numOps++;
+	//labelBase = oldbase;
+	if (emitOpc == CPUI_BRANCH || emitOpc == CPUI_BRANCHIND || emitOpc == CPUI_RETURN)
+		hasTerminal = true;
+	OpGroup op;
+	op.opc = emitOpc;
+	op.hasOut = outvar != nullptr;
+	if (op.hasOut)
+		op.out = *outvar;
+	for (int i = 0; i < isize; ++i)
+		op.vars.push_back(vars[i]);
+	ops.push_back(op);
+	std::string inpstr;
+	for (int i = emitOpc == CPUI_LOAD || emitOpc == CPUI_STORE ? 1 : 0; i < isize; i++) {
+		inpstr += "    <addr space=\"" + vars[i].space->getName() + "\" offset=\"0x" +
+			to_string(vars[i].offset, hex) +
+			"\" size=\"" + std::to_string(vars[i].size) + "\"/>\n";
+	}
+	xmlPcodes += "  <op code=\"" + std::to_string(emitOpc) + "\">\n" +
+		(outvar != nullptr ? "    <addr space=\"" + outvar->space->getName() + "\" offset=\"0x" +
+			to_string(outvar->offset, hex) +
+			"\" size=\"" + std::to_string(outvar->size) + "\"/>\n" : "    <void/>\n") +
+		(emitOpc == CPUI_LOAD || emitOpc == CPUI_STORE ?
+			"    <spaceid name=\"" + vars[0].getSpaceFromConst()->getName() + "\"/>\n" : "") +
+		inpstr + "  </op>\n";
+}
+
+void PackedPcodeRawOut::normalizeTerminalSkippedRelativeBranches()
+{
+	for (size_t i = 0; i < ops.size(); ++i) {
+		OpGroup& branch = ops[i];
+		if (branch.opc != CPUI_CBRANCH && branch.opc != CPUI_BRANCH)
+			continue;
+		if (branch.vars.empty() || branch.vars[0].space == nullptr ||
+			branch.vars[0].space->getName() != "const")
+			continue;
+		uintb relativeOffset = branch.vars[0].offset;
+		if (relativeOffset == 0 || i + relativeOffset != ops.size())
+			continue;
+		size_t terminal = ops.size();
+		for (size_t j = i + 1; j < ops.size(); ++j) {
+			if (ops[j].opc == CPUI_BRANCH || ops[j].opc == CPUI_BRANCHIND ||
+				ops[j].opc == CPUI_RETURN) {
+				terminal = j;
+				break;
+			}
+		}
+		if (terminal == ops.size() || terminal + 1 >= ops.size())
+			continue;
+		uintb adjustedOffset = static_cast<uintb>(terminal + 1 - i);
+		if (adjustedOffset < relativeOffset)
+			branch.vars[0].offset = adjustedOffset;
+	}
+}
+
+void PackedPcodeRawOut::rewriteDirectCrossFunctionBranchesAsTailCalls(
+	DecompileCallback* callback, const AddrInfo& currentFunction, AddrSpace* constSpace)
+{
+	if (callback == nullptr || constSpace == nullptr)
+		return;
+	bool rewritten = false;
+	for (std::vector<OpGroup>::iterator it = ops.begin(); it != ops.end(); ++it) {
+		if (it->opc != CPUI_BRANCH || it->vars.size() != 1 ||
+			it->vars[0].space == nullptr ||
+			it->vars[0].space->getName() != currentFunction.space)
+			continue;
+		MappedSymbolInfo target = { KIND_HOLE };
+		callback->getMappedSymbol(
+			AddrInfo{ it->vars[0].space->getName(), it->vars[0].offset }, target);
+		if (target.kind != KIND_FUNCTION || target.entryPoint == currentFunction.offset)
+			continue;
+		it->opc = CPUI_CALL;
+		rewritten = true;
+	}
+	if (!rewritten)
+		return;
+
+	OpGroup ret;
+	ret.opc = CPUI_RETURN;
+	ret.hasOut = false;
+	ret.vars.push_back(VarnodeData{ constSpace, 1, 4 });
+	ops.push_back(ret);
+	hasTerminal = true;
+	xmlPcodes += "  <!-- GhidraDec rewrote cross-function BRANCH as tail CALL/RETURN -->\n";
+}
+
+void PackedPcodeRawOut::encodePacked(PackedEncode& encoder, const Address& address, int4 offset)
+{
+	normalizeTerminalSkippedRelativeBranches();
+	encoder.openElement(ELEM_RESPONSE_INST);
+	encoder.writeSignedInteger(ATTRIB_OFFSET, offset);
+	address.encode(encoder);
+	for (std::vector<OpGroup>::iterator it = ops.begin(); it != ops.end(); ++it) {
+		writePackedPcodeOp(encoder, it->opc, it->hasOut ? &it->out : nullptr,
+			it->vars.empty() ? nullptr : it->vars.data(), static_cast<int4>(it->vars.size()));
+	}
+	encoder.closeElement(ELEM_RESPONSE_INST);
+}
+
+static void appendPackedArtificialHalt(PackedPcodeRawOut& emit, AddrSpace* constSpace, const Address& address)
+{
+	VarnodeData haltInput;
+	haltInput.space = constSpace;
+	haltInput.offset = 1;
+	haltInput.size = 4;
+	emit.dump(address, CPUI_RETURN, nullptr, &haltInput, 1);
+}
+
+//PcodeCacher/PcodeBuilder is already resolving all of this on C side
+/*void insertOffset(int streampos, long val, std::string& buf) {
+	while (val != 0) {
+		if (buf[streampos] == PcodeEmit::end_tag) {
+			throw DecompError("Could not properly insert relative jump offset");
+		}
+		int chunk = (int)(val & 0x3f);
+		val >>= 6;
+		buf[streampos] = chunk + 0x20;
+		streampos += 1;
+	}
+	for (int i = 0; i < 11; ++i) {
+		if (buf[streampos] == PcodeEmit::end_tag) {
+			return;
+		}
+		buf[streampos] = 0x20;		// Zero fill
+		streampos += 1;
+	}
+	throw DecompError("Could not find terminator while inserting relative jump offset");
+}
+void resolveRelatives(std::string& buf) {
+	for (int i = 0; i < labelrefs.size(); i++) {
+		LabelRef ref = labelrefs[i];
+		if ((ref.labelIndex >= labeldefs.size()) || (labeldefs[ref.labelIndex] == -1)) {
+			throw DecompError("Reference to non-existent sleigh label");
+		}
+		long res = (long)labeldefs[ref.labelIndex] - (long)ref.opIndex;
+		if (ref.labelSize < 8) {
+			long mask = -1;
+			mask >>= (8 - ref.labelSize) * 8;
+			res &= mask;
+		}
+		// We need to skip over op_tag, op_code, void_tag, addrsz_tag, and spc bytes
+		insertOffset(ref.streampos + 5, res, buf);		// Insert the final offset into the stream
+	}
+}*/
+
+//Ghidra/Features/Decompiler/src/decompile/cpp/translate.cc
+//Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/app/plugin/processors/sleigh/SleighInstructionPrototype.java
+//Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/app/plugin/processors/sleigh/PcodeEmit.java
+//Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/app/plugin/processors/sleigh/PcodeEmitPacked.java
+static std::pair<std::string, std::string> getPackedPcode(Translate& trans, AddrInfo addr,
+	DecompileCallback* callback = nullptr, const AddrInfo* currentFunction = nullptr)
+
+{ // Dump pcode translation of machine instructions
+	std::ostringstream packedStream;
+	PackedEncode encoder(packedStream);
+	PackedPcodeRawOut emit;		// Set up the pcode dumper
+	int4 length;			// Number of bytes of each machine instruction
+
+	//numOps = 0;
+	//labelBase = 0;
+	//labelCount = 0;
+	//labelrefs.clear();
+	//labeldefs.clear();
+	Address address(trans.getSpaceByName(addr.space), addr.offset); // First address to translate
+
+	if (address.getSpace() == nullptr)
+		throw DecompError("No address space named " + addr.space);
+	length = trans.oneInstruction(emit, address); // Translate instruction
+	if (currentFunction != nullptr) {
+		emit.rewriteDirectCrossFunctionBranchesAsTailCalls(
+			callback, *currentFunction, trans.getConstantSpace());
+	}
+	emit.encodePacked(encoder, address, length);
+	std::string xml = "<inst" " offset=\"" +
+		std::to_string(length) + "\">\n  <addr space=\"" + address.getSpace()->getName() +
+		"\" offset=\"0x" + to_string(address.getOffset(), hex) + "\"/>\n" +
+		emit.xmlPcodes + "</inst>\n";
+	return std::pair<std::string, std::string>(packedStream.str(), xml);
+	//if a failure occurs:
+	//packed += unimpl_tag;
+	//packed += dumpOffset(length);
+}
+
+static std::pair<std::string, std::string> getPackedArtificialHalt(Translate& trans, AddrInfo addr,
+	int4 length = 1)
+{
+	std::ostringstream packedStream;
+	PackedEncode encoder(packedStream);
+	PackedPcodeRawOut emit;
+	Address address(trans.getSpaceByName(addr.space), addr.offset);
+
+	appendPackedArtificialHalt(emit, trans.getConstantSpace(), address);
+	emit.encodePacked(encoder, address, length);
+
+	std::string xml = "<inst offset=\"" + std::to_string(length) + "\">\n  <addr space=\"" +
+		address.getSpace()->getName() + "\" offset=\"0x" +
+		to_string(address.getOffset(), hex) + "\"/>\n" +
+		emit.xmlPcodes + "</inst>\n";
+	return std::pair<std::string, std::string>(packedStream.str(), xml);
+}
+
+static bool isM68kIllegalTrap(DecompileCallback* callback, const std::string& sleighfile,
+	const AddrInfo& addr)
+{
+	if (callback == nullptr || addr.space != "ram" ||
+		sleighfile.find("68000") == std::string::npos &&
+		sleighfile.find("68040") == std::string::npos)
+		return false;
+	uchar bytes[2] = { 0, 0 };
+	return callback->getBytes(bytes, 2, addr) == 2 && bytes[0] == 0x4a && bytes[1] == 0xfc;
+}
+
+static std::pair<std::string, std::string> getPackedUnimplementedInstruction(AddrInfo addr, int4 length = 1)
+{
+	std::ostringstream packedStream;
+	PackedEncode encoder(packedStream);
+	if (length < 1)
+		length = 1;
+	encoder.openElement(ELEM_RESPONSE_UNIMPL);
+	encoder.writeSignedInteger(ATTRIB_OFFSET, length);
+	encoder.closeElement(ELEM_RESPONSE_UNIMPL);
+
+	std::string xml = "<unimpl offset=\"" + std::to_string(length) + "\" at=\"" + addr.space + ":0x" +
+		to_string(addr.offset, hex) + "\"/>\n";
+	return std::pair<std::string, std::string>(packedStream.str(), xml);
+}
+
+struct JvmSwitchInfo
+{
+	uchar opcode = 0;
+	int4 length = 0;
+	uint4 padding = 0;
+	int4 defaultOffset = 0;
+	uintb defaultTarget = 0;
+	int4 low = 0;
+	int4 high = 0;
+	int4 npairs = 0;
+};
+
+static int4 readJvmS4(const std::vector<uchar>& bytes, size_t offset)
+{
+	uint4 value =
+		(static_cast<uint4>(bytes[offset]) << 24) |
+		(static_cast<uint4>(bytes[offset + 1]) << 16) |
+		(static_cast<uint4>(bytes[offset + 2]) << 8) |
+		static_cast<uint4>(bytes[offset + 3]);
+	return static_cast<int4>(value);
+}
+
+static bool readJvmSwitchInfo(DecompileCallback* callback, const AddrInfo& addr,
+	unsigned long long functionEntry, uchar opcode, JvmSwitchInfo& info)
+{
+	if (callback == nullptr || (opcode != 0xaa && opcode != 0xab) || addr.offset < functionEntry)
+		return false;
+
+	unsigned long long bytecodeOffset = addr.offset - functionEntry;
+	size_t padding = (4 - ((bytecodeOffset + 1) & 3)) & 3;
+	size_t headerSize = opcode == 0xaa ? 1 + padding + 12 : 1 + padding + 8;
+	std::vector<uchar> header(headerSize);
+	if (callback->getBytes(header.data(), static_cast<int>(header.size()), addr) != header.size())
+		return false;
+
+	size_t pos = 1 + padding;
+	info = JvmSwitchInfo();
+	info.opcode = opcode;
+	info.padding = static_cast<uint4>(padding);
+	info.defaultOffset = readJvmS4(header, pos);
+	info.defaultTarget = static_cast<uintb>(static_cast<intb>(addr.offset) + info.defaultOffset);
+	pos += 4;
+	if (opcode == 0xaa) {
+		info.low = readJvmS4(header, pos);
+		info.high = readJvmS4(header, pos + 4);
+		if (info.high < info.low)
+			return false;
+		uint8 cases = static_cast<uint8>(info.high) - static_cast<uint8>(info.low) + 1;
+		if (cases > 65536)
+			return false;
+		info.length = static_cast<int4>(1 + padding + 12 + cases * 4);
+		return true;
+	}
+
+	info.npairs = readJvmS4(header, pos);
+	if (info.npairs < 0 || info.npairs > 65536)
+		return false;
+	info.length = static_cast<int4>(1 + padding + 8 + static_cast<uint8>(info.npairs) * 8);
+	return true;
+}
+
+static int4 findUserOpIndex(Translate& trans, const std::string& name)
+{
+	std::vector<std::string> userOpNames;
+	trans.getUserOpNames(userOpNames);
+	for (size_t i = 0; i < userOpNames.size(); ++i) {
+		if (userOpNames[i] == name)
+			return static_cast<int4>(i);
+	}
+	return -1;
+}
+
+static void appendXmlPcode(std::string& xml, OpCode opc,
+	VarnodeData* outvar, VarnodeData* vars, int4 isize)
+{
+	std::string inpstr;
+	for (int i = opc == CPUI_LOAD || opc == CPUI_STORE ? 1 : 0; i < isize; i++) {
+		inpstr += "    <addr space=\"" + vars[i].space->getName() + "\" offset=\"0x" +
+			to_string(vars[i].offset, hex) +
+			"\" size=\"" + std::to_string(vars[i].size) + "\"/>\n";
+	}
+	xml += "  <op code=\"" + std::to_string(opc) + "\">\n" +
+		(outvar != nullptr ? "    <addr space=\"" + outvar->space->getName() + "\" offset=\"0x" +
+			to_string(outvar->offset, hex) +
+			"\" size=\"" + std::to_string(outvar->size) + "\"/>\n" : "    <void/>\n") +
+		(opc == CPUI_LOAD || opc == CPUI_STORE ?
+			"    <spaceid name=\"" + vars[0].getSpaceFromConst()->getName() + "\"/>\n" : "") +
+		inpstr + "  </op>\n";
+}
+
+static void writeJvmSwitchOp(PackedEncode& encoder, std::string& xml, OpCode opc,
+	VarnodeData* outvar, VarnodeData* vars, int4 isize)
+{
+	writePackedPcodeOp(encoder, opc, outvar, vars, isize);
+	appendXmlPcode(xml, opc, outvar, vars, isize);
+}
+
+static std::pair<std::string, std::string> getPackedJvmSwitchPcode(Translate& trans,
+	AddrInfo addr, const JvmSwitchInfo& info, unsigned long long& uniqueBase)
+{
+	AddrSpace* ramSpace = trans.getSpaceByName(addr.space);
+	AddrSpace* registerSpace = trans.getSpaceByName("register");
+	AddrSpace* uniqueSpace = trans.getUniqueSpace();
+	AddrSpace* constSpace = trans.getConstantSpace();
+	if (ramSpace == nullptr || registerSpace == nullptr ||
+		uniqueSpace == nullptr || constSpace == nullptr)
+		throw DecompError("Cannot build JVM switch pcode without required address spaces");
+
+	VarnodeData sp = trans.getRegister("SP");
+	const uint4 wordSize = 4;
+	VarnodeData key{ uniqueSpace, uniqueBase, wordSize };
+	uniqueBase += 16;
+	VarnodeData target{ uniqueSpace, uniqueBase, wordSize };
+	uniqueBase += 16;
+	VarnodeData loadInputs[2] = {
+		{ constSpace, reinterpret_cast<uintb>(ramSpace), wordSize },
+		sp
+	};
+	VarnodeData addSpInputs[2] = {
+		sp,
+		{ constSpace, wordSize, wordSize }
+	};
+
+	std::ostringstream packedStream;
+	PackedEncode encoder(packedStream);
+	encoder.openElement(ELEM_RESPONSE_INST);
+	encoder.writeSignedInteger(ATTRIB_OFFSET, info.length);
+	Address(ramSpace, addr.offset).encode(encoder);
+
+	std::string xml = "<inst offset=\"" + std::to_string(info.length) + "\">\n  <addr space=\"" +
+		ramSpace->getName() + "\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>\n";
+	writeJvmSwitchOp(encoder, xml, CPUI_LOAD, &key, loadInputs, 2);
+	writeJvmSwitchOp(encoder, xml, CPUI_INT_ADD, &sp, addSpInputs, 2);
+
+	if (info.opcode == 0xab) {
+		int4 switchAssistIndex = findUserOpIndex(trans, "switchAssist");
+		if (switchAssistIndex < 0)
+			throw DecompError("JVM switchAssist userop was not found");
+		VarnodeData callInputs[6] = {
+			{ constSpace, static_cast<uintb>(switchAssistIndex), wordSize },
+			key,
+			{ constSpace, addr.offset, wordSize },
+			{ constSpace, info.padding, 1 },
+			{ constSpace, info.defaultTarget, wordSize },
+			{ constSpace, static_cast<uintb>(info.npairs), wordSize }
+		};
+		writeJvmSwitchOp(encoder, xml, CPUI_CALLOTHER, &target, callInputs, 6);
+		VarnodeData branchInputs[1] = { target };
+		writeJvmSwitchOp(encoder, xml, CPUI_BRANCHIND, nullptr, branchInputs, 1);
+	} else {
+		VarnodeData condLow{ uniqueSpace, uniqueBase, 1 };
+		uniqueBase += 16;
+		VarnodeData condHigh{ uniqueSpace, uniqueBase, 1 };
+		uniqueBase += 16;
+		VarnodeData index{ uniqueSpace, uniqueBase, wordSize };
+		uniqueBase += 16;
+		VarnodeData offset{ uniqueSpace, uniqueBase, wordSize };
+		uniqueBase += 16;
+		VarnodeData tableAddr{ uniqueSpace, uniqueBase, wordSize };
+		uniqueBase += 16;
+
+		VarnodeData lessLowInputs[2] = {
+			key,
+			{ constSpace, static_cast<uintb>(static_cast<intb>(info.low)), wordSize }
+		};
+		VarnodeData branchDefaultInputs1[2] = {
+			{ ramSpace, info.defaultTarget, wordSize },
+			condLow
+		};
+		VarnodeData lessHighInputs[2] = {
+			{ constSpace, static_cast<uintb>(static_cast<intb>(info.high)), wordSize },
+			key
+		};
+		VarnodeData branchDefaultInputs2[2] = {
+			{ ramSpace, info.defaultTarget, wordSize },
+			condHigh
+		};
+		VarnodeData subInputs[2] = {
+			key,
+			{ constSpace, static_cast<uintb>(static_cast<intb>(info.low)), wordSize }
+		};
+		VarnodeData multInputs[2] = {
+			index,
+			{ constSpace, 4, wordSize }
+		};
+		VarnodeData addTableInputs[2] = {
+			index,
+			{ constSpace, addr.offset + 1 + info.padding + 12, wordSize }
+		};
+		VarnodeData loadOffsetInputs[2] = {
+			{ constSpace, reinterpret_cast<uintb>(ramSpace), wordSize },
+			tableAddr
+		};
+		VarnodeData addTargetInputs[2] = {
+			offset,
+			{ constSpace, addr.offset, wordSize }
+		};
+		VarnodeData branchInputs[1] = { target };
+
+		writeJvmSwitchOp(encoder, xml, CPUI_INT_SLESS, &condLow, lessLowInputs, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_CBRANCH, nullptr, branchDefaultInputs1, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_INT_SLESS, &condHigh, lessHighInputs, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_CBRANCH, nullptr, branchDefaultInputs2, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_INT_SUB, &index, subInputs, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_INT_MULT, &index, multInputs, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_INT_ADD, &tableAddr, addTableInputs, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_LOAD, &offset, loadOffsetInputs, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_INT_ADD, &target, addTargetInputs, 2);
+		writeJvmSwitchOp(encoder, xml, CPUI_BRANCHIND, nullptr, branchInputs, 1);
+	}
+
+	encoder.closeElement(ELEM_RESPONSE_INST);
+	xml += "</inst>\n";
+	return std::pair<std::string, std::string>(packedStream.str(), xml);
+}
+
+static std::string getPackedEmptyPcodeInject(Translate& trans, AddrInfo addr)
+{
+	std::ostringstream packedStream;
+	PackedEncode encoder(packedStream);
+	AddrSpace* space = trans.getSpaceByName(addr.space);
+	if (space == nullptr)
+		throw DecompError("No address space named " + addr.space);
+	Address address(space, addr.offset);
+	encoder.openElement(ELEM_RESPONSE_INST);
+	encoder.writeSignedInteger(ATTRIB_OFFSET, 0);
+	address.encode(encoder);
+	encoder.closeElement(ELEM_RESPONSE_INST);
+	return packedStream.str();
+}
+
+
+//Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/app/plugin/processors/sleigh/PcodeEmitObjects.java
+//Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/program/model/pcode/PcodeOp.java
+class XmlPcodeEmit : public PcodeEmit {
+public:
+	//PcodeCacher/PcodeBuilder already resolve
+	//void resolveRelatives() {
+		//for (int i = 0; i < labelref.size(); i++) {
+			/*int opindex = labelref.get(i);
+			PcodeOp op = oplist.get(opindex);
+			Varnode vn = op.getInput(0);
+			int labelid = (int)vn.getOffset();
+			if ((labelid >= labeldef.size()) || (labeldef.get(labelid) == null)) {
+				throw DecompError("Reference to non-existant sleigh label");
+			}
+			long res = (long)labeldef.get(labelid) - (long)opindex;
+			if (vn.getSize() < 8) {
+				long mask = -1;
+				mask >>>= (8 - vn.getSize()) * 8;
+				res &= mask;
+			}
+			AddressSpace spc = vn.getAddress().getAddressSpace();
+			vn = new Varnode(spc.getAddress(res), vn.getSize());
+			op.setInput(vn, 0);*/
+			//}
+		//}
+		//void addLabelRef() { labelref.push_back(numOps); }
+	virtual void dump(const Address& addr, OpCode opc,
+		VarnodeData* outvar, VarnodeData* vars, int4 isize)
+	{
+		OpGroup op;
+		op.opc = opc;
+		op.hasOut = outvar != nullptr;
+		if (op.hasOut)
+			op.out = *outvar;
+		for (int i = 0; i < isize; i++)
+			op.vars.push_back(vars[i]);
+		ops.push_back(op);
+		std::string inpstr;
+		for (int i = opc == CPUI_LOAD || opc == CPUI_STORE ? 1 : 0; i < isize; i++) {
+			inpstr += "    <addr space=\"" + vars[i].space->getName() + "\" offset=\"0x" +
+				to_string(vars[i].offset, hex) +
+				"\" size=\"" + std::to_string(vars[i].size) + "\"/>\n";
+		}
+		strs.push_back({ "  <op code=\"" + std::to_string(opc) + "\">\n",
+			(outvar != nullptr ? "    <addr space=\"" + outvar->space->getName() + "\" offset=\"0x" +
+				to_string(outvar->offset, hex) +
+				"\" size=\"" + std::to_string(outvar->size) + "\"/>\n" : "    <void/>\n") +
+			(opc == CPUI_LOAD || opc == CPUI_STORE ?
+				"    <spaceid name=\"" + vars[0].space->getName() + "\"/>\n" : "") +
+			inpstr + "  </op>\n" });
+	}
+	void encodePacked(PackedEncode& encoder, Translate& trans, AddrInfo addr, int4 offset)
+	{
+		AddrSpace* space = trans.getSpaceByName(addr.space);
+		if (space == nullptr)
+			throw DecompError("No address space named " + addr.space);
+		Address address(space, addr.offset);
+		encoder.openElement(ELEM_RESPONSE_INST);
+		encoder.writeSignedInteger(ATTRIB_OFFSET, offset);
+		address.encode(encoder);
+		for (std::vector<OpGroup>::iterator it = ops.begin(); it != ops.end(); ++it) {
+			writePackedPcodeOp(encoder, it->opc, it->hasOut ? &it->out : nullptr,
+				it->vars.empty() ? nullptr : it->vars.data(), (int4)it->vars.size());
+		}
+		encoder.closeElement(ELEM_RESPONSE_INST);
+	}
+	std::string build(std::string space, uintb addr)
+	{
+		std::string str;
+		for (int i = 0; i < strs.size(); i++) {
+			str += strs[i].pre + "    <seqnum space=\"" + space + "\" offset=\"0x" + to_string(addr, hex) +
+				"\" uniq=\"0x" + to_string(i, hex) + "\"/>\n" + strs[i].post;
+		}
+		return str;
+	}
+	//std::string xmlPcodes; //XML serialized vector of PcodeOpRaw
+	struct StrGroup { std::string pre; std::string post; };
+	struct OpGroup {
+		OpCode opc;
+		bool hasOut;
+		VarnodeData out;
+		std::vector<VarnodeData> vars;
+	};
+	std::vector<StrGroup> strs;
+	std::vector<OpGroup> ops;
+	std::string body;
+	intb paramShift = 0; //only for callfixup
+	std::vector<std::pair<std::string, int>> inputs; //only for dynamic - callotherfixup, executablepcode
+	std::vector<std::pair<std::string, int>> outputs; //only for dynamic - callotherfixup, executablepcode
+	//std::vector<int> labelref;
+};
+
+//Interacting with decompile/decompile.exe:
+//ghidra\app\decompiler\DecompileProcess.java
+static const unsigned char command_start[] = { 0, 0, 1, 2 };
+static const unsigned char command_end[] = { 0, 0, 1, 3 };
+static const unsigned char query_response_start[] = { 0, 0, 1, 8 };
+static const unsigned char query_response_end[] = { 0, 0, 1, 9 };
+static const unsigned char string_start[] = { 0, 0, 1, 14 };
+static const unsigned char string_end[] = { 0, 0, 1, 15 };
+static const unsigned char exception_start[] = { 0, 0, 1, 10 };
+static const unsigned char exception_end[] = { 0, 0, 1, 11 };
+static const unsigned char byte_start[] = { 0, 0, 1, 12 };
+static const unsigned char byte_end[] = { 0, 0, 1, 13 };
+
+DecompInterface::~DecompInterface() {
+	statusGood = false;
+	for (std::map<std::string, XmlPcodeEmit*>::iterator it = callFixupMap.begin();
+		it != callFixupMap.end(); it++) {
+		delete it->second;
+	}
+	for (std::map<std::string, XmlPcodeEmit*>::iterator it = callFixupOtherMap.begin();
+		it != callFixupOtherMap.end(); it++) {
+		delete it->second;
+	}
+	for (std::map<std::string, XmlPcodeEmit*>::iterator it = callMechMap.begin();
+		it != callMechMap.end(); it++) {
+		delete it->second;
+	}
+	for (std::map<std::string, XmlPcodeEmit*>::iterator it = callExecPcodeMap.begin();
+		it != callExecPcodeMap.end(); it++) {
+		delete it->second;
+	}
+	if (trans != nullptr) delete trans;
+	if (context != nullptr) delete context;
+	if (loader != nullptr) delete loader;
+}
+
+uchar DecompInterface::read()
+{
+	uchar cur;
+	if (callback->readDec(&cur, 1) <= 0) throw DecompError("Read pipe is bad");
+	return cur;
+}
+
+void DecompInterface::write(void const* Buf, size_t MaxCharCount)
+{
+	if (callback->writeDec(Buf, MaxCharCount) != MaxCharCount) throw DecompError("Write pipe is bad");
+}
+
+uchar DecompInterface::readToBurst() {
+	uchar cur;
+	for (;;) {
+		do {
+			cur = read();
+		} while (cur > 0);
+		if (cur == -1) {
+			break;
+		}
+		do {
+			cur = read();
+		} while (cur == 0);
+		if (cur == 1) {
+			cur = read();
+			if (cur == -1) {
+				break;
+			}
+			return cur;
+		}
+		if (cur == -1) {
+			break;
+		}
+	}
+	throw DecompError("Decompiler process died");
+	return -1;
+}
+
+uchar DecompInterface::readToBuffer(std::vector<uchar>& buf) {
+	uchar cur;
+	for (;;) {
+		cur = read();
+		while (cur > 0) {
+			if (buf.size() >= (maxResultSizeMBYtes << 20))
+				throw DecompError("Maximum payload size exceeded");
+			buf.push_back((uchar)cur);
+			cur = read();
+		}
+		if (cur == -1) {
+			break;
+		}
+		do {
+			cur = read();
+		} while (cur == 0);
+		if (cur == 1) {
+			cur = read();
+			if (cur > 0) {
+				return cur;
+			}
+		}
+		if (cur == -1) {
+			break;
+		}
+	}
+	throw DecompError("Decompiler process died");
+	return -1;
+}
+
+std::string DecompInterface::readQueryString() {
+	int type = readToBurst();
+	if (type != 14) {
+		throw DecompError("GHIDRA/decompiler alignment error");
+	}
+	std::vector<uchar> buf; //new LimitedByteBuffer(16, 1 << 16);
+	type = readToBuffer(buf);
+	if (type != 15) {
+		throw DecompError("GHIDRA/decompiler alignment error");
+	}
+	if (callback != nullptr)
+		callback->protocolRecorder("readQueryString bytes=\"" + std::to_string(buf.size()) + "\"", false);
+	return std::string(buf.begin(), buf.end());
+}
+
+void DecompInterface::generateException() {
+	std::string type = readQueryString();
+	std::string message = readQueryString();
+	callback->protocolRecorder("exception(\"" + escapeCStr(type) + "\", \"" + escapeCStr(message) + "\")", false);
+	readToBurst(); // Read exception terminator
+	if (type == "alignment") {
+		throw DecompError("Alignment error: " + message);
+	}
+	throw DecompError(type + " " + message);
+}
+
+void DecompInterface::readToResponse() {
+	//device level descriptors are not buffered and do not need flushing
+	//fflush(nativeOut); // Make sure decompiler has access to all the info it has been sent
+	uchar type;
+	do {
+		type = readToBurst();
+	} while ((type & 1) == 1);
+	if (type == 10) {
+		generateException();
+	}
+	if (type == 6) {
+		return;
+	}
+	throw DecompError("Ghidra/decompiler alignment error");
+}
+
+void DecompInterface::writeString(std::string msg) {
+	write(string_start, sizeof(string_start));
+	write(msg.c_str(), (unsigned int)msg.size());
+	write(string_end, sizeof(string_end));
+}
+
+/**
+ * Transfer bytes written to -out- to decompiler process
+ * @param out has the collected byte for this write
+ */
+void DecompInterface::writeBytes(const uchar out[], int outlen) {
+	write(string_start, sizeof(string_start));
+	int sz = outlen;
+	uchar sz1 = (sz & 0x3f) + 0x20;
+	sz >>= 6;
+	uchar sz2 = (sz & 0x3f) + 0x20;
+	sz >>= 6;
+	uchar sz3 = (sz & 0x3f) + 0x20;
+	sz >>= 6;
+	uchar sz4 = (sz & 0x3f) + 0x20;
+	write(&sz1, sizeof(uchar));
+	write(&sz2, sizeof(uchar));
+	write(&sz3, sizeof(uchar));
+	write(&sz4, sizeof(uchar));
+	write(out, outlen);
+	write(string_end, sizeof(string_end));
+}
+
+//Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/program/model/pcode/PcodeDataTypeManager.java
+std::string DecompInterface::buildTypeXml(std::vector<TypeInfo>& ti, size_t indnt)
+{
+	std::string str;
+	std::stack<int> s;
+	s.push(0);
+	while (!s.empty()) {
+		int idx = s.top();
+		s.pop();
+		if (idx < 0) { //-1 used to indicate coming back up the stack for ptr and array
+			str += std::string(indnt + ~idx * 2, ' ') + "</type>\n";
+			continue;
+		}
+		TypeInfo& typeInfo = ti.at(idx);
+		//if (typeInfo == terminate) return ""; //termination happens at appropriate place implicitly
+		if (typeInfo.size == -1) {
+			/*int i;
+			for (i = 0; i < numDefCoreTypes; i++) {
+				if (defaultCoreTypes[i].name == typeInfo.typeName) break;
+			} // - (i == numDefCoreTypes ? (1ull << 63) : 0) */
+			str += std::string(indnt + idx * 2, ' ') + "<typeref name=\"" + typeInfo.typeName + "\" id=\"0x" +
+				to_string(hashName(typeInfo.typeName), hex) + "\"/>\n"; //terminates
+			continue;
+		}
+
+		if (typeInfo.metaType == "ptr") {
+			str += std::string(indnt + idx * 2, ' ') + "<type name=\"" + typeInfo.typeName + /*"\" id=\"" + std::to_string(hashName(typeInfo.typeName))*/ +
+				"\" metatype=\"" + typeInfo.metaType +
+				"\" size=\"" + std::to_string(typeInfo.size) + "\">\n"; //wordsize=\"\" when != 1
+			s.push(~idx);
+			s.push(idx + 1);
+		} else if (typeInfo.metaType == "struct") {
+			std::string strct;
+			for (int i = 0; i < typeInfo.structMembers.size(); i++) { //core types are not type referenced though
+				strct += std::string(indnt + idx * 2 + 2, ' ') + "<field name=\"" + typeInfo.structMembers[i].name +
+					"\" offset=\"" +
+					std::to_string(typeInfo.structMembers[i].offset) + "\">\n" +
+					buildTypeXml(typeInfo.structMembers[i].ti, indnt + idx * 2 + 4) + std::string(indnt + idx * 2 + 2, ' ') + "</field>\n";
+			}
+			str += std::string(indnt + idx * 2, ' ') + "<type name=\"" + typeInfo.typeName +
+				"\" id=\"" + std::to_string(hashName(typeInfo.typeName)) +
+				"\" metatype=\"" + typeInfo.metaType + "\" size=\"" +
+				std::to_string(typeInfo.size) + "\">\n" + strct + std::string(indnt + idx * 2, ' ') + "</type>\n"; //terminates
+		} else if (typeInfo.metaType == "array") {
+			str += std::string(indnt + idx * 2, ' ') + "<type name=\"" + typeInfo.typeName +
+				"\" metatype=\"" + typeInfo.metaType + "\" size=\"" +
+				std::to_string(typeInfo.size) +
+				"\" arraysize=\"" + std::to_string(typeInfo.arraySize) + "\">\n";
+			s.push(~idx);
+			s.push(idx + 1);
+		} else if (typeInfo.metaType == "code") {
+			str += std::string(indnt + idx * 2, ' ') + "<type name=\"" + typeInfo.typeName +
+				"\" id=\"" + std::to_string(hashName(typeInfo.typeName)) +
+				"\" metatype=\"" + typeInfo.metaType +
+				"\" size=\"" + std::to_string(typeInfo.size) + "\">\n" +
+				writeFuncProto(typeInfo.funcInfo, "", true, indnt + idx * 2 + 2) +
+				std::string(indnt + idx * 2, ' ') + "</type>\n";
+		} else if (typeInfo.metaType == "void") {
+			str += std::string(indnt + idx * 2, ' ') + "<void/>\n";
+		} else {
+			/*int i;
+			for (i = 0; i < numDefCoreTypes; i++) {
+				if (defaultCoreTypes[i].name == typeInfo.typeName) break;
+			} // - (i == numDefCoreTypes ? (1ull << 63) : 0)*/
+			str += std::string(indnt, ' ') + "<type name=\"" + typeInfo.typeName +
+				"\" id=\"" + std::to_string(hashName(typeInfo.typeName)) +
+				"\" metatype=\"" + typeInfo.metaType +
+				"\" size=\"" + std::to_string(typeInfo.size) + "\"" +
+				std::string(typeInfo.isEnum ? " enum=\"true\"" : "") +
+				std::string(typeInfo.isUtf ? " utf=\"true\"" : "") +
+				std::string(typeInfo.isChar ? " char=\"true\"" : "") +
+				">\n"; //core=\"true\"
+			if (typeInfo.isEnum) {
+				for (size_t i = 0; i < typeInfo.enumMembers.size(); i++) {
+					str += std::string(indnt + 2, ' ') + "<val name=\"" + typeInfo.enumMembers[i].first +
+						"\" value=\"" + std::to_string(typeInfo.enumMembers[i].second) + "\"/>\n";
+				}
+			}
+			str += std::string(indnt, ' ') + "</type>\n";
+		}
+		//metaType == "uint" && callback->isEnum();
+		//metaType == "code"...
+	}
+	return str;
+}
+
+enum comment_type {
+	user1 = 1,			///< The first user defined property
+	user2 = 2,			///< The second user defined property
+	user3 = 4,			///< The third user defined property
+	header = 8,			///< The comment should be displayed in the function header
+	warning = 16,		///< The comment is auto-generated to alert the user
+	warningheader = 32		///< The comment is auto-generated and should be in the header
+};
+
+static std::string mappedSymbolKindName(MappedSymbolKinds kind)
+{
+	switch (kind) {
+	case KIND_FUNCTION: return "function";
+	case KIND_DATA: return "data";
+	case KIND_EXTERNALREFERENCE: return "external";
+	case KIND_LABEL: return "label";
+	case KIND_HOLE:
+	default:
+		return "hole";
+	}
+}
+
+static std::string getMappedSymbolName(const MappedSymbolInfo& msi, const Address& addr,
+	const std::string& prefix)
+{
+	if (!msi.name.empty())
+		return msi.name;
+	return prefix + "_" + to_string(addr.getOffset(), hex);
+}
+
+static TypeInfo mappedSymbolPackedCoreType(const std::vector<TypeInfo>& typeChain, uintb mapSize)
+{
+	if (!typeChain.empty()) {
+		const TypeInfo& first = typeChain.front();
+		if (first.metaType != "ptr" && first.metaType != "array" &&
+			first.metaType != "struct" && first.metaType != "code")
+			return first;
+		if (first.metaType == "array" && typeChain.size() > 1)
+			return typeChain[1];
+	}
+	std::string metaType = "unknown";
+	int typ = DecompInterface::coreTypeLookup(static_cast<size_t>(mapSize), metaType);
+	return TypeInfo{ typ == -1 ? "undefined" : defaultCoreTypes[typ].name,
+		mapSize == 0 ? 1 : mapSize, metaType };
+}
+
+static void encodePackedTypeRef(PackedEncode& encoder, const TypeInfo& typeInfo)
+{
+	encoder.openElement(ELEM_RESPONSE_TYPEREF);
+	encoder.writeString(ATTRIB_NAME, typeInfo.typeName.empty() ? "undefined" : typeInfo.typeName);
+	encoder.writeUnsignedInteger(ATTRIB_ID, hashName(typeInfo.typeName.empty() ? "undefined" : typeInfo.typeName));
+	if (typeInfo.size != 0) {
+		int typ = DecompInterface::coreTypeLookup(static_cast<size_t>(typeInfo.size), typeInfo.metaType);
+		if (typ == -1)
+			encoder.writeSignedInteger(ATTRIB_SIZE, static_cast<intb>(typeInfo.size));
+	}
+	encoder.closeElement(ELEM_RESPONSE_TYPEREF);
+}
+
+static void encodePackedFallbackCoreType(PackedEncode& encoder, uintb size)
+{
+	if (size == 0)
+		size = 1;
+	std::string metaType = "unknown";
+	int typ = DecompInterface::coreTypeLookup(static_cast<size_t>(size), metaType);
+	encodePackedTypeRef(encoder, TypeInfo{
+		typ == -1 ? "undefined" : defaultCoreTypes[typ].name,
+		size,
+		metaType
+	});
+}
+
+static void encodePackedPrototype(PackedEncode& encoder, const FuncProtoInfo& func);
+
+static void encodePackedTypeInfo(PackedEncode& encoder,
+	const std::vector<TypeInfo>& typeChain, size_t index, uintb fallbackSize)
+{
+	if (index >= typeChain.size()) {
+		encodePackedFallbackCoreType(encoder, fallbackSize);
+		return;
+	}
+
+	const TypeInfo& typeInfo = typeChain[index];
+	if (typeInfo.size == (unsigned long long)-1) {
+		encodePackedTypeRef(encoder, typeInfo);
+		return;
+	}
+	if (typeInfo.metaType == "void") {
+		encoder.openElement(ELEM_RESPONSE_VOID);
+		encoder.closeElement(ELEM_RESPONSE_VOID);
+		return;
+	}
+	if (typeInfo.metaType == "ptr") {
+		encoder.openElement(ELEM_RESPONSE_TYPE);
+		if (!typeInfo.typeName.empty()) {
+			encoder.writeString(ATTRIB_NAME, typeInfo.typeName);
+			encoder.writeUnsignedInteger(ATTRIB_ID, hashName(typeInfo.typeName));
+		}
+		encoder.writeString(ATTRIB_METATYPE, "ptr");
+		encoder.writeSignedInteger(ATTRIB_SIZE,
+			static_cast<intb>(typeInfo.size == 0 ? fallbackSize : typeInfo.size));
+		if (index + 1 < typeChain.size() &&
+			(typeChain[index + 1].metaType != "code" || typeChain[index + 1].funcInfo.isNoReturn))
+			encodePackedTypeInfo(encoder, typeChain, index + 1, 1);
+		else {
+			encoder.openElement(ELEM_RESPONSE_VOID);
+			encoder.closeElement(ELEM_RESPONSE_VOID);
+		}
+		encoder.closeElement(ELEM_RESPONSE_TYPE);
+		return;
+	}
+	if (typeInfo.metaType == "array") {
+		encoder.openElement(ELEM_RESPONSE_TYPE);
+		if (!typeInfo.typeName.empty()) {
+			encoder.writeString(ATTRIB_NAME, typeInfo.typeName);
+			encoder.writeUnsignedInteger(ATTRIB_ID, hashName(typeInfo.typeName));
+		}
+		encoder.writeString(ATTRIB_METATYPE, "array");
+		encoder.writeSignedInteger(ATTRIB_SIZE,
+			static_cast<intb>(typeInfo.size == 0 ? fallbackSize : typeInfo.size));
+		encoder.writeSignedInteger(ATTRIB_RESPONSE_ARRAYSIZE,
+			static_cast<intb>(typeInfo.arraySize == 0 ? 1 : typeInfo.arraySize));
+		encodePackedTypeInfo(encoder, typeChain, index + 1, 1);
+		encoder.closeElement(ELEM_RESPONSE_TYPE);
+		return;
+	}
+	if (typeInfo.metaType == "struct") {
+		encoder.openElement(ELEM_RESPONSE_TYPE);
+		encoder.writeString(ATTRIB_NAME, typeInfo.typeName.empty() ? "anon_struct" : typeInfo.typeName);
+		encoder.writeUnsignedInteger(ATTRIB_ID,
+			hashName(typeInfo.typeName.empty() ? "anon_struct" : typeInfo.typeName));
+		encoder.writeString(ATTRIB_METATYPE, "struct");
+		encoder.writeSignedInteger(ATTRIB_SIZE,
+			static_cast<intb>(typeInfo.size == 0 ? fallbackSize : typeInfo.size));
+		for (size_t i = 0; i < typeInfo.structMembers.size(); ++i) {
+			const StructMemberInfo& member = typeInfo.structMembers[i];
+			encoder.openElement(ELEM_RESPONSE_FIELD);
+			encoder.writeString(ATTRIB_NAME, member.name);
+			encoder.writeUnsignedInteger(ATTRIB_OFFSET, member.offset);
+			encodePackedTypeInfo(encoder, member.ti, 0, 1);
+			encoder.closeElement(ELEM_RESPONSE_FIELD);
+		}
+		encoder.closeElement(ELEM_RESPONSE_TYPE);
+		return;
+	}
+	if (typeInfo.metaType == "code") {
+		const std::string typeName = typeInfo.typeName.empty() ? "code" : typeInfo.typeName;
+		encoder.openElement(ELEM_RESPONSE_TYPE);
+		encoder.writeString(ATTRIB_NAME, typeName);
+		encoder.writeUnsignedInteger(ATTRIB_ID, hashName(typeName));
+		encoder.writeString(ATTRIB_METATYPE, "code");
+		encoder.writeSignedInteger(ATTRIB_SIZE,
+			static_cast<intb>(typeInfo.size == 0 ? fallbackSize : typeInfo.size));
+		encodePackedPrototype(encoder, typeInfo.funcInfo);
+		encoder.closeElement(ELEM_RESPONSE_TYPE);
+		return;
+	}
+
+	encoder.openElement(ELEM_RESPONSE_TYPE);
+	encoder.writeString(ATTRIB_NAME, typeInfo.typeName.empty() ? "undefined" : typeInfo.typeName);
+	encoder.writeUnsignedInteger(ATTRIB_ID, hashName(typeInfo.typeName.empty() ? "undefined" : typeInfo.typeName));
+	encoder.writeString(ATTRIB_METATYPE, typeInfo.metaType.empty() ? "unknown" : typeInfo.metaType);
+	encoder.writeSignedInteger(ATTRIB_SIZE,
+		static_cast<intb>(typeInfo.size == 0 ? fallbackSize : typeInfo.size));
+	if (typeInfo.isChar)
+		encoder.writeBool(ATTRIB_RESPONSE_CHAR, true);
+	if (typeInfo.isUtf)
+		encoder.writeBool(ATTRIB_RESPONSE_UTF, true);
+	encoder.closeElement(ELEM_RESPONSE_TYPE);
+}
+
+static void encodePackedPrototype(PackedEncode& encoder, const FuncProtoInfo& func)
+{
+	encoder.openElement(ELEM_RESPONSE_PROTOTYPE);
+	if (!func.model.empty() && func.model != "unknown")
+		encoder.writeString(ATTRIB_RESPONSE_MODEL, func.model);
+	if (func.extraPop != static_cast<unsigned long long>(-1))
+		encoder.writeSignedInteger(ATTRIB_RESPONSE_EXTRAPOP, static_cast<intb>(func.extraPop));
+	else
+		encoder.writeString(ATTRIB_RESPONSE_EXTRAPOP, "unknown");
+	if (func.isNoReturn)
+		encoder.writeBool(ATTRIB_RESPONSE_NORETURN, true);
+
+	encoder.openElement(ELEM_RESPONSE_RETURNSYM);
+	encoder.openElement(ELEM_RESPONSE_ADDR);
+	encoder.closeElement(ELEM_RESPONSE_ADDR);
+	if (func.isNoReturn || func.retType.addr.size == 0 || func.retType.pi.ti.empty()) {
+		encoder.openElement(ELEM_RESPONSE_VOID);
+		encoder.closeElement(ELEM_RESPONSE_VOID);
+	} else {
+		encodePackedTypeInfo(encoder, func.retType.pi.ti, 0, func.retType.addr.size);
+	}
+	encoder.closeElement(ELEM_RESPONSE_RETURNSYM);
+	encoder.closeElement(ELEM_RESPONSE_PROTOTYPE);
+}
+
+static void encodePackedCPoolRecord(PackedEncode& encoder, const CPoolRecord& rec)
+{
+	size_t tagIndex = rec.tag >= PRIMITIVE && rec.tag <= CHECK_CAST ?
+		static_cast<size_t>(rec.tag) : static_cast<size_t>(PRIMITIVE);
+	encoder.openElement(ELEM_RESPONSE_CPOOLREC);
+	encoder.writeString(ATTRIB_RESPONSE_TAG, cpoolreftags[tagIndex]);
+	if (rec.constructor)
+		encoder.writeBool(ATTRIB_CONSTRUCTOR, true);
+	if (rec.tag == PRIMITIVE) {
+		encoder.openElement(ELEM_RESPONSE_VALUE);
+		encoder.writeUnsignedInteger(ATTRIB_CONTENT, rec.value);
+		encoder.closeElement(ELEM_RESPONSE_VALUE);
+	}
+	if (!rec.data.empty()) {
+		std::ostringstream data;
+		int wrap = 0;
+		for (size_t i = 0; i < rec.data.size(); ++i) {
+			data << std::setfill('0') << std::setw(2) << std::hex
+				<< static_cast<unsigned int>(rec.data[i]) << ' ';
+			if (++wrap > 15) {
+				data << '\n';
+				wrap = 0;
+			}
+		}
+		encoder.openElement(ELEM_RESPONSE_DATA);
+		encoder.writeSignedInteger(ATTRIB_RESPONSE_LENGTH, rec.data.size());
+		encoder.writeString(ATTRIB_CONTENT, data.str());
+		encoder.closeElement(ELEM_RESPONSE_DATA);
+	} else {
+		encoder.openElement(ELEM_RESPONSE_TOKEN);
+		encoder.writeString(ATTRIB_CONTENT, rec.token);
+		encoder.closeElement(ELEM_RESPONSE_TOKEN);
+	}
+	encodePackedTypeRef(encoder, TypeInfo{ "undefined", 1, "unknown" });
+	encoder.closeElement(ELEM_RESPONSE_CPOOLREC);
+}
+
+static void encodePackedMappedData(PackedEncode& encoder, const Address& addr,
+	const std::string& name, unsigned long long scopeId,
+	const std::vector<TypeInfo>& typeChain, uintb mapSize, bool readOnly, bool volatil)
+{
+	if (mapSize == 0)
+		mapSize = 1;
+	TypeInfo typeInfo = mappedSymbolPackedCoreType(typeChain, mapSize);
+	bool useFullType = !typeChain.empty() &&
+		(typeChain.front().metaType == "ptr" || typeChain.front().metaType == "array" ||
+			typeChain.front().metaType == "struct" || typeChain.front().metaType == "code");
+	encoder.openElement(ELEM_RESPONSE_SCOPE);
+	encoder.writeUnsignedInteger(ATTRIB_ID, scopeId);
+	encoder.openElement(ELEM_RESPONSE_MAPSYM);
+	encoder.openElement(ELEM_RESPONSE_SYMBOL);
+	encoder.writeString(ATTRIB_NAME, name);
+	encoder.writeBool(ATTRIB_NAMELOCK, !name.empty());
+	encoder.writeBool(ATTRIB_TYPELOCK, true);
+	encoder.writeBool(ATTRIB_READONLY, readOnly);
+	encoder.writeBool(ATTRIB_RESPONSE_VOLATILE, volatil);
+	encoder.writeSignedInteger(ATTRIB_RESPONSE_CAT, -1);
+	if (useFullType)
+		encodePackedTypeInfo(encoder, typeChain, 0, mapSize);
+	else
+		encodePackedTypeRef(encoder, typeInfo);
+	encoder.closeElement(ELEM_RESPONSE_SYMBOL);
+	addr.encode(encoder, mapSize);
+	encoder.openElement(ELEM_RESPONSE_RANGELIST);
+	encoder.closeElement(ELEM_RESPONSE_RANGELIST);
+	encoder.closeElement(ELEM_RESPONSE_MAPSYM);
+	encoder.closeElement(ELEM_RESPONSE_SCOPE);
+}
+
+static void encodePackedMappedLabel(PackedEncode& encoder, const Address& addr,
+	const std::string& name, unsigned long long scopeId, uintb mapSize,
+	bool readOnly, bool volatil)
+{
+	if (mapSize == 0)
+		mapSize = 1;
+	encoder.openElement(ELEM_RESPONSE_SCOPE);
+	encoder.writeUnsignedInteger(ATTRIB_ID, scopeId);
+	encoder.openElement(ELEM_RESPONSE_MAPSYM);
+	encoder.openElement(ELEM_RESPONSE_LABELSYM);
+	encoder.writeString(ATTRIB_NAME, name);
+	encoder.writeBool(ATTRIB_NAMELOCK, true);
+	encoder.writeBool(ATTRIB_TYPELOCK, true);
+	encoder.writeBool(ATTRIB_READONLY, readOnly);
+	encoder.writeBool(ATTRIB_RESPONSE_VOLATILE, volatil);
+	encoder.writeSignedInteger(ATTRIB_RESPONSE_CAT, -1);
+	encoder.closeElement(ELEM_RESPONSE_LABELSYM);
+	addr.encode(encoder, mapSize);
+	encoder.openElement(ELEM_RESPONSE_RANGELIST);
+	encoder.closeElement(ELEM_RESPONSE_RANGELIST);
+	encoder.closeElement(ELEM_RESPONSE_MAPSYM);
+	encoder.closeElement(ELEM_RESPONSE_SCOPE);
+}
+
+static void encodePackedMappedExternRef(PackedEncode& encoder, const Address& addr,
+	const std::string& name, unsigned long long scopeId)
+{
+	encoder.openElement(ELEM_RESPONSE_SCOPE);
+	encoder.writeUnsignedInteger(ATTRIB_ID, scopeId);
+	encoder.openElement(ELEM_RESPONSE_MAPSYM);
+	encoder.openElement(ELEM_RESPONSE_EXTERNREFSYMBOL);
+	encoder.writeString(ATTRIB_NAME, name);
+	addr.encode(encoder);
+	encoder.closeElement(ELEM_RESPONSE_EXTERNREFSYMBOL);
+	addr.encode(encoder, 1);
+	encoder.openElement(ELEM_RESPONSE_RANGELIST);
+	encoder.closeElement(ELEM_RESPONSE_RANGELIST);
+	encoder.closeElement(ELEM_RESPONSE_MAPSYM);
+	encoder.closeElement(ELEM_RESPONSE_SCOPE);
+}
+
+static bool registerContainingHole(const Translate* trans, const Address& queryAddr,
+	uintb& first, uintb& last)
+{
+	if (trans == nullptr || queryAddr.getSpace() == nullptr ||
+		queryAddr.getSpace()->getName() != "register")
+		return false;
+
+	static const int4 candidateSizes[] = { 8, 4, 2, 1 };
+	for (int4 size : candidateSizes) {
+		uintb base = queryAddr.getOffset() & ~(static_cast<uintb>(size) - 1);
+		std::string name = trans->getRegisterName(queryAddr.getSpace(), base, size);
+		if (name.empty())
+			continue;
+		first = base;
+		last = base + static_cast<uintb>(size) - 1;
+		return true;
+	}
+	return false;
+}
+
+static void encodePackedNoReturnPrototype(PackedEncode& encoder, const FuncProtoInfo& func)
+{
+	encoder.openElement(ELEM_RESPONSE_PROTOTYPE);
+	if (func.model.size() != 0 && func.model != "unknown")
+		encoder.writeString(ATTRIB_RESPONSE_MODEL, func.model);
+	if (func.extraPop != static_cast<unsigned long long>(-1))
+		encoder.writeSignedInteger(ATTRIB_RESPONSE_EXTRAPOP, static_cast<intb>(func.extraPop));
+	else
+		encoder.writeString(ATTRIB_RESPONSE_EXTRAPOP, "unknown");
+	encoder.writeBool(ATTRIB_RESPONSE_NORETURN, true);
+	encoder.openElement(ELEM_RESPONSE_RETURNSYM);
+	encoder.openElement(ELEM_RESPONSE_ADDR);
+	encoder.closeElement(ELEM_RESPONSE_ADDR);
+	encoder.openElement(ELEM_RESPONSE_VOID);
+	encoder.closeElement(ELEM_RESPONSE_VOID);
+	encoder.closeElement(ELEM_RESPONSE_RETURNSYM);
+	encoder.closeElement(ELEM_RESPONSE_PROTOTYPE);
+}
+
+void DecompInterface::adjustUniqueBase(VarnodeTpl* v) {
+	if (v->getSpace().isUniqueSpace()) {
+		ConstTpl c = v->getOffset();
+		uintb offset = c.getReal();
+		if (offset >= uniqueBase) uniqueBase = offset + 16;
+	}
+}
+
+//Ghidra/Features/Decompiler/src/main/java/ghidra/app/decompiler/DecompileCallback.java
+//Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/program/model/lang/PcodeInjectLibrary.java
+XmlPcodeEmit* DecompInterface::getPcodeSnippet(std::string parsestring,
+	const std::vector<std::pair<std::string, int>>& inputs,
+	const std::vector<std::pair<std::string, int>>& outputs)
+{
+	PcodeSnippet compiler(trans);
+	//  compiler.clear();			// Not necessary unless we reuse
+	compiler.setUniqueBase(uniqueBase);
+	istringstream s(parsestring);
+	for (size_t i = 0; i < inputs.size(); i++)
+		compiler.addOperand(inputs[i].first, inputs[i].second);
+	for (size_t i = 0; i < outputs.size(); i++)
+		compiler.addOperand(outputs[i].first, outputs[i].second);
+	if (!compiler.parseStream(s))
+		throw DecompError("Unable to compile pcode: " + compiler.getErrorMessage());
+	//uintm tempbase = compiler.getUniqueBase();
+	ConstructTpl* tpl = compiler.releaseResult();
+	//parsestring = "";		// No longer need the memory
+	//adjustUniqueBase
+	for (int i = 0; i < tpl->getOpvec().size(); i++) {
+		if (tpl->getOpvec()[i]->getOut() != nullptr)
+			adjustUniqueBase(tpl->getOpvec()[i]->getOut());
+		for (int j = 0; j < tpl->getOpvec()[i]->numInput(); j++)
+			adjustUniqueBase(tpl->getOpvec()[i]->getIn(j));
+	}
+	//buildInstruction
+	ContextInternal cdb;
+	ContextCache cc(&cdb);
+	//use PcodeCacher to resolve issues
+	XmlPcodeEmit* emit = new XmlPcodeEmit();
+	uint4 parser_cachesize = 2;
+	uint4 parser_windowsize = 32;
+	DisassemblyCache discache(trans, &cc, trans->getConstantSpace(), parser_cachesize, parser_windowsize);
+	ParserContext* pc = discache.getParserContext(Address());
+	//ParserContext pc(&cc); //Java derives a SleighParserContext
+
+	//Create state suitable for parsing a just a p-code semantics snippet
+	ParserWalkerChange walker(pc);
+	walker.baseState();
+	Constructor c(nullptr);
+	walker.setConstructor(&c);
+
+	//int4 curstate = pos->getParserState();
+	//if (curstate == ParserContext::uninitialized) resolve(*pos);
+	// If we reach here,  state must be ParserContext::pcode
+	//resolveHandles(*pos);
+	PcodeCacher pcode_cache;
+	//walker.snippetState();
+	//the whole task here is to glue the construction template to the walker through the context
+	//trans->oneInstruction(emit, Address(trans->getSpaceByName(space), addr)); //Sleigh not sufficient for ConstructTpl...
+	SleighBuilder builder(&walker, &discache, &pcode_cache,
+		trans->getConstantSpace(), trans->getUniqueSpace(), 0); //unique_allocatemask not used and always 0
+	//now tie input and output parameters for all callfixupother, callmechanism, executablepcode
+	try {
+		builder.build(tpl, -1);
+		pcode_cache.resolveRelatives();
+		pcode_cache.emit(Address(), emit);
+	} catch (SleighError& err) {
+		delete emit;
+		throw DecompError(err.explain.c_str());
+	} catch (BadDataError& err) {
+		delete emit;
+		throw DecompError(err.explain.c_str());
+	} catch (UnimplError& /*err*/) {
+		ostringstream s;
+		s << "Instruction not implemented in pcode:\n ";
+		ParserWalker* cur = builder.getCurrentWalker();
+		cur->baseState();
+		Constructor* ct = cur->getConstructor();
+		cur->getAddr().printRaw(s);
+		s << ": ";
+		ct->printMnemonic(s, *cur);
+		s << "  ";
+		ct->printBody(s, *cur);
+		//err.explain = s.str();
+		//err.instruction_length = fallOffset;
+		delete emit;
+		throw DecompError(s.str());
+	} catch (LowlevelError& err) {
+		delete emit;
+		throw DecompError(err.explain.c_str());
+	}
+	return emit;
+}
+
+std::string DecompInterface::compilePcodeSnippet(std::string sleighfilename,
+	std::string parsestring,
+	const std::vector<std::pair<std::string, int>>& inputs,
+	const std::vector<std::pair<std::string, int>>& outputs)
+{
+	DecompInterface* di = new DecompInterface();
+	di->setupTranslator(nullptr, sleighfilename);
+	XmlPcodeEmit* emit = di->getPcodeSnippet(parsestring, inputs, outputs);
+	std::string str = emit->build("ram", 0x10000000);
+	delete di;
+	return str;
+}
+
+void getAddrFromString(std::string addrstring, AddrInfo& addr, unsigned long long* size)
+{
+	istringstream str(addrstring);
+	Document* doc;
+	try {
+		doc = xml_tree(str);
+	} catch (XmlError&) {
+		throw DecompError("Received bad XML Address from decompiler");
+	}
+	Element* el = doc->getRoot();
+	addr.space = el->getAttributeValue("space");
+	addr.offset = strtoull(el->getAttributeValue("offset").c_str(), nullptr, 16);
+	if (size != nullptr) *size = strtoll(el->getAttributeValue("size").c_str(), nullptr, 10);
+	delete doc;
+}
+
+void getAddrFromString(std::string addrstring, AddrInfo & addr)
+{
+	getAddrFromString(addrstring, addr, nullptr);
+}
+
+void getAddrFromString(std::string addrstring, SizedAddrInfo& addr)
+{
+	getAddrFromString(addrstring, addr.addr, &addr.size);
+}
+
+void parsePcodeElement(Element* pcode,
+	std::string& body,
+	std::vector<std::pair<std::string, int>>& inputs,
+	std::vector<std::pair<std::string, int>>& outputs)
+{
+	List::const_iterator iter;
+	const List& children(pcode->getChildren());
+	for (iter = children.begin(); iter != children.end(); ++iter) {
+		Element* child = *iter;
+		if (child->getName() == "input") {
+			inputs.push_back(std::pair<std::string, int>(child->getAttributeValue("name"), 0));
+		} else if (child->getName() == "output") {
+			outputs.push_back(std::pair<std::string, int>(child->getAttributeValue("name"), 0));
+		} else if (child->getName() == "body") {
+			body = child->getContent();
+		}
+	}
+	for (size_t i = 0; i < inputs.size(); i++)
+		inputs[i].second = (int)i;
+	for (size_t i = 0; i < outputs.size(); i++)
+		outputs[i].second = (int)(inputs.size() + i);
+}
+
+void decodeVarnodeList(Decoder& decoder, const ElementId& elemId, std::vector<VarnodeData>& out)
+{
+	uint4 id = decoder.openElement(elemId);
+	while (decoder.peekElement() != 0) {
+		VarnodeData vd;
+		vd.decode(decoder);
+		if (vd.space != nullptr)
+			out.push_back(vd);
+	}
+	decoder.closeElement(id);
+}
+
+void DecompInterface::processPcodeInject(int type, std::map<std::string, XmlPcodeEmit*> &fixupmap)
+{
+	std::string name = readQueryString(); //inject_sleigh.cc
+	std::string context = readQueryString();
+	std::string types[] = { "getCallFixup", "getCallotherFixup", "getCallMech", "getXPcode" };
+	callback->protocolRecorder("query(\"" + escapeCStr(types[type - 1]) + "\", \"" + escapeCStr(name) + "\", \"" + escapeCStr(context) + "\")", false);
+	istringstream str(context);
+	Document* doc;
+	try {
+		doc = xml_tree(str);
+	} catch (XmlError&) {
+		throw DecompError("Received bad XML inject context from decompiler");
+	}
+	Element* el = doc->getRoot();
+	const List& list(el->getChildren());
+	List::const_iterator iter;
+	bool bFirst = true;
+	std::string space, offset, fixupspace, fixupoffset; //first address for current address, next for fixup
+	for (iter = list.begin(); iter != list.end(); ++iter) {
+		el = *iter;
+		if (el->getName() == "addr") { //should only be 2 of them
+			for (int i = 0; i < el->getNumAttributes(); i++) {
+				if (el->getAttributeName(i) == "space")
+					(bFirst ? space : fixupspace) = el->getAttributeValue(i);
+				else if (el->getAttributeName(i) == "offset")
+					(bFirst ? offset : fixupoffset) = el->getAttributeValue(i);
+			}
+			bFirst = !bFirst;
+		}
+	}
+	delete doc;
+	uint8 idx = strtoull(offset.c_str(), nullptr, 16);
+	uint8 fixupidx = strtoull(fixupoffset.c_str(), nullptr, 16);
+	XmlPcodeEmit* emitter = fixupmap[name];
+	if (fixupmap[name]->strs.size() == 0) //dynamic, has no body
+		emitter = getPcodeSnippet(callback->getPcodeInject(type, name,
+			AddrInfo{ space, idx }, fixupspace, fixupidx),
+			emitter->inputs, emitter->outputs);
+	std::string s = "<inst" " offset=\"" +
+		std::to_string(trans->instructionLength(Address(trans->getSpaceByName(space), idx))) + "\"" +
+		std::string(emitter->paramShift != 0 ? "paramshift=\"" +
+			std::to_string(emitter->paramShift) + "\"" : "") + ">\n" +
+		emitter->build(space, idx) + "</inst>\n";
+	write(query_response_start, sizeof(query_response_start));
+	writeString(s);
+	write(query_response_end, sizeof(query_response_end));
+	callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
+	if (fixupmap[name] == nullptr) delete emitter;
+}
+
+std::string DecompInterface::writeFuncProto(FuncProtoInfo func,
+	std::string injectstr, bool bUseInternalList, size_t indnt)
+{
+	std::string symbols;
+	std::string joinString;
+	if (callStyles.find(func.model) == callStyles.end()) func.model = "unknown";
+	if (bUseInternalList) {
+		for (std::vector<SymInfo>::iterator it = func.syminfo.begin(); it != func.syminfo.end(); it++) {
+			bool readonly = false;
+			symbols += std::string(indnt + 4, ' ') + "<param name=\"" + it->pi.name + "\" typelock=\"" "true"
+				"\" namelock=\"" + std::string(it->pi.name.size() != 0 ? "true" : "false") + "\">\n" +
+				std::string(indnt + 6, ' ') + "<addr/>\n" +
+				buildTypeXml(it->pi.ti, indnt + 6) +
+				std::string(indnt + 4, ' ') + "</param>\n"; //"<type name=\"\" metatype=\"" + "\" size=\"" "\"><typeref name=\"" + it->typeRef + "\" id=\"" + std::string(buf) "\"/></type>"
+		}
+	} else {
+		if (func.retType.addr.addr.space == "join") {
+			for (int i = 0; i < func.retType.addr.addr.joins.size(); i++) {
+				if (i != 0) joinString += " ";
+				joinString += "piece" + std::to_string(i + 1) +
+					"=\"" + func.retType.addr.addr.joins[i].addr.space + ":0x" +
+					to_string(func.retType.addr.addr.joins[i].addr.offset) + ":" +
+					std::to_string(func.retType.addr.addr.joins[i].size) + "\"";
+			}
+		}
+	}
+	std::string killbycall;
+	if (func.killedByCall.size() != 0) {
+		killbycall = std::string(indnt + 2, ' ') + "<killedbycall>\n";
+		for (size_t i = 0; i < func.killedByCall.size(); i++) {
+			killbycall += std::string(indnt + 4, ' ') + "<addr space=\"" + func.killedByCall[i].addr.space +
+				"\" offset=\"0x" + to_string(func.killedByCall[i].addr.offset, hex) +
+				"\" size=\"" + std::to_string(func.killedByCall[i].size) + "\"/>\n";
+		}
+		killbycall += std::string(indnt + 2, ' ') + "</killedbycall>\n";
+	}
+	return std::string(indnt, ' ') + "<prototype extrapop=\"" +
+		(func.extraPop != -1 ? std::to_string(func.extraPop) : std::string("unknown")) +
+		"\" model=\"" + func.model + "\" modellock=\"" +
+		(func.model != "default" && func.model != "unknown" && lastdm.actionname != "paramid" ? "true" : "false") +
+		(func.model != "default" && func.model != "unknown" && lastdm.actionname != "paramid" && func.syminfo.size() == 0 ?
+			"\" voidlock=\"true" : "") +
+		(func.isInline ? "\" inline=\"true" : "") +
+		(func.isNoReturn ? "\" noreturn=\"true" : "") +
+		(func.hasThis ? "\" hasthis=\"true" : "") +
+		(func.customStorage ? "\" custom=\"true" : "") +
+		(func.isConstruct ? "\" constructor=\"true" : "") +
+		(func.isDestruct ? "\" destructor=\"true" : "") +
+		(func.dotdotdot ? "\" dotdotdot=\"true" : "") +
+		"\">\n" +
+		std::string(indnt + 2, ' ') + "<returnsym" +
+		std::string(func.retType.pi.ti.begin()->metaType != "unknown" && lastdm.actionname != "paramid" ? " typelock=\"true\"" : "") +
+		">\n" +
+		std::string(func.retType.addr.size == 0 ? std::string(indnt + 4, ' ') + "<addr/>\n" + std::string(indnt + 4, ' ') + "<void/>\n" :
+			((bUseInternalList ? std::string(indnt + 4, ' ') + "<addr/>\n" :
+				std::string(indnt + 4, ' ') + "<addr space=\"" + func.retType.addr.addr.space + "\" " +
+				(func.retType.addr.addr.space != "join" ? "offset=\"0x" +
+					to_string(func.retType.addr.addr.offset, hex) +
+				"\" size=\"" + std::to_string(func.retType.addr.size) + "\"" : joinString) + "/>\n") +
+			buildTypeXml(func.retType.pi.ti, indnt + 4))) +
+		std::string(indnt + 2, ' ') + "</returnsym>\n" +
+		(!injectstr.empty() ? std::string(indnt + 2, ' ') + injectstr : "") + //Pcode injection: "<inject>" + "</inject>\n"
+		killbycall +
+		(bUseInternalList ? std::string(indnt + 2, ' ') + "<internallist>\n" + symbols + std::string(indnt + 2, ' ') + "</internallist>\n" : "") +
+		std::string(indnt, ' ') + "</prototype>\n";
+}
+
+std::string DecompInterface::getFunctionSymbolName(const std::string& name, unsigned long long entryPoint)
+{
+	std::string base = name.empty() ? "FUN_0x" + to_string(entryPoint, hex) : name;
+	std::map<std::string, unsigned long long>::iterator existing = functionSymbolEntries.find(base);
+	if (existing == functionSymbolEntries.end()) {
+		functionSymbolEntries[base] = entryPoint;
+		return base;
+	}
+	if (existing->second == entryPoint)
+		return base;
+
+	std::string safeBase;
+	for (std::string::const_iterator it = base.begin(); it != base.end(); ++it) {
+		unsigned char ch = static_cast<unsigned char>(*it);
+		if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+			(ch >= '0' && ch <= '9') || ch == '_')
+			safeBase.push_back(static_cast<char>(ch));
+		else
+			safeBase.push_back('_');
+	}
+	if (safeBase.empty() || (safeBase[0] >= '0' && safeBase[0] <= '9'))
+		safeBase.insert(0, "FUN_");
+
+	std::string unique = safeBase + "_0x" + to_string(entryPoint, hex);
+	std::string candidate = unique;
+	unsigned long long suffix = 2;
+	while (true) {
+		existing = functionSymbolEntries.find(candidate);
+		if (existing == functionSymbolEntries.end() || existing->second == entryPoint) {
+			functionSymbolEntries[candidate] = entryPoint;
+			return candidate;
+		}
+		candidate = unique + "_" + std::to_string(suffix++);
+	}
+}
+
+static std::vector<std::string> splitNamespaceName(const std::string& name, std::string* leaf)
+{
+	std::vector<std::string> path;
+	size_t start = 0;
+	for (;;) {
+		size_t sep = name.find("::", start);
+		if (sep == std::string::npos)
+			break;
+		if (sep > start)
+			path.push_back(name.substr(start, sep - start));
+		start = sep + 2;
+	}
+	*leaf = name.substr(start);
+	return path;
+}
+
+static std::string namespacePathKey(const std::vector<std::string>& path)
+{
+	std::string key;
+	for (std::vector<std::string>::const_iterator it = path.begin(); it != path.end(); ++it) {
+		if (!key.empty())
+			key.push_back('\x1f');
+		key += *it;
+	}
+	return key;
+}
+
+unsigned long long DecompInterface::registerNamespacePath(const std::vector<std::string>& path)
+{
+	if (path.empty())
+		return 0;
+	std::string key = namespacePathKey(path);
+	std::map<std::string, unsigned long long>::iterator existing = namespaceIdsByPath.find(key);
+	if (existing != namespaceIdsByPath.end())
+		return existing->second;
+	unsigned long long id = nextNamespaceId++;
+	namespaceIdsByPath[key] = id;
+	namespacePaths[id] = path;
+	return id;
+}
+
+void DecompInterface::registerNamespaceName(unsigned long long scopeId, const std::string& name)
+{
+	if (!name.empty())
+		namespaceNames[scopeId][name] = true;
+}
+
+DecompInterface::ScopedSymbolName DecompInterface::getScopedSymbolName(const std::string& name, const std::string& parentname)
+{
+	ScopedSymbolName scoped;
+	std::string leaf;
+	std::vector<std::string> path = splitNamespaceName(name, &leaf);
+	if (!parentname.empty())
+		path.insert(path.begin(), parentname);
+	scoped.scopeId = registerNamespacePath(path);
+	scoped.name = leaf.empty() ? name : leaf;
+	registerNamespaceName(scoped.scopeId, scoped.name);
+	return scoped;
+}
+
+std::string DecompInterface::getPackedNamespacePath(unsigned long long namespaceId)
+{
+	std::ostringstream packedResponse;
+	PackedEncode encoder(packedResponse);
+	encoder.openElement(ELEM_RESPONSE_PARENT);
+	encoder.openElement(ELEM_RESPONSE_VAL);
+	encoder.writeUnsignedInteger(ATTRIB_ID, 0);
+	encoder.closeElement(ELEM_RESPONSE_VAL);
+
+	std::map<unsigned long long, std::vector<std::string>>::iterator pathIt = namespacePaths.find(namespaceId);
+	if (pathIt != namespacePaths.end()) {
+		std::vector<std::string> curPath;
+		for (std::vector<std::string>::const_iterator it = pathIt->second.begin();
+			it != pathIt->second.end(); ++it) {
+			curPath.push_back(*it);
+			unsigned long long id = registerNamespacePath(curPath);
+			encoder.openElement(ELEM_RESPONSE_VAL);
+			encoder.writeUnsignedInteger(ATTRIB_ID, id);
+			encoder.writeString(ATTRIB_CONTENT, *it);
+			encoder.closeElement(ELEM_RESPONSE_VAL);
+		}
+	}
+	encoder.closeElement(ELEM_RESPONSE_PARENT);
+	return packedResponse.str();
+}
+
+bool DecompInterface::isNameUsedInNamespaces(const std::string& name, unsigned long long firstId, unsigned long long lastId)
+{
+	for (unsigned long long cur = firstId;;) {
+		std::map<unsigned long long, std::map<std::string, bool>>::const_iterator ns = namespaceNames.find(cur);
+		if (ns != namespaceNames.end() && ns->second.find(name) != ns->second.end())
+			return true;
+		if (cur == lastId)
+			break;
+		std::map<unsigned long long, std::vector<std::string>>::const_iterator pathIt = namespacePaths.find(cur);
+		if (pathIt == namespacePaths.end() || pathIt->second.empty())
+			break;
+		std::vector<std::string> parentPath = pathIt->second;
+		parentPath.pop_back();
+		cur = registerNamespacePath(parentPath);
+	}
+	return false;
+}
+
+std::string DecompInterface::writeFunc(SizedAddrInfo addr, std::string funcname, std::string parentname, FuncProtoInfo func)
+{//mapsym can have type: type="dynamic"/"equate" as well as booleans volatile, indirectstorage, hiddenretparm
+							//valid symbol tags are: symbol/dynsymbol, equatesymbol, function/functionshell, labelsym, externrefsymbol
+							//prototype can contain elements for <unaffected>..., <killedbycall>..., <returnaddress>..., <likelytrash>...
+							//Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/program/model/pcode/HighFunction.java
+							//Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/program/model/pcode/LocalSymbolMap.java
+	//"<mapsym><symbol name=\"" "\" typelock=\"" "\" namelock=\"" "\" readonly=\"" "\" volatile=\"" "\" cat=\"" "\" index=\"" "\">" "<typeref name=\"" "\"/>" "</symbol>"
+	//"<addr space=\"" + space + "\" offset=\"0x" + std::string() + "\" size=\"" + "\"/>"
+	//"<rangelist/></mapsym>"
+	//callback->status("Function name: " + funcname);
+	//int index = 0;
+	std::string res;
+	ScopedSymbolName scopedName = getScopedSymbolName(funcname, parentname);
+	ostringstream nameesc;
+	xml_escape(nameesc, scopedName.name.c_str());
+	std::string symbols;
+	bool bTypeLockArgs = lastdm.actionname != "paramid"; //for args, either type lock all or none
+	for (std::vector<SymInfo>::iterator it = func.syminfo.begin(); it != func.syminfo.end(); it++) {
+		if (//startOffs.space != addr.addr.space || startOffs.offset != addr.addr.offset ||
+			it->pi.ti.begin()->metaType == "unknown" && it->argIndex != -1) {
+			bTypeLockArgs = false;
+		}
+	}
+	for (std::vector<SymInfo>::iterator it = func.syminfo.begin(); it != func.syminfo.end(); it++) {
+		//must bitmask any negative offsets to the current addressing sizes, for stack, likely pointers and others too
+		int addrSize = 0;
+		if (it->addr.addr.space == "stack") {
+			if (trans->getStackSpace() != nullptr)
+				addrSize = trans->getStackSpace()->getAddrSize();
+			else
+				addrSize = trans->getRegister(stackPointerReg).size;
+		} else addrSize = trans->getSpaceByName(it->addr.addr.space)->getAddrSize();
+		it->addr.addr.offset &= ((~0ull) >> (64 - addrSize * 8));
+		bool readonly = false;
+		std::string joinString;
+		if (it->addr.addr.space == "join") {
+			for (int i = 0; i < it->addr.addr.joins.size(); i++) {
+				if (i != 0) joinString += " ";
+				joinString += "piece" + std::to_string(i + 1) + "=\"" + it->addr.addr.joins[i].addr.space + ":0x" +
+					to_string(it->addr.addr.joins[i].addr.offset) + ":" + std::to_string(it->addr.addr.joins[i].size) + "\"";
+			}
+		}
+		//current function arguments must be added to the category 0 index # in order of function definition parameters
+		//this should be part of the symbol info and not done in here as nuances like type inference effect this
+		//bool bIsCat = idx == startOffs && it->space == "stack" && it->offset != 0 && (it->offset & (1ull << (addrSize * 8 - 1))) == 0;
+		//could assume positive offsets are args but indexes now assigned by callback
+		symbols += "            <mapsym>\n              <symbol name=\"" + it->pi.name + "\" typelock=\"" +
+			//the typelock is a size lock for unknown metatype and for category 0 mappings for the primary function being decompiled it is an all or nothing situation - due to design issue in Ghidra
+			(it->pi.ti.begin()->metaType == "unknown" &&
+			//startOffs.space != addr.addr.space || startOffs.offset != addr.addr.offset ||
+				it->argIndex == -1 || (it->argIndex != -1 && !bTypeLockArgs) ? "false" : "true") +
+			"\" namelock=\"" + std::string(it->pi.name.size() != 0 ? "true" : "false") +
+			"\" readonly=\"" + (readonly ? "true" : "false") +
+			"\" cat=\"" + std::string(it->argIndex != -1 ? "0\" index=\"" +
+				std::to_string(it->argIndex) : "-1") + "\">\n" +
+			buildTypeXml(it->pi.ti, 16) +
+			"              </symbol>\n"
+			"              <addr space=\"" + it->addr.addr.space + "\" " +
+			(it->addr.addr.space != "join" ? "offset=\"0x" + to_string(it->addr.addr.offset, hex) +
+				"\" size=\"" + std::to_string(it->addr.size) + "\"" : joinString) + "/>\n" +
+			std::string(it->addr.addr.space == "register" ? "              <rangelist>\n                <range space=\"" +
+			(it->argIndex != -1 ? addr.addr.space : it->range.space) +
+				"\" first=\"0x" +
+				to_string(it->argIndex != -1 ? addr.addr.offset - 1 : it->range.beginoffset, hex) +
+				"\" last=\"0x" +
+				to_string(it->argIndex != -1 ? addr.addr.offset - 1 : it->range.endoffset, hex) +
+				"\"/>\n              </rangelist>\n" : "              <rangelist/>\n") +
+			"            </mapsym>\n";
+	}
+	std::string symbolKey = std::to_string(scopedName.scopeId) + ":" + scopedName.name;
+	if (symbolIds.find(symbolKey) == symbolIds.end()) symbolIds[symbolKey] = symbolIds.size() + 1;
+	//callback->status("Extern name: " + externname);
+	//prototype has uponentry and uponreturn tags to inject pcode for call mechanism fixup
+	res = "<result id=\"0x0\">\n" //"  <parent>\n    <val/>\n" +
+		//std::string(parentname.size() != 0 ? "    <val>" + parentnameesc.str() + "</val>\n" : "") +
+		//"  </parent>\n"
+		"  <mapsym>\n"
+		"    <function id=\"0x" + to_string(symbolIds[symbolKey], hex) + "\" name=\"" + nameesc.str() + "\" size=\"" + std::to_string(addr.size) + "\">\n"
+		"      <addr space=\"" + addr.addr.space + "\" offset=\"0x" + to_string(addr.addr.offset, hex) + "\"/>\n"
+		"      <localdb lock=\"false\" main=\"" "stack" "\">\n        <scope name=\"" + nameesc.str() + "\">\n"
+		"          <parent id=\"0x" + to_string(scopedName.scopeId, hex) + "\"/>\n"
+		//"          <parent>\n            <val/>\n" +
+		//std::string(parentname.size() != 0 ? "            <val>" + parentnameesc.str() + "</val>\n" : "") +
+		//"          </parent>\n"
+		"          <rangelist/>\n"
+		"          <symbollist>\n" + symbols + "          </symbollist>\n        </scope>\n      </localdb>\n" +
+		writeFuncProto(func, (fixupTargetMap.find(funcname) != fixupTargetMap.end() ?
+			"<inject>" + fixupTargetMap[funcname] + "</inject>" :
+			(callFixupMap.find(funcname) != callFixupMap.end() ?
+				"<inject>" + nameesc.str() + "</inject>" : "")), false, 6) +
+		"    </function>\n"
+		"    <addr space=\"" + addr.addr.space + "\" offset=\"0x" + to_string(addr.addr.offset, hex) + "\"/>\n"
+		"    <rangelist/>\n  </mapsym>\n</result>\n";
+	return res;
+}
+
+std::string buildHoleXml(std::string space, unsigned long long beginoffset,
+	unsigned long long endoffset, bool readOnly, bool volatil)
+{
+	return "<hole readonly=\"" + std::string(readOnly ? "true" : "false") + "\" volatile=\"" +
+		std::string(volatil ? "true" : "false") + "\" space=\"" +
+		space + "\" first=\"0x" + to_string(beginoffset, hex) +
+		"\" last=\"0x" + to_string(endoffset, hex) + "\"/>";
+}
+
+std::vector<uchar> DecompInterface::readResponse() {
+	readToResponse();
+	int type = readToBurst();
+	std::string name;
+	std::vector<uchar> retbuf;
+	std::vector<uchar> buf;
+	bool bufferActive = false;
+	std::string addrstring;
+	while (type != 7) {
+		switch (type) {
+		case 4:
+		{
+			callback->protocolRecorder("query read begin", false);
+			name = readQueryString();
+			callback->protocolRecorder("query read complete bytes=\"" + std::to_string(name.size()) + "\"", false);
+			std::string queryContext = "query bytes=" + std::to_string(name.size());
+			try {
+				if (!name.empty() && (static_cast<uchar>(name[0]) & PackedFormat::HEADER_MASK) == PackedFormat::ELEMENT_START) {
+					callback->protocolRecorder("packed query stream begin bytes=\"" + std::to_string(name.size()) +
+						"\" first=\"0x" + to_string(static_cast<uint4>(static_cast<uchar>(name[0])), hex) + "\"", false);
+					std::istringstream packedStream(name);
+					callback->protocolRecorder("packed query stream ready", false);
+					PackedDecode decoder(trans);
+					callback->protocolRecorder("packed query ingest begin", false);
+					decoder.ingestStream(packedStream);
+					callback->protocolRecorder("packed query ingest complete", false);
+					callback->protocolRecorder("packed query open element begin", false);
+					uint4 elemId = decoder.openElement();
+					callback->protocolRecorder("packed query open element id=\"" + std::to_string(elemId) + "\"", false);
+					queryContext = "packed query element " + std::to_string(elemId);
+					if (elemId == ELEM_COMMAND_GETPCODEEXECUTABLE)
+						callback->protocolRecorder("packed query element 252 bytes=\"" +
+							bytesToHexPreview(name) + "\"", false);
+					if (elemId == ELEM_COMMAND_GETBYTES) {
+						int4 size = 0;
+						Address queryAddr = Address::decode(decoder, size);
+						decoder.closeElement(elemId);
+						callback->protocolRecorder("query(command_getbytes addr=\"" +
+							std::string(queryAddr.getSpace() != nullptr ? queryAddr.getSpace()->getName() : "<null>") +
+							":0x" + to_string(queryAddr.getOffset(), hex) + "\" size=\"" +
+							std::to_string(size) + "\")", false);
+						std::vector<uchar> res;
+						res.resize(size);
+						callback->getBytes(res.data(), size, AddrInfo{ queryAddr.getSpace()->getName(), queryAddr.getOffset() });
+						std::vector<uchar> dblres;
+						dblres.resize(res.size() * 2);
+						for (int i = 0; i < res.size(); i++) {
+							dblres[i * 2] = (uchar)(((res[i] >> 4) & 0xf) + 65);
+							dblres[i * 2 + 1] = (uchar)((res[i] & 0xf) + 65);
+						}
+						write(query_response_start, sizeof(query_response_start));
+						write(byte_start, sizeof(byte_start));
+						write(dblres.data(), dblres.size());
+						write(byte_end, sizeof(byte_end));
+						write(query_response_end, sizeof(query_response_end));
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETUSEROPNAME) {
+						int4 index = decoder.readSignedInteger(ATTRIB_INDEX);
+						decoder.closeElement(elemId);
+						std::vector<std::string> userOpNames;
+						trans->getUserOpNames(userOpNames);
+						std::string nm = index >= userOpNames.size() ? "" : userOpNames[index];
+						write(query_response_start, sizeof(query_response_start));
+						writeString(nm);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(\"" + escapeCStr(nm) + "\")", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETCODELABEL) {
+						Address queryAddr = Address::decode(decoder);
+						decoder.closeElement(elemId);
+						AddrInfo addr{ queryAddr.getSpace()->getName(), queryAddr.getOffset() };
+						callback->protocolRecorder("query(command_getcodelabel addr=\"" + addr.space +
+							":0x" + to_string(addr.offset, hex) + "\")", false);
+						std::string label = callback->getSymbol(addr);
+						write(query_response_start, sizeof(query_response_start));
+						writeString(label);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getcodelabel \"" + escapeCStr(label) + "\")", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETCOMMENTS) {
+						callback->protocolRecorder("query(command_getcomments decode begin)", false);
+						uint4 flags = decoder.readUnsignedInteger(ATTRIB_TYPE);
+						Address funcAddr = Address::decode(decoder);
+						decoder.closeElement(elemId);
+						AddrInfo addr{ funcAddr.getSpace()->getName(), funcAddr.getOffset() };
+						callback->protocolRecorder("query(command_getcomments addr=\"" + addr.space +
+							":0x" + to_string(addr.offset, hex) + "\" flags=\"" +
+							std::to_string(flags) + "\")", false);
+						std::vector<CommentInfo> comments;
+						callback->getComments(addr, comments);
+						std::ostringstream packedResponse;
+						PackedEncode encoder(packedResponse);
+						encoder.openElement(ELEM_RESPONSE_COMMENTDB);
+						for (int i = 0; i < comments.size(); i++) {
+							uint4 commentFlag =
+								comments[i].type == "user1" ? comment_type::user1 :
+								comments[i].type == "user2" ? comment_type::user2 :
+								comments[i].type == "user3" ? comment_type::user3 :
+								comments[i].type == "header" ? comment_type::header :
+								comments[i].type == "warning" ? comment_type::warning :
+								comments[i].type == "warningheader" ? comment_type::warningheader : 0;
+							if ((commentFlag & flags) == 0) continue;
+							AddrSpace* commentSpace = trans->getSpaceByName(comments[i].addr.space);
+							if (commentSpace == nullptr) continue;
+							encoder.openElement(ELEM_RESPONSE_COMMENT);
+							encoder.writeString(ATTRIB_TYPE, comments[i].type);
+							funcAddr.encode(encoder);
+							Address(commentSpace, comments[i].addr.offset).encode(encoder);
+							encoder.openElement(ELEM_RESPONSE_TEXT);
+							encoder.writeString(ATTRIB_CONTENT, comments[i].text);
+							encoder.closeElement(ELEM_RESPONSE_TEXT);
+							encoder.closeElement(ELEM_RESPONSE_COMMENT);
+						}
+						encoder.closeElement(ELEM_RESPONSE_COMMENTDB);
+						std::string res = packedResponse.str();
+						write(query_response_start, sizeof(query_response_start));
+						writeString(res);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getcomments)", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETCPOOLREF) {
+						int4 refCount = (int4)decoder.readSignedInteger(ATTRIB_SIZE);
+						std::vector<unsigned long long> refs;
+						for (int4 i = 0; i < refCount; ++i) {
+							uint4 valueId = decoder.openElement(ELEM_RESPONSE_VALUE);
+							refs.push_back(decoder.readUnsignedInteger(ATTRIB_CONTENT));
+							decoder.closeElement(valueId);
+						}
+						decoder.closeElement(elemId);
+						callback->protocolRecorder("query(command_getcpoolref count=\"" +
+							std::to_string(refs.size()) + "\")", false);
+						CPoolRecord rec = { PRIMITIVE, false, false, 0, std::vector<uchar>(), "" };
+						callback->getCPoolRef(refs, rec);
+						std::ostringstream packedResponse;
+						PackedEncode encoder(packedResponse);
+						encodePackedCPoolRecord(encoder, rec);
+						std::string s = packedResponse.str();
+						write(query_response_start, sizeof(query_response_start));
+						writeString(s);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getcpoolref)", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETDATATYPE) {
+						std::string typeName = decoder.readString(ATTRIB_NAME);
+						intb typeId = decoder.readSignedInteger(ATTRIB_ID);
+						decoder.closeElement(elemId);
+						callback->protocolRecorder("query(command_getdatatype name=\"" +
+							escapeCStr(typeName) + "\" id=\"0x" +
+							to_string(static_cast<uint8>(typeId), hex) + "\")", false);
+						std::vector<TypeInfo> typeChain;
+						callback->getMetaType(typeName, typeChain);
+						std::string s = !typeChain.empty() ? buildTypeXml(typeChain, 0) : "";
+						write(query_response_start, sizeof(query_response_start));
+						if (!s.empty()) writeString(s);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getdatatype bytes=\"" +
+							std::to_string(s.size()) + "\")", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETEXTERNALREF) {
+						Address queryAddr = Address::decode(decoder);
+						decoder.closeElement(elemId);
+						AddrInfo addr{ queryAddr.getSpace()->getName(), queryAddr.getOffset() };
+						callback->protocolRecorder("query(command_getexternalref addr=\"" + addr.space +
+							":0x" + to_string(addr.offset, hex) + "\")", false);
+						std::string externName;
+						std::string modName;
+						FuncProtoInfo func = {};
+						callback->getExternInfo(addr, externName, modName, func);
+						std::string res = !externName.empty() ?
+							writeFunc(SizedAddrInfo{ addr, 1 }, externName, modName, func) :
+							buildHoleXml(addr.space, addr.offset, addr.offset, true, false);
+						write(query_response_start, sizeof(query_response_start));
+						writeString(res);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getexternalref)", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETMAPPEDSYMBOLS) {
+						Address queryAddr = Address::decode(decoder);
+						decoder.closeElement(elemId);
+						AddrInfo addr{ queryAddr.getSpace()->getName(), queryAddr.getOffset() };
+						callback->protocolRecorder("query(command_getmappedsymbols addr=\"" + addr.space +
+							":0x" + to_string(addr.offset, hex) + "\")", false);
+						MappedSymbolInfo msi = { KIND_HOLE };
+						callback->getMappedSymbol(addr, msi);
+						callback->protocolRecorder("query(command_getmappedsymbols result kind=\"" +
+							mappedSymbolKindName(msi.kind) + "\" entry=\"0x" +
+							to_string(msi.entryPoint, hex) + "\" size=\"" +
+							std::to_string(msi.size) + "\" name=\"" +
+							escapeCStr(msi.name) + "\")", false);
+						std::ostringstream packedResponse;
+						PackedEncode encoder(packedResponse);
+						if (msi.kind == KIND_FUNCTION && msi.entryPoint == addr.offset) {
+							std::string symbolName = getFunctionSymbolName(msi.name, msi.entryPoint);
+							ScopedSymbolName scopedName = getScopedSymbolName(symbolName);
+							std::string symbolKey = std::to_string(scopedName.scopeId) + ":" + scopedName.name;
+							if (symbolIds.find(symbolKey) == symbolIds.end()) symbolIds[symbolKey] = symbolIds.size() + 1;
+							encoder.openElement(ELEM_RESPONSE_SCOPE);
+							encoder.writeUnsignedInteger(ATTRIB_ID, scopedName.scopeId);
+							encoder.openElement(ELEM_RESPONSE_MAPSYM);
+							encoder.openElement(ELEM_RESPONSE_FUNCTION);
+							encoder.writeString(ATTRIB_NAME, scopedName.name);
+							encoder.writeUnsignedInteger(ATTRIB_ID, symbolIds[symbolKey]);
+							// Match Ghidra's DecompileCallback.encodeFunction(): the function
+							// symbol is mapped only over the queried entry byte, not the whole
+							// function body. Interior body queries are represented as holes.
+							uintb mapSize = (addr.space == queryAddr.getSpace()->getName() &&
+								addr.offset >= msi.entryPoint && addr.offset < msi.entryPoint + 8)
+								? (addr.offset - msi.entryPoint + 1) : 1;
+							encoder.writeSignedInteger(ATTRIB_SIZE, mapSize);
+							queryAddr.encode(encoder);
+							if (msi.func.isNoReturn)
+								encodePackedNoReturnPrototype(encoder, msi.func);
+							encoder.closeElement(ELEM_RESPONSE_FUNCTION);
+							queryAddr.encode(encoder, mapSize);
+							encoder.openElement(ELEM_RESPONSE_RANGELIST);
+							for (std::vector<RangeInfo>::iterator iter = msi.ranges.begin();
+								iter != msi.ranges.end(); ++iter) {
+								AddrSpace* rangeSpace = trans->getSpaceByName(iter->space);
+								if (rangeSpace == nullptr || iter->endoffset < iter->beginoffset)
+									continue;
+								encoder.openElement(ELEM_RESPONSE_RANGE);
+								encoder.writeSpace(ATTRIB_SPACE, rangeSpace);
+								encoder.writeUnsignedInteger(ATTRIB_FIRST, iter->beginoffset);
+								encoder.writeUnsignedInteger(ATTRIB_LAST, iter->endoffset);
+								encoder.closeElement(ELEM_RESPONSE_RANGE);
+							}
+							encoder.closeElement(ELEM_RESPONSE_RANGELIST);
+							encoder.closeElement(ELEM_RESPONSE_MAPSYM);
+							encoder.closeElement(ELEM_RESPONSE_SCOPE);
+						} else if (msi.kind == KIND_DATA) {
+							uintb mapSize = !msi.typeChain.empty() ?
+								static_cast<uintb>(msi.typeChain.front().size) : 1;
+							if (mapSize == 0)
+								mapSize = 1;
+							TypeInfo packedType = mappedSymbolPackedCoreType(msi.typeChain, mapSize);
+							callback->protocolRecorder("query(command_getmappedsymbols data encoded size=\"" +
+								std::to_string(mapSize) + "\" type=\"" +
+								escapeCStr(packedType.typeName) + "\" metatype=\"" +
+								escapeCStr(packedType.metaType) + "\" chain0=\"" +
+								(msi.typeChain.empty() ? "" : escapeCStr(msi.typeChain.front().metaType)) +
+								"\")", false);
+							ScopedSymbolName scopedName =
+								getScopedSymbolName(getMappedSymbolName(msi, queryAddr, "DAT"));
+							encodePackedMappedData(encoder, queryAddr,
+								scopedName.name, scopedName.scopeId, msi.typeChain, mapSize,
+								msi.readonly, msi.volatil);
+						} else if (msi.kind == KIND_LABEL) {
+							ScopedSymbolName scopedName =
+								getScopedSymbolName(getMappedSymbolName(msi, queryAddr, "LAB"));
+							encodePackedMappedLabel(encoder, queryAddr,
+								scopedName.name, scopedName.scopeId, 1, msi.readonly, msi.volatil);
+						} else if (msi.kind == KIND_EXTERNALREFERENCE) {
+							ScopedSymbolName scopedName =
+								getScopedSymbolName(getMappedSymbolName(msi, queryAddr, "EXT"));
+							encodePackedMappedExternRef(encoder, queryAddr,
+								scopedName.name, scopedName.scopeId);
+						} else {
+							const bool isRegisterQuery =
+								queryAddr.getSpace() != nullptr &&
+								queryAddr.getSpace()->getName() == "register";
+							const bool useEmptyRegisterResponse =
+								msi.kind == KIND_HOLE && isRegisterQuery &&
+								lastsleighfile.find("pa-risc") == std::string::npos &&
+								lastsleighfile.find("PA-RISC") == std::string::npos;
+							const bool useEmptyUnmappedRamResponse =
+								msi.kind == KIND_HOLE &&
+								queryAddr.getSpace() != nullptr &&
+								queryAddr.getSpace()->getName() == "ram" &&
+								msi.size == 0;
+							if (useEmptyRegisterResponse || useEmptyUnmappedRamResponse) {
+								// Ghidra's Java callback reports an unmapped register symbol query
+								// as an empty response. Unmapped RAM misses should behave the same
+								// way; a manufactured hole can poison the native symbol table.
+								callback->protocolRecorder(
+									useEmptyRegisterResponse ?
+									"query(command_getmappedsymbols register empty)" :
+									"query(command_getmappedsymbols unmapped ram empty)", false);
+							} else {
+								uintb first = queryAddr.getOffset();
+								uintb last = queryAddr.getOffset();
+								bool readOnly = msi.readonly;
+								bool volatil = msi.volatil;
+								if (msi.kind == KIND_FUNCTION && msi.entryPoint != addr.offset) {
+									std::vector<RangeInfo>::iterator iter = msi.ranges.begin();
+									for (; iter != msi.ranges.end(); iter++) {
+										if (addr.offset >= iter->beginoffset && addr.offset <= iter->endoffset) {
+											first = iter->beginoffset;
+											last = iter->endoffset;
+											readOnly = true;
+											volatil = false;
+											break;
+										}
+									}
+								}
+								if (msi.kind == KIND_HOLE)
+									registerContainingHole(trans, queryAddr, first, last);
+								encoder.openElement(ELEM_RESPONSE_HOLE);
+								encoder.writeSpace(ATTRIB_SPACE, queryAddr.getSpace());
+								encoder.writeUnsignedInteger(ATTRIB_FIRST, first);
+								encoder.writeUnsignedInteger(ATTRIB_LAST, last);
+								encoder.writeBool(ATTRIB_READONLY, readOnly);
+								encoder.writeBool(ATTRIB_RESPONSE_VOLATILE, volatil);
+								encoder.closeElement(ELEM_RESPONSE_HOLE);
+							}
+						}
+						std::string res = packedResponse.str();
+						write(query_response_start, sizeof(query_response_start));
+						if (!res.empty()) writeString(res);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getmappedsymbols)", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETNAMESPACEPATH) {
+						uintb namespaceId = decoder.readUnsignedInteger(ATTRIB_ID);
+						decoder.closeElement(elemId);
+						std::string res = getPackedNamespacePath(namespaceId);
+						write(query_response_start, sizeof(query_response_start));
+						writeString(res);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getnamespacepath id=\"0x" +
+							to_string(namespaceId, hex) + "\")", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_ISNAMEUSED) {
+						std::string symbolName = decoder.readString(ATTRIB_NAME);
+						uintb firstId = decoder.readUnsignedInteger(ATTRIB_FIRST);
+						uintb lastId = decoder.readUnsignedInteger(ATTRIB_LAST);
+						decoder.closeElement(elemId);
+						write(query_response_start, sizeof(query_response_start));
+						write(string_start, sizeof(string_start));
+						const char res = isNameUsedInNamespaces(symbolName, firstId, lastId) ? 't' : 'f';
+						write(&res, 1);
+						write(string_end, sizeof(string_end));
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_isnameused name=\"" +
+							escapeCStr(symbolName) + "\" first=\"0x" +
+							to_string(firstId, hex) + "\" last=\"0x" +
+							to_string(lastId, hex) + "\" " +
+							(res == 't' ? "true" : "false") + ")", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETCALLFIXUP ||
+						elemId == ELEM_COMMAND_GETCALLOTHERFIXUP ||
+						elemId == ELEM_COMMAND_GETCALLMECH ||
+						elemId == ELEM_COMMAND_GETPCODEEXECUTABLE) {
+						int injectType =
+							elemId == ELEM_COMMAND_GETCALLFIXUP ? CALLFIXUP_TYPE :
+							elemId == ELEM_COMMAND_GETCALLOTHERFIXUP ? CALLOTHERFIXUP_TYPE :
+							elemId == ELEM_COMMAND_GETCALLMECH ? CALLMECHANISM_TYPE :
+							EXECUTABLEPCODE_TYPE;
+						std::string injectName;
+						AddrInfo base = startOffs;
+						AddrInfo call = startOffs;
+						std::vector<VarnodeData> contextInputs;
+						std::vector<VarnodeData> contextOutputs;
+						try {
+							callback->protocolRecorder("query(command_getpcodeinject decode name begin)", false);
+							injectName = decoder.readString(ATTRIB_NAME);
+							callback->protocolRecorder("query(command_getpcodeinject decode name=\"" +
+								escapeCStr(injectName) + "\")", false);
+							callback->protocolRecorder("query(command_getpcodeinject decode context open begin)", false);
+							uint4 contextId = decoder.openElement(ELEM_RESPONSE_CONTEXT);
+							callback->protocolRecorder("query(command_getpcodeinject decode context id=\"" +
+								std::to_string(contextId) + "\")", false);
+							callback->protocolRecorder("query(command_getpcodeinject decode base begin)", false);
+							Address baseAddr = Address::decode(decoder);
+							callback->protocolRecorder("query(command_getpcodeinject decode call begin)", false);
+							Address callAddr = Address::decode(decoder);
+							while (decoder.peekElement() != 0) {
+								uint4 subId = decoder.peekElement();
+								if (subId == ELEM_INPUT) {
+									decodeVarnodeList(decoder, ELEM_INPUT, contextInputs);
+								} else if (subId == ELEM_OUTPUT) {
+									decodeVarnodeList(decoder, ELEM_OUTPUT, contextOutputs);
+								} else {
+									uint4 skipId = decoder.openElement();
+									decoder.closeElementSkipping(skipId);
+								}
+							}
+							callback->protocolRecorder("query(command_getpcodeinject decode context close begin)", false);
+							decoder.closeElement(contextId);
+							callback->protocolRecorder("query(command_getpcodeinject decode element close begin)", false);
+							decoder.closeElement(elemId);
+							AddrSpace* baseSpace = baseAddr.getSpace();
+							if (baseSpace != nullptr) {
+								base = AddrInfo{ baseSpace->getName(), baseAddr.getOffset() };
+							} else {
+								callback->protocolRecorder("query(command_getpcodeinject null base fallback)", false);
+								base = startOffs;
+							}
+							AddrSpace* callSpace = callAddr.getSpace();
+							if (callSpace != nullptr) {
+								call = AddrInfo{ callSpace->getName(), callAddr.getOffset() };
+							} else {
+								callback->protocolRecorder("query(command_getpcodeinject null call fallback)", false);
+								call = base;
+							}
+							callback->protocolRecorder("query(command_getpcodeinject type=\"" +
+								std::to_string(injectType) + "\" name=\"" +
+								escapeCStr(injectName) + "\" base=\"" + base.space +
+								":0x" + to_string(base.offset, hex) + "\" call=\"" +
+								call.space + ":0x" + to_string(call.offset, hex) +
+								"\" inputs=\"" + std::to_string(contextInputs.size()) +
+								"\" outputs=\"" + std::to_string(contextOutputs.size()) + "\")", false);
+						} catch (...) {
+							callback->protocolRecorder("query(command_getpcodeinject decode failed type=\"" +
+								std::to_string(injectType) + "\" name=\"" +
+								escapeCStr(injectName) + "\")", true);
+							throw DecompError("Could not decode packed pcode injection context");
+						}
+						std::map<std::string, XmlPcodeEmit*>* injectMap =
+							injectType == CALLFIXUP_TYPE ? &callFixupMap :
+							injectType == CALLOTHERFIXUP_TYPE ? &callFixupOtherMap :
+							injectType == CALLMECHANISM_TYPE ? &callMechMap :
+							&callExecPcodeMap;
+						std::map<std::string, XmlPcodeEmit*>::iterator injectIt = injectMap->find(injectName);
+						if (injectIt == injectMap->end() || injectIt->second == nullptr)
+							throw DecompError("Missing pcode injection '" + injectName + "'");
+						XmlPcodeEmit* emitter = injectIt->second;
+						if (injectType == EXECUTABLEPCODE_TYPE && injectName == "segment_pcode" &&
+							contextInputs.size() >= 2 && contextOutputs.size() >= 1) {
+							AddrSpace* uniqueSpace = trans->getUniqueSpace();
+							AddrSpace* constSpace = trans->getConstantSpace();
+							if (uniqueSpace == nullptr || constSpace == nullptr)
+								throw DecompError("Cannot build segment_pcode without unique/const spaces");
+							uint4 outSize = contextOutputs[0].size;
+							if (outSize == 0)
+								outSize = 4;
+							VarnodeData tmpBase{ uniqueSpace, uniqueBase, outSize };
+							uniqueBase += 16;
+							VarnodeData tmpShift{ uniqueSpace, uniqueBase, outSize };
+							uniqueBase += 16;
+							VarnodeData tmpInner{ uniqueSpace, uniqueBase, outSize };
+							uniqueBase += 16;
+							VarnodeData shiftInputs[] = {
+								tmpBase,
+								VarnodeData{ constSpace, 4, outSize }
+							};
+							VarnodeData addInputs[] = { tmpShift, tmpInner };
+							std::ostringstream packedResponse;
+							PackedEncode encoder(packedResponse);
+							encoder.openElement(ELEM_RESPONSE_INST);
+							encoder.writeSignedInteger(ATTRIB_OFFSET, 0);
+							AddrSpace* baseSpace = trans->getSpaceByName(base.space);
+							Address(baseSpace != nullptr ? baseSpace : trans->getDefaultCodeSpace(), base.offset).encode(encoder);
+							writePackedPcodeOp(encoder, CPUI_INT_ZEXT, &tmpBase, &contextInputs[0], 1);
+							writePackedPcodeOp(encoder, CPUI_INT_LEFT, &tmpShift, shiftInputs, 2);
+							writePackedPcodeOp(encoder, CPUI_INT_ZEXT, &tmpInner, &contextInputs[1], 1);
+							writePackedPcodeOp(encoder, CPUI_INT_ADD, &contextOutputs[0], addInputs, 2);
+							encoder.closeElement(ELEM_RESPONSE_INST);
+							std::string packed = packedResponse.str();
+							write(query_response_start, sizeof(query_response_start));
+							writeString(packed);
+							write(query_response_end, sizeof(query_response_end));
+							callback->protocolRecorder("queryresponse(command_getpcodeinject segment_pcode packed bytes=\"" +
+								std::to_string(packed.size()) + "\")", true);
+							goto query_response_written;
+						}
+						bool deleteEmitter = false;
+						if (emitter->ops.empty()) {
+							std::string dynamicBody = callback->getPcodeInject(injectType, injectName,
+								base, call.space, call.offset);
+							if (!dynamicBody.empty()) {
+								emitter = getPcodeSnippet(dynamicBody, injectIt->second->inputs, injectIt->second->outputs);
+								deleteEmitter = true;
+							}
+						}
+						int4 injectOffset = 0;
+						try {
+							AddrSpace* baseSpace = trans->getSpaceByName(base.space);
+							if (baseSpace != nullptr)
+								injectOffset = trans->instructionLength(Address(baseSpace, base.offset));
+						} catch (...) {
+							injectOffset = 0;
+						}
+						std::ostringstream packedResponse;
+						PackedEncode encoder(packedResponse);
+						if (emitter->ops.empty()) {
+							AddrSpace* baseSpace = trans->getSpaceByName(base.space);
+							if (baseSpace == nullptr)
+								throw DecompError("Cannot build no-op pcode injection without base space");
+							encoder.openElement(ELEM_RESPONSE_INST);
+							encoder.writeSignedInteger(ATTRIB_OFFSET, injectOffset);
+							Address(baseSpace, base.offset).encode(encoder);
+							AddrSpace* uniqueSpace = trans->getUniqueSpace();
+							AddrSpace* constSpace = trans->getConstantSpace();
+							if (uniqueSpace == nullptr || constSpace == nullptr)
+								throw DecompError("Cannot build no-op pcode injection without unique/const spaces");
+							uint4 tmpSize = 4;
+							VarnodeData* out = nullptr;
+							if (!contextOutputs.empty() && contextOutputs[0].space != nullptr) {
+								tmpSize = contextOutputs[0].size != 0 ? contextOutputs[0].size : 4;
+								out = &contextOutputs[0];
+							} else {
+								VarnodeData tmp{ uniqueSpace, uniqueBase, tmpSize };
+								uniqueBase += 16;
+								contextOutputs.push_back(tmp);
+								out = &contextOutputs.back();
+							}
+							VarnodeData zero{ constSpace, 0, tmpSize };
+							writePackedPcodeOp(encoder, CPUI_COPY, out, &zero, 1);
+							encoder.closeElement(ELEM_RESPONSE_INST);
+							callback->protocolRecorder("queryresponse(command_getpcodeinject no-op fallback name=\"" +
+								escapeCStr(injectName) + "\")", true);
+						} else {
+							emitter->encodePacked(encoder, *trans, base, injectOffset);
+						}
+						std::string packed = packedResponse.str();
+						if (deleteEmitter)
+							delete emitter;
+						write(query_response_start, sizeof(query_response_start));
+						writeString(packed);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getpcodeinject packed bytes=\"" +
+							std::to_string(packed.size()) + "\")", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETPCODE) {
+						Address queryAddr = Address::decode(decoder);
+						decoder.closeElement(elemId);
+						AddrInfo addr{ queryAddr.getSpace()->getName(), queryAddr.getOffset() };
+						callback->protocolRecorder("query(command_getpcode addr=\"" + addr.space +
+							":0x" + to_string(addr.offset, hex) + "\")", false);
+						MappedSymbolInfo owner = { KIND_HOLE };
+						if (addr.space == startOffs.space) {
+							callback->getMappedSymbol(addr, owner);
+							callback->protocolRecorder("query(command_getpcode owner kind=\"" +
+								mappedSymbolKindName(owner.kind) + "\" entry=\"0x" +
+								to_string(owner.entryPoint, hex) + "\" size=\"" +
+								std::to_string(owner.size) + "\" name=\"" +
+								escapeCStr(owner.name) + "\")", false);
+							if (owner.kind == KIND_FUNCTION && owner.entryPoint != startOffs.offset) {
+								std::string packed, xml;
+								std::tie(packed, xml) = getPackedArtificialHalt(*trans, addr, 1);
+								write(query_response_start, sizeof(query_response_start));
+								writeString(packed);
+								write(query_response_end, sizeof(query_response_end));
+								callback->protocolRecorder("queryresponse(command_getpcode outsideCurrentFunctionHalt(\"" +
+									escapeCStr(xml) + "\"))", true);
+								goto query_response_written;
+							}
+							if (owner.kind == KIND_HOLE && addr.offset != startOffs.offset) {
+								MappedSymbolInfo current = { KIND_HOLE };
+								callback->getMappedSymbol(startOffs, current);
+								const bool pastNoReturnFunction =
+									current.kind == KIND_FUNCTION &&
+									current.entryPoint == startOffs.offset &&
+									current.func.isNoReturn &&
+									addr.offset >= current.entryPoint + current.size;
+								if (pastNoReturnFunction) {
+									std::string packed, xml;
+									std::tie(packed, xml) = getPackedArtificialHalt(*trans, addr, 1);
+									write(query_response_start, sizeof(query_response_start));
+									writeString(packed);
+									write(query_response_end, sizeof(query_response_end));
+									callback->protocolRecorder("queryresponse(command_getpcode noReturnFunctionBoundaryHalt(\"" +
+										escapeCStr(xml) + "\"))", true);
+									goto query_response_written;
+								}
+								write(query_response_start, sizeof(query_response_start));
+								write(query_response_end, sizeof(query_response_end));
+								callback->protocolRecorder("queryresponse(command_getpcode emptyUnknownCode)", true);
+								goto query_response_written;
+							}
+						}
+						std::string packed, xml;
+						auto unimplementedFallback = [&]() {
+							if (isM68kIllegalTrap(callback, lastsleighfile, addr))
+								return getPackedArtificialHalt(*trans, addr, 2);
+							return getPackedUnimplementedInstruction(addr);
+						};
+						try {
+							callback->protocolRecorder("query(command_getpcode translate begin addr=\"" +
+								addr.space + ":0x" + to_string(addr.offset, hex) + "\")", false);
+							uchar opcode = 0;
+							bool isJvm = lastsleighfile.find("JVM.sla") != std::string::npos ||
+								lastsleighfile.find("JVM\\") != std::string::npos ||
+								lastsleighfile.find("JVM/") != std::string::npos;
+							if (isJvm && owner.kind == KIND_FUNCTION &&
+								callback->getBytes(&opcode, 1, addr) == 1 &&
+								(opcode == 0xaa || opcode == 0xab)) {
+								JvmSwitchInfo switchInfo;
+								if (!readJvmSwitchInfo(callback, addr, owner.entryPoint, opcode, switchInfo))
+									throw DecompError("Unable to decode JVM switch at " + addr.space +
+										":0x" + to_string(addr.offset, hex));
+								std::tie(packed, xml) = getPackedJvmSwitchPcode(*trans, addr, switchInfo, uniqueBase);
+								int4 caseCount = opcode == 0xaa ?
+									(switchInfo.high - switchInfo.low + 1) : switchInfo.npairs;
+								callback->protocolRecorder("query(command_getpcode JVM switch pcode addr=\"" +
+									addr.space + ":0x" + to_string(addr.offset, hex) + "\" opcode=\"0x" +
+									to_string(static_cast<uint4>(opcode), hex) + "\" length=\"" +
+									std::to_string(switchInfo.length) + "\" cases=\"" +
+									std::to_string(caseCount) + "\")", true);
+							} else {
+								std::tie(packed, xml) = getPackedPcode(*trans, addr, callback, &startOffs);
+							}
+							callback->protocolRecorder("query(command_getpcode translate end addr=\"" +
+								addr.space + ":0x" + to_string(addr.offset, hex) + "\" bytes=\"" +
+								std::to_string(packed.size()) + "\")", true);
+						} catch (SleighError&) {
+							std::tie(packed, xml) = unimplementedFallback();
+						} catch (BadDataError&) {
+							std::tie(packed, xml) = unimplementedFallback();
+						} catch (UnimplError&) {
+							std::tie(packed, xml) = unimplementedFallback();
+						} catch (LowlevelError&) {
+							std::tie(packed, xml) = unimplementedFallback();
+						} catch (DecompError&) {
+							std::tie(packed, xml) = unimplementedFallback();
+						} catch (...) {
+							callback->protocolRecorder("query(command_getpcode translate fallback addr=\"" +
+								addr.space + ":0x" + to_string(addr.offset, hex) + "\")", true);
+							std::tie(packed, xml) = unimplementedFallback();
+						}
+						write(query_response_start, sizeof(query_response_start));
+						if (!packed.empty()) writeString(packed);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getpcode packedPcode(\"" +
+							escapeCStr(xml) + "\"))", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETTRACKEDREGISTERS) {
+						Address queryAddr = Address::decode(decoder);
+						decoder.closeElement(elemId);
+						std::ostringstream packedResponse;
+						PackedEncode encoder(packedResponse);
+						encoder.openElement(ELEM_RESPONSE_TRACKED_POINTSET);
+						queryAddr.getSpace()->encodeAttributes(encoder, queryAddr.getOffset());
+						const TrackedSet* ts = nullptr;
+						try {
+							ts = &context->getTrackedSet(queryAddr);
+						} catch (...) {
+							callback->protocolRecorder("query(command_gettrackedregisters empty fallback addr=\"" +
+								std::string(queryAddr.getSpace() != nullptr ? queryAddr.getSpace()->getName() : "<null>") +
+								":0x" + to_string(queryAddr.getOffset(), hex) + "\")", true);
+						}
+						if (ts != nullptr) {
+							size_t trackedCount = 0;
+							for (TrackedSet::const_iterator it = ts->begin(); it != ts->end(); it++) {
+								if (it->loc.space == nullptr || it->loc.offset == -1 || it->loc.size == 0) {
+									callback->protocolRecorder("query(command_gettrackedregisters skipInvalid)", false);
+									continue;
+								}
+								++trackedCount;
+								callback->protocolRecorder("query(command_gettrackedregisters set space=\"" +
+									it->loc.space->getName() + "\" offset=\"0x" +
+									to_string(it->loc.offset, hex) + "\" size=\"" +
+									std::to_string(it->loc.size) + "\" val=\"0x" +
+									to_string(it->val, hex) + "\")", false);
+								encoder.openElement(ELEM_RESPONSE_SET);
+								it->loc.space->encodeAttributes(encoder, it->loc.offset, it->loc.size);
+								encoder.writeUnsignedInteger(ATTRIB_VAL, it->val);
+								encoder.closeElement(ELEM_RESPONSE_SET);
+							}
+							callback->protocolRecorder("query(command_gettrackedregisters count=\"" +
+								std::to_string(trackedCount) + "\")", false);
+						}
+						encoder.closeElement(ELEM_RESPONSE_TRACKED_POINTSET);
+						std::string res = packedResponse.str();
+						write(query_response_start, sizeof(query_response_start));
+						writeString(res);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_gettrackedregisters)", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETREGISTER) {
+						std::string nm = decoder.readString(ATTRIB_NAME);
+						decoder.closeElement(elemId);
+						VarnodeData vd = trans->getRegister(nm);
+						std::ostringstream packedResponse;
+						PackedEncode encoder(packedResponse);
+						Address(vd.space, vd.offset).encode(encoder, vd.size);
+						std::string res = packedResponse.str();
+						write(query_response_start, sizeof(query_response_start));
+						writeString(res);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getregister)", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETREGISTERNAME) {
+						int4 size = 0;
+						Address queryAddr = Address::decode(decoder, size);
+						decoder.closeElement(elemId);
+						AddrSpace* space = queryAddr.getSpace();
+						std::string name;
+						if (space != nullptr)
+							name = trans->getRegisterName(space, queryAddr.getOffset(), size).c_str();
+						callback->protocolRecorder("query(command_getregistername addr=\"" +
+							std::string(space != nullptr ? space->getName() : "<null>") +
+							":0x" + to_string(queryAddr.getOffset(), hex) + "\" size=\"" +
+							std::to_string(size) + "\")", false);
+						write(query_response_start, sizeof(query_response_start));
+						writeString(name);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getregistername \"" + escapeCStr(name) + "\")", true);
+						goto query_response_written;
+					}
+					if (elemId == ELEM_COMMAND_GETSTRINGDATA) {
+						int4 maxSize = (int4)decoder.readSignedInteger(ATTRIB_RESPONSE_MAXSIZE);
+						std::string dtName = decoder.readString(ATTRIB_TYPE);
+						uintb dtId = decoder.readUnsignedInteger(ATTRIB_ID);
+						Address queryAddr = Address::decode(decoder);
+						decoder.closeElement(elemId);
+						AddrSpace* space = queryAddr.getSpace();
+						AddrInfo addr{ space != nullptr ? space->getName() : std::string(), queryAddr.getOffset() };
+						callback->protocolRecorder("query(command_getstringdata addr=\"" + addr.space +
+							":0x" + to_string(addr.offset, hex) + "\" type=\"" +
+							escapeCStr(dtName) + "\" id=\"" + to_string(dtId, hex) +
+							"\" maxsize=\"" + std::to_string(maxSize) + "\")", false);
+						std::vector<uchar> res = callback->getStringData(addr);
+						uchar isTruncated = 0;
+						if (maxSize >= 0 && res.size() > static_cast<size_t>(maxSize)) {
+							res.resize(static_cast<size_t>(maxSize));
+							isTruncated = 1;
+						}
+						std::vector<uchar> dblres;
+						dblres.resize(res.size() * 2);
+						for (size_t i = 0; i < res.size(); i++) {
+							dblres[i * 2] = (uchar)(((res[i] >> 4) & 0xf) + 65);
+							dblres[i * 2 + 1] = (uchar)((res[i] & 0xf) + 65);
+						}
+						write(query_response_start, sizeof(query_response_start));
+						write(byte_start, sizeof(byte_start));
+						int sz = (int)res.size();
+						uchar sz1 = (sz & 0x3f) + 0x20;
+						sz >>= 6;
+						uchar sz2 = (sz & 0x3f) + 0x20;
+						write(&sz1, sizeof(sz1));
+						write(&sz2, sizeof(sz2));
+						write(&isTruncated, sizeof(isTruncated));
+						if (!dblres.empty())
+							write(dblres.data(), dblres.size());
+						write(byte_end, sizeof(byte_end));
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(command_getstringdata bytes=\"" +
+							std::to_string(res.size()) + "\" truncated=\"" +
+							std::to_string(isTruncated) + "\")", true);
+						goto query_response_written;
+					}
+					throw DecompError("Unsupported packed decompiler query element " + std::to_string(elemId));
+				}
+				//if (name != "getUserOpName" && name != "getRegister") throw DecompError(name);
+				queryContext = "legacy query '" + escapeCStr(name) + "'";
+				if (name.length() < 4) {
+					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\")", false);
+					throw DecompError("Bad decompiler query: " + name);
+				}
+				switch (name[3]) {
+				case 'B':
+				{
+					addrstring = readQueryString();
+					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
+					SizedAddrInfo addr;
+					getAddrFromString(addrstring, addr);
+					//callback->status("getBytes " + addrstring);
+					std::vector<uchar> res;
+					res.resize(addr.size);
+					callback->getBytes(res.data(), addr.size, addr.addr);
+					std::vector<uchar> dblres;
+					dblres.resize(res.size() * 2);
+					for (int i = 0; i < res.size(); i++) {
+						dblres[i * 2] = (uchar)(((res[i] >> 4) & 0xf) + 65);
+						dblres[i * 2 + 1] = (uchar)((res[i] & 0xf) + 65);
+					}
+					write(query_response_start, sizeof(query_response_start));
+					write(byte_start, sizeof(byte_start));
+					write(dblres.data(), dblres.size());
+					write(byte_end, sizeof(byte_end));
+					write(query_response_end, sizeof(query_response_end));
+					std::string str;
+					for (int i = 0; i < res.size(); i++) {
+						if (i != 0) str += ", ";
+						std::string s = to_string((unsigned int)res[i], std::hex);
+						str += "0x" + std::string(2 - s.size(), '0') + s;
+					}
+					callback->protocolRecorder("queryresponse(packedBytes({ " + str + " }))", true);
+					//getBytes();						// getBytes
+					break;
+				}
+				case 'C':
+					if (name == "getComments") {
+						addrstring = readQueryString();
+						//flags from Ghidra/Features/Decompiler/src/decompile/cpp/comment.hh based on initialization options
+						std::string flags = readQueryString();
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\", \"" + escapeCStr(flags) + "\")", false);
+						AddrInfo addr;
+						getAddrFromString(addrstring, addr);
+						uint8 f = strtoull(flags.c_str(), nullptr, 10);
+						//callback->status("getComments " + addr + " " + flags);
+						//addr = Varnode.readXMLAddress(addrstring, addrfactory, funcEntry.getAddressSpace());
+						//flags = SpecXmlUtils.decodeInt(types);
+						//Function func = getFunctionAt(addr);
+						//AddressSetView addrset = func.getBody();
+						/*if ((flags & 8) != 0) {
+							generateHeaderCommentXML(func, buf);
+						}
+						if ((flags & 1) != 0) {
+							generateCommentXML(addrset, addr, buf, CodeUnit.EOL_COMMENT);
+						}
+						if ((flags & 2) != 0) {
+							generateCommentXML(addrset, addr, buf, CodeUnit.PRE_COMMENT);
+						}
+						if ((flags & 4) != 0) {
+							generateCommentXML(addrset, addr, buf, CodeUnit.POST_COMMENT);
+						}
+						if ((flags & 8) != 0) {
+							generateCommentXML(addrset, addr, buf, CodeUnit.PLATE_COMMENT);
+						}*/
+						std::string commentStr;
+						std::vector<CommentInfo> comments;
+						callback->getComments(addr, comments);
+						for (int i = 0; i < comments.size(); i++) {
+							if (comments[i].type == "header" && (f & comment_type::header) != 0 ||
+								comments[i].type == "warning" && (f & comment_type::warning) != 0 ||
+								comments[i].type == "warningheader" &&
+									(f & comment_type::warningheader) != 0 ||
+								comments[i].type == "user1" && (f & comment_type::user1) != 0 ||
+								comments[i].type == "user2" && (f & comment_type::user2) != 0 ||
+								comments[i].type == "user3" && (f & comment_type::user3) != 0) {
+								ostringstream commentesc;
+								xml_escape(commentesc, comments[i].text.c_str());
+								commentStr += "<comment type=\"" + comments[i].type + "\">\n"
+									"<addr space=\"" + addr.space +
+									"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>"
+									"<addr space=\"" + comments[i].addr.space +
+									"\" offset=\"0x" + to_string(comments[i].addr.offset, hex) + "\"/>"
+									"\n<text>" + commentesc.str() + "</text>\n"
+									"</comment>";
+							}
+						}
+						std::string s = "<commentdb>\n" + commentStr + "</commentdb>";
+						write(query_response_start, sizeof(query_response_start));
+						writeString(s);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
+						//getComments();
+					} else if (name == "getCallFixup") {
+						processPcodeInject(CALLFIXUP_TYPE, callFixupMap);
+					} else if (name == "getCallotherFixup") {
+						processPcodeInject(CALLOTHERFIXUP_TYPE, callFixupOtherMap);
+					} else if (name == "getCallMech") {
+						processPcodeInject(CALLMECHANISM_TYPE, callMechMap);
+					} else {
+						std::string liststring = readQueryString();
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(liststring) + "\")", false);
+						std::vector<unsigned long long> refs;
+						std::stringstream ss(liststring);
+						std::string item;
+						while (getline(ss, item, ',')) refs.push_back(strtoull(item.c_str(), nullptr, 16));
+						CPoolRecord rec = { PRIMITIVE, false, false, 0, std::vector<uchar>(), "" };
+						callback->getCPoolRef(refs, rec);
+						std::string dblres;
+						ostringstream commentesc;
+						if (rec.data.size() != 0) {
+							int wrap = 0;
+							for (int i = 0; i < rec.data.size(); i++) {
+								int val = (rec.data[i] >> 4) & 0xf;
+								dblres.push_back(val > 9 ? val - 10 + 'a' : (val + '0'));
+								val = rec.data[i] & 0xf;
+								dblres.push_back(val > 9 ? val - 10 + 'a' : (val + '0'));
+								dblres.push_back(' ');
+								wrap++;
+								if (wrap > 15) {
+									dblres.push_back('\n');
+									wrap = 0;
+								}
+							}
+						} else {
+							xml_escape(commentesc, rec.token.c_str());
+						}
+						size_t tagIndex = rec.tag >= PRIMITIVE && rec.tag <= CHECK_CAST ?
+							static_cast<size_t>(rec.tag) : static_cast<size_t>(PRIMITIVE);
+						std::string cpoolFallbackType =
+							"  <type name=\"undefined\" id=\"" +
+							std::to_string(hashName("undefined")) +
+							"\" metatype=\"unknown\" size=\"1\">\n  </type>\n";
+						std::string s = "<cpoolrec ref=\"" + std::to_string(refs.empty() ? 0 : refs[0]) +
+							"\" tag=\"" + cpoolreftags[tagIndex] + "\"" +
+							std::string(rec.hasThis ? " hasthis=\"true\"" : "") +
+							std::string(rec.constructor ? " constructor=\"true\"" : "") + ">\n" +
+							(rec.tag == PRIMITIVE ? "  <value>" +
+								std::to_string(rec.value) + "</value>\n" : "") +
+								(rec.data.size() != 0 ? "  <data length=\"" +
+									std::to_string(rec.data.size()) + "\">\n" + dblres + "</data>\n" :
+									"  <token>" + commentesc.str() + "</token>\n") +
+							cpoolFallbackType +
+							"</cpoolrec>";
+						write(query_response_start, sizeof(query_response_start));
+						writeString(s);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
+						//getCPoolRef(); //constant pool only implemented currently for JVM/Dalvik
+						//Ghidra/Processors/JVM/src/main/java/ghidra/app/util/pcodeInject/ConstantPoolJava.java
+						//hard coded constants and some sort of record format with tag, token value and type returned for the comman deliminated query
+					}
+					break;
+				case 'E':
+				{
+					addrstring = readQueryString();
+					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
+					//callback->status("getExternalRefXML " + addrstring);
+					AddrInfo addr;
+					getAddrFromString(addrstring, addr);
+					std::string externname;
+					std::string modName;
+					FuncProtoInfo func = {};
+					callback->getExternInfo(addr, externname, modName, func);
+					std::string res = writeFunc(SizedAddrInfo{ addr, 1 }, externname, modName, func);
+					write(query_response_start, sizeof(query_response_start));
+					writeString(res);
+					write(query_response_end, sizeof(query_response_end));
+					callback->protocolRecorder("queryresponse(\"" + escapeCStr(res) + "\")", true);
+					//getExternalRefXML();			// getExternalRefXML
+					break;
+				}
+				case 'M':
+				{
+					addrstring = readQueryString();
+					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
+					//callback->status("getMappedSymbolsXML " + addrstring);
+					istringstream str(addrstring);
+					AddrInfo addr;
+					getAddrFromString(addrstring, addr);
+					if (addr.space == "register") {
+						//trans->getRegisterName(trans->getSpaceByName(space), idx, sz).c_str()
+					}
+					MappedSymbolInfo msi = { KIND_HOLE };
+					callback->getMappedSymbol(addr, msi);
+					std::string res;
+					if (msi.kind == KIND_FUNCTION) {
+						if (msi.entryPoint != addr.offset) {
+							std::vector<RangeInfo>::iterator iter = msi.ranges.begin();
+							for (; iter != msi.ranges.end(); iter++) {
+								if (addr.offset >= iter->beginoffset && addr.offset <= iter->endoffset) {
+									res = buildHoleXml(addr.space,
+										iter->beginoffset, iter->endoffset, true, false);
+									break;
+								}
+							}
+							if (iter == msi.ranges.end())
+								res = buildHoleXml(addr.space, addr.offset, addr.offset, true, false);
+						} else {
+							res = writeFunc(SizedAddrInfo{ addr, msi.size }, msi.name, "", msi.func);
+						}
+					} else if (msi.kind == KIND_DATA) {
+						ostringstream datanameesc;
+						xml_escape(datanameesc, msi.name.c_str());
+						//typelock, namelock, readonly, volatile also cat (szCoreTypes), index
+						//callback->status("Data name: " + dataname);
+						res = "<result id=\"0x0\">\n  <mapsym>\n" //type=\"dynamic\"/\"equate"
+							"    <symbol name=\"" + datanameesc.str() + "\" typelock=\"" +
+							(msi.typeChain.begin()->metaType == "unknown" ? "true" : "true") +
+							"\" namelock=\"" + std::string(msi.name.size() != 0 ? "true" : "false") +
+							"\" readonly=\"" + (msi.readonly ? "true" : "false") +
+							"\" volatile=\"" +
+							std::string(msi.volatil ? "true" : "false") + "\" cat=\"" "-1" "\">\n" +
+							buildTypeXml(msi.typeChain, 6) +
+							"    </symbol>\n"
+							"    <addr space=\"" + addr.space +
+							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>\n"
+							"    <rangelist/>\n  </mapsym>\n</result>\n";
+					} else if (msi.kind == KIND_EXTERNALREFERENCE) {
+						ostringstream nameesc;
+						xml_escape(nameesc, msi.name.c_str());
+						//callback->status("Extern name: " + externname);
+						res = "<result id=\"0x0\">\n  <mapsym>\n"
+							"    <externrefsymbol name=\"" + nameesc.str() + "\">\n"
+							"      <addr space=\"" + addr.space +
+							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>\n"
+							"    </externrefsymbol>\n"
+							"    <addr space=\"" + addr.space +
+							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>\n"
+							"    <rangelist/>\n  </mapsym>\n</result>\n";
+					} else if (msi.kind == KIND_LABEL) {
+						ostringstream nameesc;
+						xml_escape(nameesc, msi.name.c_str());
+						res = "<result id=\"0x0\">\n  <mapsym>\n"
+							"    <labelsym name=\"" + nameesc.str() +
+							"\" namelock=\"true\" typelock=\"true\" readonly=\"" +
+							std::string(msi.readonly ? "true" : "false") + "\" volatile=\"" +
+							std::string(msi.volatil ? "true" : "false") + "\" cat=\"" "-1" "\"/>\n"
+							"    <addr space=\"" + addr.space +
+							"\" offset=\"0x" + to_string(addr.offset, hex) + "\"/>\n"
+							"    <rangelist/>\n  </mapsym>\n</result>\n";
+					}
+					if (res.size() == 0) { //KIND_HOLE
+						//get the readonly status
+						res = buildHoleXml(addr.space,
+							addr.offset, addr.offset, msi.readonly, msi.volatil);
+					} //get info about hole
+					//addr = Varnode.readXMLAddress(addrstring, addrfactory, funcEntry.getAddressSpace());
+					//Object obj = lookupSymbol(addr);
+					/*if (obj instanceof Function) {
+						boolean includeDefaults = addr.equals(funcEntry);
+						res = buildFunctionXML((Function) obj, addr, includeDefaults);
+					}
+					else if (obj instanceof Data) {
+						res = buildData((Data) obj);
+					}
+					else if (obj instanceof ExternalReference) {
+						res = buildExternalRef(addr, (ExternalReference) obj);
+					}
+					else if (obj instanceof Symbol) {
+						res = buildLabel((Symbol) obj, addr);
+					}
+					if (res == nullptr) { // There is a hole, describe the extent of the hole
+						res = buildHole(addr).toString();
+					}
+					*/
+					write(query_response_start, sizeof(query_response_start));
+					writeString(res);
+					write(query_response_end, sizeof(query_response_end));
+					callback->protocolRecorder("queryresponse(\"" + escapeCStr(res) + "\")", true);
+					//getMappedSymbolsXML();			// getMappedSymbolsXML
+					break;
+				}
+				//case 'N': //getNamespacePath
+				case 'P':
+				{
+					addrstring = readQueryString();
+					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
+					//callback->status("getPcodePacked " + addrstring);
+					istringstream str(addrstring);
+					AddrInfo addr;
+					getAddrFromString(addrstring, addr);
+					//addr = Varnode.readXMLAddress(addrstring, addrfactory, funcEntry.getAddressSpace());
+					//Instruction instr = getInstruction(addr);
+					//PackedBytes pcode = instr.getPrototype().getPcodePacked(instr.getInstructionContext(),
+					//	new InstructionPcodeOverride(instr), uniqueFactory);
+					std::string packed, xml;
+					try {
+						std::tie(packed, xml) = getPackedPcode(*trans, addr);
+					} catch (SleighError&) {
+					} catch (BadDataError&) {
+					} catch (UnimplError&) {
+					} catch (LowlevelError&) {
+					} catch (DecompError&) {
+						//no byte to load send empty response to decompiler
+					}
+					//get instruction bytes from IDA and use the Sleigh interface to translate to P-code
+					write(query_response_start, sizeof(query_response_start));
+					if (packed.size() != 0) writeBytes((const uchar*)packed.data(), packed.size());
+					write(query_response_end, sizeof(query_response_end));
+					callback->protocolRecorder("queryresponse(packedPcode(\"" + escapeCStr(xml) + "\"))", true);
+					//getPcodePacked();				// getPacked
+					break;
+				}
+				case 'R':
+					if (name == "getRegister") {
+						std::string nm = readQueryString();
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(nm) + "\")", false);
+						//in .sla file: <varnode_sym name="REG" id="0xID" scope="0x0" space="register" offset="0xOFFSET" size="SIZE"></varnode_sym>
+						//std::map<std::string, std::string>::const_iterator it = registers.find(nm);
+						//if (it != registers.end()) writeString(it->second + "\n");
+						VarnodeData vd = trans->getRegister(nm);
+						std::string res = "<addr space=\"" + vd.space->getName() + "\" offset=\"0x" +
+							to_string(vd.offset, hex) +
+							"\" size=\"" + std::to_string(vd.size) + "\"/>\n";
+						write(query_response_start, sizeof(query_response_start));
+						writeString(res);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(\"" + escapeCStr(res) + "\")", true);
+						//getRegister();
+					} else { //getRegisterName mainly because not all registers enumerated initially with getRegister
+						//however this is probably never a problem, but it could be a problem if there is some highly specialized code with uneven alignment on registers?
+						addrstring = readQueryString(); //is addr the same as offset?
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
+						SizedAddrInfo addr;
+						getAddrFromString(addrstring, addr);
+						//Address addr = Varnode.readXMLAddress(addrstring, addrfactory, nullptr);
+						//int size = readXMLSize(addrstring);
+						//Register reg = pcodelanguage.getRegister(addr, size);
+						//std::map<std::string, std::string>::iterator it;
+						//for (it = registers.begin(); it != registers.end(); it++) {
+						//	if (it->second == addrstring) break;
+						//}
+						//writeString(it == registers.end() ? "" : it->first);
+						std::string s = trans->getRegisterName(trans->getSpaceByName(addr.addr.space),
+							addr.addr.offset, addr.size).c_str();
+						write(query_response_start, sizeof(query_response_start));
+						writeString(s);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
+					}
+					break;
+				case 'S':
+				{
+					if (name == "getString") {
+						addrstring = readQueryString();
+						std::string dtName = readQueryString();
+						std::string dtId = readQueryString();
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\", \"" + escapeCStr(dtName) + "\", \"" + escapeCStr(dtId) + "\")", false);
+						SizedAddrInfo addr;
+						getAddrFromString(addrstring, addr);
+						std::vector<uchar> res = callback->getStringData(addr.addr);
+						uchar isTruncated = 0;
+						if (res.size() > addr.size) {
+							res.resize(addr.size);
+							isTruncated = 1;
+						}
+						std::vector<uchar> dblres;
+						dblres.resize(res.size() * 2 + 2);
+						for (int i = 0; i < res.size(); i++) {
+							dblres[i * 2] = (uchar)(((res[i] >> 4) & 0xf) + 65);
+							dblres[i * 2 + 1] = (uchar)((res[i] & 0xf) + 65);
+						}
+						dblres[res.size() * 2] = 65;		// Adding null terminator
+						dblres[res.size() * 2 + 1] = 65;
+						write(query_response_start, sizeof(query_response_start));
+						write(byte_start, sizeof(byte_start));
+						int sz = res.size() + 1;		// We add a null terminator character
+						uchar sz1 = (sz & 0x3f) + 0x20;
+						sz >>= 6;
+						uchar sz2 = (sz & 0x3f) + 0x20;
+						write(&sz1, sizeof(sz1));
+						write(&sz2, sizeof(sz2));
+						write(&isTruncated, sizeof(isTruncated));
+
+						write(dblres.data(), dblres.size());
+						write(byte_end, sizeof(byte_end));
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(" + to_string(sz1) + ", " + to_string(sz2) + ", " + to_string(isTruncated) + ", packedBytes({" + std::string(res.begin(), res.end()) + "}))", true);
+					} else {
+						addrstring = readQueryString();
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
+						AddrInfo addr;
+						getAddrFromString(addrstring, addr);
+						//callback->status("getSymbol " + addrstring);
+						std::string s = callback->getSymbol(addr);
+						write(query_response_start, sizeof(query_response_start));
+						writeString(s);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
+						//getSymbol();					// getSymbol
+					}
+					break;
+				}
+				case 'T':
+					if (name == "getType") {
+						std::string nm = readQueryString();
+						std::string id = readQueryString();
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(nm) + "\", \"" + escapeCStr(id) + "\")", false);
+						//Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/program/model/pcode/PcodeDataTypeManager.java
+						//getType();
+						//Pointer
+						//"<type name=\"" "\" metatype=\"ptr\" size=\"" "\" wordsize=\"" "\">" "<typeref />" "</type>";
+						//Array, String, TerminatedString, StringUTF8, Unicode, TerminatedUnicode, Unicode32, TerminatedUnicode32
+						//"<type name=\"" "\" metatype=\"array\" size=\"" "\" arraysize=\"" "\">" "<typeref />" "</type>";
+						//Structure
+						//"<type name=\"" "\" metatype=\"struct\" size=\"" "\">"
+						//"<field name=\"" "\" offset=\"" "\">" "<typeref />" "</field>"
+						//"</type>";
+						//Enum
+						//"<type name=\"" "\" metatype=\"uint\" size=\"" "\" enum=\"true\">"
+						//"<val name=\"" "\" value=\"" "\"/>"
+						//"</type>";
+						//Function
+						//"<type name=\"" "\" metatype=\"code\" size=\"1\">" "</type>"; //new FunctionPrototype(fdef, cspec, voidInputIsVarargs).buildPrototypeXML(resBuf, this) from function definition and compiler spec
+						//Regular: WideChar, WideChar16, WideChar32, AbstractInteger, Boolean, AbstractFloat
+						//can use coreTypes
+						//Otherwise < 16: unknown, > 16: Array
+						std::vector<TypeInfo> typeChain;
+						callback->getMetaType(nm, typeChain);
+						std::string s = typeChain.size() != 0 ? buildTypeXml(typeChain, 0) : "";
+						write(query_response_start, sizeof(query_response_start));
+						writeString(s);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
+					} else {
+						//getTrackedRegisters();
+						addrstring = readQueryString();
+						callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(addrstring) + "\")", false);
+						//callback->status("getTrackedRegisters " + addrstring);
+						AddrInfo addr;
+						getAddrFromString(addrstring, addr);
+						//.pspec context_data -> tracked_set -> <set name="DF" val="0"/>
+						//addr = Varnode.readXMLAddress(addrstring, addrfactory, funcEntry.getAddressSpace());
+						//ProgramContext context = program.getProgramContext();
+						//Register[] regs = context.getRegisters();
+						//Varnode.appendSpaceOffset(stringBuf, addr);
+						/*for (Register reg : regs) {
+							if (reg.isProcessorContext()) {
+								continue;
+							}
+							BigInteger val = context.getValue(reg, addr, false);
+							if (val != nullptr) {
+								buildTrackSet(stringBuf, reg, val.longValue());
+							}
+						}*/
+						//"<set space=\"register\" offset=\"0x106\" size=\"2\" val=\"0x90c\"/>\n"
+						//"<set space=\"register\" offset=\"0x20a\" size=\"1\" val=\"0x0\"/>\n"
+						//only the DF direction control flag on x86 is reported by default here for string operations from the pspec
+						Address trackAddr(trans->getSpaceByName(addr.space), addr.offset);
+						const TrackedSet* ts = nullptr;
+						try {
+							ts = &context->getTrackedSet(trackAddr);
+						} catch (...) {
+							callback->protocolRecorder("query(command_gettrackedregisters empty fallback addr=\"" +
+								addr.space + ":0x" + to_string(addr.offset, hex) + "\")", true);
+						}
+						std::string track;
+						if (ts != nullptr) {
+							for (TrackedSet::const_iterator it = ts->begin(); it != ts->end(); it++) {
+								if (it->loc.space != nullptr && it->loc.offset != -1)
+									track += "  <set space=\"" + it->loc.space->getName() + "\" offset=\"0x" +
+										to_string(it->loc.offset, hex) +
+										"\" size=\"" + std::to_string(it->loc.size) +
+										"\" val=\"0x" + to_string(it->val, hex) + "\"/>\n";
+							}
+						}
+						//register values upon entry
+						std::string s = std::string("<tracked_pointset space=\"" + addr.space +
+							"\" offset=\"0x") + to_string(addr.offset, hex) +
+							"\">\n" + track +
+							"</tracked_pointset>\n";
+						write(query_response_start, sizeof(query_response_start));
+						writeString(s);
+						write(query_response_end, sizeof(query_response_end));
+						callback->protocolRecorder("queryresponse(\"" + escapeCStr(s) + "\")", true);
+					}
+					break;
+				case 'U':
+				{
+					std::string indexStr = readQueryString();
+					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\", \"" + escapeCStr(indexStr) + "\")", false);
+					//in .sla file: <userop_head name = "UserOpName" id = "0xID" scope = "0x0" / >
+					int index = strtol(indexStr.c_str(), nullptr, 10);
+					//std::map<int, std::string>::const_iterator it = userOpNames.find(index);
+					//std::string nm = it == userOpNames.end() ? "" : it->second;
+					std::vector<std::string> userOpNames;
+					trans->getUserOpNames(userOpNames);
+					std::string nm = index >= userOpNames.size() ? "" : userOpNames[index];
+					write(query_response_start, sizeof(query_response_start));
+					writeString(nm);
+					write(query_response_end, sizeof(query_response_end));
+					callback->protocolRecorder("queryresponse(\"" + escapeCStr(nm) + "\")", true);
+					//getUserOpName();				// getUserOpName
+				}
+				break;
+				case 'X': //getXPcode
+					processPcodeInject(EXECUTABLEPCODE_TYPE, callExecPcodeMap);
+					break;
+				default:
+					callback->protocolRecorder("query(\"" + escapeCStr(name) + "\")", false);
+					throw DecompError("Unsupported decompiler query '" + name + "'");
+				}
+query_response_written:
+				;
+			} catch (DecompError& e) { // Catch ANY exception query generates
+				// and pass it down to decompiler
+				std::string extype = "DecompError"; // e.getClass().getName();
+				//std::string msg = e.getMessage();
+				write(exception_start, sizeof(exception_start));
+				writeString(extype.c_str());
+				writeString(e.explain.c_str());
+				write(exception_end, sizeof(exception_end));
+				callback->protocolRecorder("exception(\"" + escapeCStr(extype) + "\", \"" + escapeCStr(e.explain) + "\")", true);
+			} catch (std::exception& e) {
+				std::string extype = "std::exception";
+				write(exception_start, sizeof(exception_start));
+				writeString(extype.c_str());
+				writeString(e.what());
+				write(exception_end, sizeof(exception_end));
+				callback->protocolRecorder("exception(\"" + escapeCStr(extype) + "\", \"" + escapeCStr(e.what()) + "\")", true);
+			} catch (...) {
+				std::string extype = "unknown";
+				std::string message = "Unknown exception while handling decompiler query (" + queryContext + ")";
+				write(exception_start, sizeof(exception_start));
+				writeString(extype.c_str());
+				writeString(message.c_str());
+				write(exception_end, sizeof(exception_end));
+				callback->protocolRecorder("exception(\"" + escapeCStr(extype) + "\", \"" + escapeCStr(message) + "\")", true);
+			}
+			//fflush(nativeOut); // Make sure decompiler receives response
+			callback->protocolRecorder("query terminator read begin", false);
+			readToBurst(); // Read query terminator
+			callback->protocolRecorder("query terminator read complete", false);
+			break;
+		}
+		case 6:
+			throw DecompError("GHIDRA/decompiler out of alignment");
+		case 10:
+			generateException();
+			break;
+		case 14:			// Start of the main decompiler output
+			if (bufferActive) {
+				throw DecompError("Nested decompiler output");
+			}
+			// Allocate storage buffer for the result, which is generally not tiny. So we
+			// start with any initial allocation of 1024 bytes, also give an absolute upper bound
+			// determined by maxResultSizeMBYtes
+			//buf = LimitedByteBuffer(1024, maxResultSizeMBYtes << 20);
+			buf.reserve(1024);
+			bufferActive = true;
+			break;
+		case 15:			// This is the end of the main decompiler output
+			if (!bufferActive) { //== nullptr...
+				throw DecompError("Mismatched string header");
+			}
+			retbuf = buf;
+			buf.clear();		// Reset the main buffer as a native message may follow
+			buf.shrink_to_fit();
+			bufferActive = false;
+			break;
+		case 16:			// Beginning of any native message from the decompiler
+			//if (buf.capacity() != 0)
+				//throw DecompError(("Nested decompiler output");
+					// if buf is non-null, then res was interrupted
+					// so we just throw out the partial result
+					//buf = LimitedByteBuffer(64, 1 << 20);
+			buf.reserve(64);
+			bufferActive = true;
+			break;
+		case 17:			// End of the native message from the decompiler
+			if (!bufferActive) { //== nullptr...
+				throw DecompError("Mismatched message header");
+			}
+			//callback.setNativeMessage(buf.toString());
+			//callback->status("Decompiler response: " + std::string(buf.begin(), buf.end()));
+			//this is the one case where the process does not need to be relaunched...
+			if (buf.size() != 0) { //can enhance if resbuf contains partial output?
+				//always "\r\n" at start of message?
+				//need to replace all new lines with "//"
+				size_t msgStart = (buf.size() >= 2 && buf[0] == '\r' && buf[1] == '\n') ? 2 : 0;
+				std::replace_if(buf.begin() + msgStart, buf.end(),
+					[](uchar it) { return it == '\n'; }, ' ');
+				std::string str = "\n\n\n<doc><function/><function><comment color=\"comment\">\n"
+					"//Decompiler native message: " + std::string(buf.begin() + msgStart, buf.end()) +
+					"\n</comment></function></doc>";
+				retbuf = std::vector<uchar>(str.begin(), str.end());
+			}
+			buf.clear();
+			buf.shrink_to_fit();
+			bufferActive = false;
+			break;
+		default:
+			throw DecompError("GHIDRA/decompiler alignment error");
+
+		}
+		if (!bufferActive) { //== nullptr...
+			callback->protocolRecorder("response next burst begin", false);
+			type = readToBurst();
+			callback->protocolRecorder("response next burst type=\"" + std::to_string(type) + "\"", false);
+		}
+		else {
+			size_t pos = buf.size();
+			callback->protocolRecorder("response buffer read begin", false);
+			type = readToBuffer(buf);
+			callback->protocolRecorder("response buffer read complete type=\"" + std::to_string(type) +
+				"\" bytes=\"" + std::to_string(buf.size() - pos) + "\"", false);
+			callback->protocolRecorder("buffereddata(\"" + escapeCStr(std::string(buf.begin() + pos, buf.end())) + "\")", false);
+		}
+	}
+	return retbuf;
+}
+
+std::string readFileAsString(std::string filename)
+{
+	/*FILE* fp = fopen(filename.c_str(), "rb");
+	if (fp == nullptr) return std::string();
+	std::vector<uchar> buf;
+	fseek(fp, 0, SEEK_END);
+	long size = ftell(fp);
+	buf.resize(size);
+	fseek(fp, 0, SEEK_SET);
+	fread(buf.data(), size, 1, fp);
+	fclose(fp);*/
+	ifstream ifs(filename, std::ifstream::binary);
+	ifs.seekg(0, ifs.end);
+	std::streampos length = ifs.tellg();
+	ifs.seekg(0, ifs.beg);
+	std::vector<char> buf;
+	buf.resize(length);
+	ifs.read(buf.data(), length);
+	return std::string(buf.begin(), buf.end());
+}
+
+std::string DecompInterface::getOptions(Options opt)
+{
+	return "<optionslist>\n"
+		"\t<currentaction>\n"
+		"\t\t<param1>conditionalexe</param1>\n"
+		"\t\t<param2>" + std::string(opt.conditionalexe ? "on" : "off") + "</param2>\n"
+		"\t</currentaction>\n"
+		"\t<readonly>" + std::string(opt.readonly ? "on" : "off") + "</readonly>\n"
+		"\t<currentaction>\n"
+		"\t\t<param1>decompile</param1>\n"
+		"\t\t<param2>unreachable</param2>\n"
+		"\t\t<param3>" + std::string(opt.decompileUnreachable ? "on" : "off") + "</param3>\n"
+		"\t</currentaction>\n"
+		"\t<currentaction>\n"
+		"\t\t<param1>decompile</param1>\n"
+		"\t\t<param2>doubleprecis</param2>\n"
+		"\t\t<param3>" + std::string(opt.decompileDoublePrecis ? "on" : "off") + "</param3>\n"
+		"\t</currentaction>\n"
+		"\t<ignoreunimplemented>" + std::string(opt.ignoreUnimplemented ? "on" : "off") +
+		"</ignoreunimplemented>\n"
+		"\t<inferconstptr>" + std::string(opt.inferConstPtr ? "on" : "off") + "</inferconstptr>\n"
+		"\t<analyzeforloops>" + std::string(opt.analyzeForLoops ? "on" : "off") + "</analyzeforloops>\n"
+		"\t<allowcontextset>" + std::string(opt.allowContextSet ? "on" : "off") + "</allowcontextset>\n"
+		"\t<errorunimplemented>" + std::string(opt.errorUnimplemented ? "on" : "off") + "</errorunimplemented>\n"
+		"\t<errorreinterpreted>" + std::string(opt.errorReinterpreted ? "on" : "off") + "</errorreinterpreted>\n"
+		"\t<errortoomanyinstructions>" + std::string(opt.errorTooManyInstructions ? "on" : "off") +
+		"</errortoomanyinstructions>\n"
+		"\t<jumpload>" + std::string(opt.jumpLoad ? "on" : "off") + "</jumpload>\n"
+		"\t<aliasblock>" + opt.aliasBlock + "</aliasblock>\n"
+		"\t<maxinstruction>" + std::to_string(opt.maxInstructions) + "</maxinstruction>\n"
+		"\t<namespacestrategy>" + opt.namespaceStrategy + "</namespacestrategy>\n"
+		"\t<splitdatatype>\n"
+		"\t\t<param1>" + opt.splitDatatype1 + "</param1>\n"
+		"\t\t<param2>" + opt.splitDatatype2 + "</param2>\n"
+		"\t\t<param3>" + opt.splitDatatype3 + "</param3>\n"
+		"\t</splitdatatype>\n"
+		"\t<nanignore>" + opt.nanIgnore + "</nanignore>\n"
+		"\t<nullprinting>" + std::string(opt.nullPrinting ? "on" : "off") + "</nullprinting>\n"
+		"\t<inplaceops>" + std::string(opt.inPlaceOps ? "on" : "off") + "</inplaceops>\n"
+		"\t<conventionprinting>" + std::string(opt.conventionPrinting ? "on" : "off") +
+		"</conventionprinting>\n"
+		"\t<nocastprinting>" + std::string(opt.noCastPrinting ? "on" : "off") +
+		"</nocastprinting>\n"
+		"\t<hideextensions>" + std::string(opt.hideExtensions ? "on" : "off") + "</hideextensions>\n"
+		"\t<maxlinewidth>" + std::to_string(opt.maxLineWidth) + "</maxlinewidth>\n"
+		"\t<jumptablemax>" + std::to_string(opt.maxJumpTableSize) + "</jumptablemax>\n"
+		"\t<indentincrement>" + std::to_string(opt.indentIncrement) + "</indentincrement>\n"
+		"\t<commentindent>" + std::to_string(opt.commentIndent) + "</commentindent>\n"
+		"\t<commentstyle>" + opt.commentStyle + "</commentstyle>\n"
+		"\t<commentinstruction>\n"
+		"\t\t<param1>header</param1>\n"
+		"\t\t<param2>" + std::string(opt.commentInstructionHeader ? "on" : "off") + "</param2>\n"
+		"\t</commentinstruction>\n"
+		"\t<commentinstruction>\n"
+		"\t\t<param1>user2</param1>\n"
+		"\t\t<param2>" + std::string(opt.commentUser2 ? "on" : "off") + "</param2>\n"
+		"\t</commentinstruction>\n"
+		"\t<commentinstruction>\n"
+		"\t\t<param1>user1</param1>\n"
+		"\t\t<param2>" + std::string(opt.commentUser1 ? "on" : "off") + "</param2>\n"
+		"\t</commentinstruction>\n"
+		"\t<commentinstruction>\n"
+		"\t\t<param1>user3</param1>\n"
+		"\t\t<param2>" + std::string(opt.commentUser3 ? "on" : "off") + "</param2>\n"
+		"\t</commentinstruction>\n"
+		"\t<commentinstruction>\n"
+		"\t\t<param1>warning</param1>\n"
+		"\t\t<param2>" + std::string(opt.commentWarning ? "on" : "off") + "</param2>\n"
+		"\t</commentinstruction>\n"
+		"\t<commentheader>\n"
+		"\t\t<param1>header</param1>\n"
+		"\t\t<param2>" + std::string(opt.commentHeader ? "on" : "off") + "</param2>\n"
+		"\t</commentheader>\n"
+		"\t<commentheader>\n"
+		"\t\t<param1>warningheader</param1>\n"
+		"\t\t<param2>" + std::string(opt.commentWarningHeader ? "on" : "off") + "</param2>\n"
+		"\t</commentheader>\n"
+		"\t<integerformat>" + opt.integerFormat + "</integerformat>\n"
+		"\t<braceformat>\n"
+		"\t\t<param1>function</param1>\n"
+		"\t\t<param2>" + opt.braceFormatFunction + "</param2>\n"
+		"\t</braceformat>\n"
+		"\t<braceformat>\n"
+		"\t\t<param1>ifelse</param1>\n"
+		"\t\t<param2>" + opt.braceFormatIfElse + "</param2>\n"
+		"\t</braceformat>\n"
+		"\t<braceformat>\n"
+		"\t\t<param1>loop</param1>\n"
+		"\t\t<param2>" + opt.braceFormatLoop + "</param2>\n"
+		"\t</braceformat>\n"
+		"\t<braceformat>\n"
+		"\t\t<param1>switch</param1>\n"
+		"\t\t<param2>" + opt.braceFormatSwitch + "</param2>\n"
+		"\t</braceformat>\n"
+		"\t<setlanguage>" + opt.setLanguage + "</setlanguage>\n"
+		"\t<protoeval>" +
+		((callStyles.find(opt.protoEval) == callStyles.end()) ? callStyle : opt.protoEval) +
+		"</protoeval>\n"
+		"</optionslist>"; //protoeval must be set to one allowed in the cspec or setOptions fails;
+}
+
+static const char* optionBool(bool val)
+{
+	return val ? "on" : "off";
+}
+
+static void writePackedOption(PackedEncode& encoder, const ElementId& option, const std::string& param1)
+{
+	encoder.openElement(option);
+	encoder.writeString(ATTRIB_CONTENT, param1);
+	encoder.closeElement(option);
+}
+
+static void writePackedOption(PackedEncode& encoder, const ElementId& option, const std::string& param1,
+	const std::string& param2)
+{
+	encoder.openElement(option);
+	encoder.openElement(ELEM_OPTION_PARAM1);
+	encoder.writeString(ATTRIB_CONTENT, param1);
+	encoder.closeElement(ELEM_OPTION_PARAM1);
+	encoder.openElement(ELEM_OPTION_PARAM2);
+	encoder.writeString(ATTRIB_CONTENT, param2);
+	encoder.closeElement(ELEM_OPTION_PARAM2);
+	encoder.closeElement(option);
+}
+
+static void writePackedOption(PackedEncode& encoder, const ElementId& option, const std::string& param1,
+	const std::string& param2, const std::string& param3)
+{
+	encoder.openElement(option);
+	encoder.openElement(ELEM_OPTION_PARAM1);
+	encoder.writeString(ATTRIB_CONTENT, param1);
+	encoder.closeElement(ELEM_OPTION_PARAM1);
+	encoder.openElement(ELEM_OPTION_PARAM2);
+	encoder.writeString(ATTRIB_CONTENT, param2);
+	encoder.closeElement(ELEM_OPTION_PARAM2);
+	encoder.openElement(ELEM_OPTION_PARAM3);
+	encoder.writeString(ATTRIB_CONTENT, param3);
+	encoder.closeElement(ELEM_OPTION_PARAM3);
+	encoder.closeElement(option);
+}
+
+std::string DecompInterface::getPackedOptions(Options opt)
+{
+	ostringstream packedStream;
+	PackedEncode encoder(packedStream);
+	encoder.openElement(ELEM_OPTION_OPTIONSLIST);
+	writePackedOption(encoder, ELEM_OPTION_CURRENTACTION, "conditionalexe", optionBool(opt.conditionalexe));
+	writePackedOption(encoder, ELEM_OPTION_READONLY, optionBool(opt.readonly));
+	writePackedOption(encoder, ELEM_OPTION_CURRENTACTION, "decompile", "unreachable", optionBool(opt.decompileUnreachable));
+	writePackedOption(encoder, ELEM_OPTION_CURRENTACTION, "decompile", "doubleprecis", optionBool(opt.decompileDoublePrecis));
+	writePackedOption(encoder, ELEM_OPTION_IGNOREUNIMPLEMENTED, optionBool(opt.ignoreUnimplemented));
+	writePackedOption(encoder, ELEM_OPTION_INFERCONSTPTR, optionBool(opt.inferConstPtr));
+	writePackedOption(encoder, ELEM_OPTION_ANALYZEFORLOOPS, optionBool(opt.analyzeForLoops));
+	writePackedOption(encoder, ELEM_OPTION_ALLOWCONTEXTSET, optionBool(opt.allowContextSet));
+	writePackedOption(encoder, ELEM_OPTION_ERRORUNIMPLEMENTED, optionBool(opt.errorUnimplemented));
+	writePackedOption(encoder, ELEM_OPTION_ERRORREINTERPRETED, optionBool(opt.errorReinterpreted));
+	writePackedOption(encoder, ELEM_OPTION_ERRORTOOMANYINSTRUCTIONS, optionBool(opt.errorTooManyInstructions));
+	writePackedOption(encoder, ELEM_OPTION_JUMPLOAD, optionBool(opt.jumpLoad));
+	writePackedOption(encoder, ELEM_OPTION_ALIASBLOCK, opt.aliasBlock);
+	writePackedOption(encoder, ELEM_OPTION_MAXINSTRUCTION, std::to_string(opt.maxInstructions));
+	writePackedOption(encoder, ELEM_OPTION_NAMESPACESTRATEGY, opt.namespaceStrategy);
+	writePackedOption(encoder, ELEM_OPTION_SPLITDATATYPE, opt.splitDatatype1, opt.splitDatatype2, opt.splitDatatype3);
+	writePackedOption(encoder, ELEM_OPTION_NANIGNORE, opt.nanIgnore);
+	writePackedOption(encoder, ELEM_OPTION_NULLPRINTING, optionBool(opt.nullPrinting));
+	writePackedOption(encoder, ELEM_OPTION_INPLACEOPS, optionBool(opt.inPlaceOps));
+	writePackedOption(encoder, ELEM_OPTION_CONVENTIONPRINTING, optionBool(opt.conventionPrinting));
+	writePackedOption(encoder, ELEM_OPTION_NOCASTPRINTING, optionBool(opt.noCastPrinting));
+	writePackedOption(encoder, ELEM_OPTION_MAXLINEWIDTH, std::to_string(opt.maxLineWidth));
+	writePackedOption(encoder, ELEM_OPTION_JUMPTABLEMAX, std::to_string(opt.maxJumpTableSize));
+	writePackedOption(encoder, ELEM_OPTION_INDENTINCREMENT, std::to_string(opt.indentIncrement));
+	writePackedOption(encoder, ELEM_OPTION_COMMENTINDENT, std::to_string(opt.commentIndent));
+	writePackedOption(encoder, ELEM_OPTION_COMMENTSTYLE, opt.commentStyle);
+	writePackedOption(encoder, ELEM_OPTION_COMMENTINSTRUCTION, "header", optionBool(opt.commentInstructionHeader));
+	writePackedOption(encoder, ELEM_OPTION_COMMENTINSTRUCTION, "user2", optionBool(opt.commentUser2));
+	writePackedOption(encoder, ELEM_OPTION_COMMENTINSTRUCTION, "user1", optionBool(opt.commentUser1));
+	writePackedOption(encoder, ELEM_OPTION_COMMENTINSTRUCTION, "user3", optionBool(opt.commentUser3));
+	writePackedOption(encoder, ELEM_OPTION_COMMENTINSTRUCTION, "warning", optionBool(opt.commentWarning));
+	writePackedOption(encoder, ELEM_OPTION_COMMENTHEADER, "header", optionBool(opt.commentHeader));
+	writePackedOption(encoder, ELEM_OPTION_COMMENTHEADER, "warningheader", optionBool(opt.commentWarningHeader));
+	writePackedOption(encoder, ELEM_OPTION_INTEGERFORMAT, opt.integerFormat);
+	writePackedOption(encoder, ELEM_OPTION_BRACEFORMAT, "function", opt.braceFormatFunction);
+	writePackedOption(encoder, ELEM_OPTION_BRACEFORMAT, "ifelse", opt.braceFormatIfElse);
+	writePackedOption(encoder, ELEM_OPTION_BRACEFORMAT, "loop", opt.braceFormatLoop);
+	writePackedOption(encoder, ELEM_OPTION_BRACEFORMAT, "switch", opt.braceFormatSwitch);
+	writePackedOption(encoder, ELEM_OPTION_SETLANGUAGE, opt.setLanguage);
+	writePackedOption(encoder, ELEM_OPTION_PROTOEVAL,
+		(callStyles.find(opt.protoEval) == callStyles.end()) ? callStyle : opt.protoEval);
+	encoder.closeElement(ELEM_OPTION_OPTIONSLIST);
+	return packedStream.str();
+}
+
+std::string DecompInterface::getPackedAddress(AddrInfo addr)
+{
+	ostringstream packedStream;
+	PackedEncode encoder(packedStream);
+	AddrSpace* space = trans->getSpaceByName(addr.space);
+	if (space == nullptr)
+		throw DecompError("Unknown address space: " + addr.space);
+	Address(space, addr.offset).encode(encoder);
+	return packedStream.str();
+}
+
+void DecompInterface::setupTranslator(DecompileCallback* cb, std::string sleighfilename)
+{
+	callback = cb;
+	setupTrace(callback, "translator begin");
+	/*ifstream s(sleighfilename);
+	Document* doc = xml_tree(s);
+	s.close();
+	Element* el = doc->getRoot();
+	const List& list(el->getChildren());
+	List::const_iterator iter;
+	//uniqBase = strtoull(el->getAttributeValue("uniqbase").c_str(), nullptr, 16);
+	//uniqBase = 0x10000000; //hard coded per Ghidra/Features/Decompiler/src/main/java/ghidra/app/decompiler/DecompInterface.java
+	//bigEndian = el->getAttributeValue("bigendian") == "true";
+	for (iter = list.begin(); iter != list.end(); ++iter) {
+		el = *iter;
+		if (el->getName() == "spaces") {
+			//global defined here:
+			//Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/app/plugin/processors/sleigh/SleighLanguage.java
+			procSpaces = "<" + el->getName();
+			for (int i = 0; i < el->getNumAttributes(); i++) {
+				procSpaces += " " + el->getAttributeName(i) + "=\"" + el->getAttributeValue(i) + "\"";
+			}
+			procSpaces += ">";
+			const List& lst(el->getChildren());
+			List::const_iterator it;
+			for (it = lst.begin(); it != lst.end(); ++it) {
+				Element* e = *it;
+				procSpaces += "<" + e->getName();
+				for (int i = 0; i < e->getNumAttributes(); i++) {
+					procSpaces += " " + e->getAttributeName(i) + "=\"" + e->getAttributeValue(i) + "\"";
+				}
+				if (e->getAttributeValue("name") == "ram") procSpaces += " global=\"true\""; //tag=space
+				else if (e->getAttributeValue("name") == "register") procSpaces += " global=\"false\""; //tag=space
+				else if (e->getAttributeValue("name") == "unique") procSpaces += " global=\"false\""; //tag=space_unique
+				procSpaces += "/>";
+			}
+			procSpaces += "</spaces>";
+			//need to add global attributes: false for unique and register, true for ram e.g. global="true/false" on the space_unique and space children though
+		} /*else if (el->getName() == "symbol_table") {
+			const List& lst(el->getChildren());
+			List::const_iterator it;
+			for (it = lst.begin(); it != lst.end(); ++it) {
+				Element* e = *it;
+				if (e->getName() == "userop_head") {
+					//uint8 idx = strtoull(e->getAttributeValue("id").c_str(), nullptr, 16);
+					//int idx = userOpNames.size();
+					//userOpNames[idx] = e->getAttributeValue("name");
+				} else if (e->getName() == "varnode_sym" && e->getAttributeValue("space") == "register") {
+					//registers[e->getAttributeValue("name").c_str()] = "<addr space=\"register\" offset=\"" + e->getAttributeValue("offset") + "\" size=\"" + e->getAttributeValue("size") + "\"/>";
+				}
+			}
+		}*/
+		//}
+		//delete doc;
+		//  loader->open();
+		//    loader->adjustVma(adjustvma);
+		// Set up the context object
+	if (context != nullptr) delete context;
+	if (loader != nullptr) delete loader;
+	context = new ContextInternal();
+	setupTrace(callback, "context allocated");
+	// Set up the assembler/pcode-translator
+	//if (trans != nullptr)
+		//trans->reset(&loader, context);
+	//else
+	loader = new CallbackLoadImage(callback);
+	setupTrace(callback, "loader allocated");
+
+	DocumentStorage docstorage;
+	if (lastsleighfile != sleighfilename) {
+		lastsleighfile = sleighfilename;
+		if (trans != nullptr) delete trans;
+		trans = new Sleigh(loader, context);
+		setupTrace(callback, "sleigh allocated");
+		Element sleighroot(nullptr);
+		sleighroot.setName("sleigh");
+		sleighroot.addContent(sleighfilename.c_str(), 0, (int4)sleighfilename.size());
+		docstorage.registerTag(&sleighroot);
+		setupTrace(callback, "sleigh initialize begin");
+		trans->initialize(docstorage); // Initialize the translator
+		setupTrace(callback, "sleigh initialize complete");
+	} else {
+		setupTrace(callback, "sleigh reset begin");
+		trans->reset(loader, context);
+		setupTrace(callback, "sleigh reset complete");
+		setupTrace(callback, "sleigh reinitialize begin");
+		trans->initialize(docstorage);
+		setupTrace(callback, "sleigh reinitialize complete");
+	}
+
+	for (std::map<std::string, XmlPcodeEmit*>::iterator it = callFixupMap.begin();
+		it != callFixupMap.end(); it++) {
+		delete it->second;
+	}
+	callFixupMap.clear();
+	fixupTargetMap.clear();
+	for (std::map<std::string, XmlPcodeEmit*>::iterator it = callFixupOtherMap.begin();
+		it != callFixupOtherMap.end(); it++) {
+		delete it->second;
+	}
+	callFixupOtherMap.clear();
+	for (std::map<std::string, XmlPcodeEmit*>::iterator it = callMechMap.begin();
+		it != callMechMap.end(); it++) {
+		delete it->second;
+	}
+	callMechMap.clear();
+	for (std::map<std::string, XmlPcodeEmit*>::iterator it = callExecPcodeMap.begin();
+		it != callExecPcodeMap.end(); it++) {
+		delete it->second;
+	}
+	callExecPcodeMap.clear();
+
+	uniqueBase = trans->getUniqueBase(); //for pcode injections
+	setupTrace(callback, "translator complete");
+}
+
+#define getDefaultSpace getDefaultCodeSpace //Ghidra 10
+
+void DecompInterface::setup(DecompileCallback* cb, std::string sleighfilename,
+	std::string pspecfilename, std::string cspecfilename, std::vector<CoreType>& coreTypes,
+	Options opt, int timeout, int maxpload)
+{
+	setupTrace(cb, "interface setup begin");
+	setupTranslator(cb, sleighfilename);
+	setupTrace(cb, "core types begin");
+	std::string szCoreTypes = "    <coretypes>\n";
+	for (std::vector<CoreType>::iterator it = coreTypes.begin(); it != coreTypes.end(); it++) {
+		it->id = hashName(it->name);
+		if (it->name == "void") szCoreTypes += "        <void/>\n";
+		else szCoreTypes += "        <type name=\"" + it->name + "\" size=\"" +
+			std::to_string(it->size) + "\" metatype=\"" + it->metaType +
+			std::string(it->isChar ? "\" char=\"true" : "") +
+			std::string(it->isUtf ? "\" utf=\"true" : "") +
+			"\" id=\"" + std::to_string(it->id) + "\"/>\n";
+	}
+	szCoreTypes += "    </coretypes>\n";
+	coretypesxml = szCoreTypes;
+	setupTrace(cb, "read compiler and processor specs begin");
+	cspecxml = readFileAsString(cspecfilename);
+	pspecxml = readFileAsString(pspecfilename);
+	setupTrace(cb, "read compiler and processor specs complete");
+
+	std::vector<InitStateItem> inits;
+	setupTrace(cb, "ida initial state begin");
+	cb->getInits(inits);
+	setupTrace(cb, "ida initial state complete count=\"" + std::to_string(inits.size()) + "\"");
+	//no good way to do this in a future-proof way as no protected members, no good accessor methods, XML looks the best
+	partmap<Address, TrackedSet> newtrackmap;
+	std::string str;
+	for (int i = 0; i < inits.size(); i++) {
+		/*str += "<tracked_pointset space=\"" + inits[i].space1 + "\" offset=\"" + std::to_string(inits[i].offset1) + "\" size=\"" +
+			std::to_string(inits[i].offset2 - inits[i].offset1) + "\">" "<set space=\"" + inits[i].space + "\" offset=\"" +
+			std::to_string(inits[i].offset) + "\" val=\"" + std::to_string(inits[i].val) + "\"/>"
+			"</tracked_pointset>";*/
+		AddrSpace* initSpace = trans->getSpaceByName(inits[i].addr.addr.space);
+		AddrSpace* rangeSpace1 = trans->getSpaceByName(inits[i].addr1.space);
+		AddrSpace* rangeSpace2 = trans->getSpaceByName(inits[i].addr2.space);
+		if (inits[i].addr.size == 0 || initSpace == nullptr ||
+			rangeSpace1 == nullptr || rangeSpace2 == nullptr)
+			continue;
+		Address addr1(rangeSpace1, inits[i].addr1.offset);
+		Address addr2(rangeSpace2, inits[i].addr2.offset);
+		newtrackmap.split(addr1);
+		newtrackmap.split(addr2);
+		for (partmap<Address, TrackedSet>::iterator it = newtrackmap.begin(addr1);
+			it != newtrackmap.begin(addr2); it++) {
+			/*const TrackedSet oldts = context->getTrackedSet(it->first); //make copy as the temporary hole cleared will destroy anything in here presumably
+			for (int i = 0; i < oldts.size(); i++) {
+				it->second.push_back(oldts[i]);
+			}*/
+			it->second.push_back(TrackedContext({
+				VarnodeData{ initSpace, inits[i].addr.addr.offset, (uint4)inits[i].addr.size},
+				inits[i].val }));
+		}
+	}
+
+	// Now that context symbol names are loaded by the translator
+	// we can set the default context
+	//Ghidra/Processors/x86/data/languages/x86-64.pspec context_set:
+	istringstream ss(pspecxml);
+	Document* doc;
+	try {
+		setupTrace(cb, "processor spec parse begin");
+		doc = xml_tree(ss);
+		setupTrace(cb, "processor spec parse complete");
+	} catch (XmlError& err) {
+		throw DecompError("Processor spec file not found or could not be parsed: " + err.explain);
+	}
+	Element* el = doc->getRoot();
+	const List& list(el->getChildren());
+	List::const_iterator iter;
+	for (iter = list.begin(); iter != list.end(); ++iter) {
+		el = *iter;
+		if (el->getName() == "context_data") {
+			const List& lst(el->getChildren());
+			for (iter = lst.begin(); iter != lst.end(); ++iter) {
+				el = *iter;
+				if (el->getName() == "context_set" || el->getName() == "tracked_set") {
+					bool bContext = el->getName() == "context_set";
+					AddrSpace* rangeSpace = nullptr;
+					try {
+						rangeSpace = trans->getSpaceByName(el->getAttributeValue("space"));
+					} catch (...) {
+						rangeSpace = nullptr;
+					}
+					uintb first = 0;
+					uintb last = rangeSpace != nullptr ? rangeSpace->getHighest() : 0;
+					try {
+						first = strtoull(el->getAttributeValue("first").c_str(), nullptr, 0);
+					} catch (...) {
+					}
+					try {
+						last = strtoull(el->getAttributeValue("last").c_str(), nullptr, 0);
+					} catch (...) {
+					}
+					Address addr1;
+					Address addr2;
+					if (rangeSpace != nullptr) {
+						Range range(rangeSpace, first, last);
+						addr1 = range.getFirstAddr();
+						addr2 = range.getLastAddrOpen(trans);
+					}
+					const List& lt(el->getChildren());
+					for (List::const_iterator itr = lt.begin(); itr != lt.end(); ++itr) {
+						el = *itr;
+						if (el->getName() == "set") {
+							uintb val = strtoull(el->getAttributeValue("val").c_str(), nullptr, 0);
+							if (bContext) {
+								if (rangeSpace != nullptr)
+									context->setVariableRegion(el->getAttributeValue("name"), addr1, addr2, val);
+								else
+									context->setVariableDefault(el->getAttributeValue("name"), val);
+							} else if (rangeSpace != nullptr) {
+								int4 size = 0;
+								Address addrinner;
+								try {
+									XmlDecode addressDecoder(trans, el);
+									addrinner = Address::decode(addressDecoder, size);
+								} catch (...) {
+									const VarnodeData& vd = trans->getRegister(el->getAttributeValue("name"));
+									addrinner = Address(vd.space, vd.offset);
+									size = vd.size;
+								}
+							for (partmap<Address, TrackedSet>::iterator it = newtrackmap.begin(addr1);
+								it != newtrackmap.begin(addr2); it++) {
+								it->second.push_back(TrackedContext({
+									VarnodeData{ addrinner.getSpace(),
+									addrinner.getOffset(), (uint4)size},
+									val }));
+							}
+							}
+						}
+					}
+					//break;
+				}
+			}
+			break;
+		} else if (el->getName() == "segmentop") {
+			std::string name = "segment";
+			for (int i = 0; i < el->getNumAttributes(); i++) {
+				if (el->getAttributeName(i) == "userop") {
+					name = el->getAttributeValue(i);
+					break;
+				}
+			}
+			const List& lst(el->getChildren());
+			for (List::const_iterator segIt = lst.begin(); segIt != lst.end(); ++segIt) {
+				Element* pcode = *segIt;
+				if (pcode->getName() != "pcode")
+					continue;
+				std::string body;
+				std::vector<std::pair<std::string, int>> inputs;
+				std::vector<std::pair<std::string, int>> outputs;
+				parsePcodeElement(pcode, body, inputs, outputs);
+				if (body.size() != 0) {
+					XmlPcodeEmit* emit = new XmlPcodeEmit;
+					emit->body = body;
+					emit->inputs = inputs;
+					emit->outputs = outputs;
+					callExecPcodeMap[name + "_pcode"] = emit;
+				}
+			}
+		} else if (el->getName() == "jumpassist") {
+			//EXECUTABLEPCODE_TYPE is for Dalvik/JVM
+			//pspec has optional jumpassist -> with optional case_pcode, addr_pcode, default_pcode, size_pcode each with <input name="" size=""/>...<output name="" size=""/><body>[CDATA]
+			std::string name = el->getAttributeValue("name");
+			const List& lst(el->getChildren());
+			for (List::const_iterator jumpIt = lst.begin(); jumpIt != lst.end(); ++jumpIt) {
+				el = *jumpIt;
+				std::string finalname;
+				if (el->getName() == "case_pcode") {
+					finalname = name + "_index2case";
+				} else if (el->getName() == "addr_pcode") {
+					finalname = name + "_index2addr";
+				} else if (el->getName() == "default_pcode") {
+					finalname = name + "_defaultaddr";
+				} else if (el->getName() == "size_pcode") {
+					finalname = name + "_calcsize";
+				}
+				std::string body;
+				std::vector<std::pair<std::string, int>> inputs;
+				std::vector<std::pair<std::string, int>> outputs;
+				parsePcodeElement(el, body, inputs, outputs);
+				if (finalname.size() != 0 && body.size() != 0) {
+					XmlPcodeEmit* emit = new XmlPcodeEmit;
+					emit->body = body;
+					emit->inputs = inputs;
+					emit->outputs = outputs;
+					callExecPcodeMap[finalname] = emit;
+				}
+			}
+		}
+	}
+	delete doc;
+	setupTrace(cb, "processor spec apply complete");
+
+	for (partmap<Address, TrackedSet>::iterator it = newtrackmap.begin();
+		it != newtrackmap.end(); ++it) {
+		if (it->second.empty())
+			continue;
+		partmap<Address, TrackedSet>::iterator next = it;
+		++next;
+		if (next == newtrackmap.end())
+			continue;
+
+		TrackedSet& ts(context->createSet(it->first, next->first));
+		for (int i = 0; i < it->second.size(); i++) {
+			ts.push_back(it->second[i]);
+		}
+	}
+
+	toutSecs = timeout;
+	maxResultSizeMBYtes = maxpload;
+	//setShowNamespace(xmlOptions.isDisplayNamespaces());
+
+	istringstream s(cspecxml);
+	try {
+		setupTrace(cb, "compiler spec parse begin");
+		doc = xml_tree(s);
+		setupTrace(cb, "compiler spec parse complete");
+	} catch (XmlError& err) {
+		throw DecompError("Compiler spec file not found or could not be parsed: " + err.explain);
+	}
+	callStyles.clear();
+	std::map<std::string, bool> globalSpaces;
+	el = doc->getRoot();
+	const List& l(el->getChildren());
+	for (iter = l.begin(); iter != l.end(); ++iter) {
+		el = *iter;
+		std::string elemName = el->getName();
+		setupTrace(cb, "compiler element begin name=\"" + elemName + "\"");
+		if (elemName == "default_proto") {
+			const List& lst(el->getChildren());
+			List::const_iterator it;
+			for (it = lst.begin(); it != lst.end(); ++it) {
+				el = *it; //el->getName() == "prototype"
+				setupTrace(cb, "compiler default_proto prototype name=\"" + el->getAttributeValue("name") + "\"");
+				callStyle = el->getAttributeValue("name");
+				callStyles[el->getAttributeValue("name")] =
+					strtoull(el->getAttributeValue("extrapop").c_str(), nullptr, 10);
+				//<pcode inject="uponentry"/"uponreturn" dynamic="true"/"false"><body></pcode>
+				const List& protoChildren(el->getChildren());
+				List::const_iterator childIt;
+				for (childIt = protoChildren.begin(); childIt != protoChildren.end(); ++childIt) {
+					Element* e = *childIt;
+					if (e->getName() == "pcode") {
+						for (size_t i = 0; i < e->getNumAttributes(); i++) {
+							if (e->getAttributeName(i) == "dynamic") {
+								if (e->getAttributeValue(i) == "true")
+									callMechMap[el->getAttributeValue("name") +
+										"@@inject_" + e->getAttributeValue("inject")] = new XmlPcodeEmit;
+								break;
+							}
+						}
+						List::const_iterator bodyIt;
+						const List& pcodeChildren(e->getChildren());
+						for (bodyIt = pcodeChildren.begin(); bodyIt != pcodeChildren.end(); ++bodyIt) {
+							if ((*bodyIt)->getName() == "body") {
+								callMechMap[el->getAttributeValue("name") +
+									"@@inject_" + e->getAttributeValue("inject")] =
+									getPcodeSnippet((*bodyIt)->getContent(),
+										std::vector<std::pair<std::string, int>>(),
+										std::vector<std::pair<std::string, int>>());
+							}
+						}
+					}
+				}
+			}
+			//break;
+		} else if (elemName == "prototype") {
+			//callStyle = el->getAttributeValue("name");
+			//CALLMECHANISM_TYPE is for Dalvik/JVM all so far are dynamic
+			//input, output, pcode inject="uponentry/uponreturn" dynamic="true/false" then use el->getAttributeValue("name") + "@@inject_uponentry" or "@@inject_uponreturn"; -> body
+			setupTrace(cb, "compiler prototype name=\"" + el->getAttributeValue("name") + "\"");
+			callStyles[el->getAttributeValue("name")] =
+				strtoull(el->getAttributeValue("extrapop").c_str(), nullptr, 10);
+			const List& lst(el->getChildren());
+			List::const_iterator it;
+			for (it = lst.begin(); it != lst.end(); ++it) {
+				Element* e = *it;
+				if (e->getName() == "pcode") {
+					for (size_t i = 0; i < e->getNumAttributes(); i++) {
+						if (e->getAttributeName(i) == "dynamic") {
+							if (e->getAttributeValue(i) == "true")
+								callMechMap[el->getAttributeValue("name") +
+									"@@inject_" + e->getAttributeValue("inject")] = new XmlPcodeEmit;
+							break;
+						}
+					}
+					List::const_iterator t;
+					const List& l(e->getChildren());
+					for (t = l.begin(); t != l.end(); ++t) {
+						if ((*t)->getName() == "body") {
+							callMechMap[el->getAttributeValue("name") +
+								"@@inject_" + e->getAttributeValue("inject")] =
+								getPcodeSnippet((*t)->getContent(),
+									std::vector<std::pair<std::string, int>>(),
+									std::vector<std::pair<std::string, int>>());
+						}
+					}
+				}
+			}
+			//<pcode inject="uponentry"/"uponreturn" dynamic="true"/"false"><body></pcode>
+		} else if (elemName == "resolveprototype") {
+			callStyles[el->getAttributeValue("name")] = -1;
+		} else if (elemName == "stackpointer") {
+			stackPointerReg = el->getAttributeValue("register");
+			//stackPointerSpace = el->getAttributeValue("space");
+		} else if (elemName == "callfixup") { //CALLFIXUP_TYPE - wider use
+			//target name=..., pcode -> body[CDATA]
+			setupTrace(cb, "compiler callfixup name=\"" + el->getAttributeValue("name") + "\"");
+			const List& lst(el->getChildren());
+			List::const_iterator it;
+			intb paramShift = 0;
+			for (int i = 0; i < el->getNumAttributes(); i++) {
+				if (el->getAttributeName(i) == "paramshift")
+					paramShift = strtoll(el->getAttributeValue(i).c_str(), nullptr, 10);
+			}
+			for (it = lst.begin(); it != lst.end(); ++it) {
+				Element* e = *it;
+				if (e->getName() == "target") {
+					fixupTargetMap[e->getAttributeValue("name")] = el->getAttributeValue("name");
+				} else if (e->getName() == "pcode") {
+					List::const_iterator t;
+					const List& l(e->getChildren());
+					for (t = l.begin(); t != l.end(); ++t) {
+						if ((*t)->getName() == "body") {
+							callFixupMap[el->getAttributeValue("name")] =
+								getPcodeSnippet((*t)->getContent(),
+									std::vector<std::pair<std::string, int>>(),
+									std::vector<std::pair<std::string, int>>());
+							callFixupMap[el->getAttributeValue("name")]->paramShift = paramShift;
+						}
+					}
+				}
+			}
+		} else if (elemName == "callotherfixup") { //CALLOTHERFIXUP_TYPE is for Dalvik/JVM all so far are dynamic
+			//targetop="" -> pcode -> body[CDATA]
+			std::string targetop = el->getAttributeValue("targetop");
+			setupTrace(cb, "compiler callotherfixup name=\"" + targetop + "\"");
+			const List& lst(el->getChildren());
+			List::const_iterator it;
+			for (it = lst.begin(); it != lst.end(); ++it) {
+				Element* e = *it;
+				if (e->getName() == "pcode") { //dynamic="true" means no body will appear only input/output!
+					for (size_t i = 0; i < e->getNumAttributes(); i++) {
+						if (e->getAttributeName(i) == "dynamic") {
+							if (e->getAttributeValue(i) == "true")
+								callFixupOtherMap[targetop] = new XmlPcodeEmit;
+							break;
+						}
+					}
+					std::string body;
+					std::vector<std::pair<std::string, int>> inputs;
+					std::vector<std::pair<std::string, int>> outputs;
+					parsePcodeElement(e, body, inputs, outputs);
+					if (body.size() != 0) {
+						callFixupOtherMap[targetop] = getPcodeSnippet(body, inputs, outputs);
+					} else {
+						if (callFixupOtherMap[targetop] == nullptr)
+							callFixupOtherMap[targetop] = new XmlPcodeEmit;
+						callFixupOtherMap[targetop]->inputs = inputs;
+						callFixupOtherMap[targetop]->outputs = outputs;
+					}
+				}
+			}
+		} else if (elemName == "global") {
+			const List& lst(el->getChildren());
+			List::const_iterator it;
+			for (it = lst.begin(); it != lst.end(); ++it) {
+				Element* e = *it;
+				if (e->getName() == "range") {
+					size_t i;
+					for (i = 0; i < e->getNumAttributes(); i++) {
+						if (e->getAttributeName(i) == "first" || e->getAttributeName(i) == "last") break;
+					}
+					if (i == e->getNumAttributes()) globalSpaces[e->getAttributeValue("space")] = true;
+				}
+			}
+		}
+		setupTrace(cb, "compiler element complete name=\"" + elemName + "\"");
+	}
+	std::string procSpaces = "<spaces defaultspace=\"" + trans->getDefaultSpace()->getName() + "\">";
+	for (int i = 0; i < trans->numSpaces(); i++) {
+		//trans->saveXml(os);
+		AddrSpace* as = trans->getSpace(i);
+		if (as->getName() == "const") continue; //const space is special and cannot be registered again
+		//deadcodedelay if delay != deadcodedelay
+		//wordsize if wordsize > 1
+		//global is specified in the cspec file e.g. -> <global> -> <range space="ram"/>
+		procSpaces += "<" + std::string(as->getName() == "unique" ? "space_unique" : "space") +
+			" name=\"" + as->getName() + "\" index=\"" + std::to_string(i) +//as->getIndex();
+			"\" bigendian=\"" + std::string(as->isBigEndian() ? "true" : "false") +
+			"\" delay=\"" + std::to_string(as->getDelay()) +
+			std::string(as->getDelay() != as->getDeadcodeDelay() ?
+				"\" deadcodedelay=\"" + std::to_string(as->getDeadcodeDelay()) : "") +
+			"\" size=\"" + std::to_string(as->getAddrSize()) +
+			std::string(as->getWordSize() > 1 ? "\" wordsize=\"" + std::to_string(as->getWordSize()) : "") +
+			"\" physical=\"" + std::string(as->hasPhysical() ? "true" : "false") +
+			"\" global=\"" +
+			std::string(globalSpaces.find(as->getName()) != globalSpaces.end() ? "true" : "false") + "\"/>"; //as->getName() == "ram"
+	}
+	procSpaces += "</spaces>";
+	uintm uniqBase = 0x10000000; //trans->getUniqueBase()
+	//the problem is the unique base at trans->getUniqueBase() will be used for pcode injections so 0x10000000 is considered a safe distance to allow for an arbitrary amount of them
+	tspecxml = "<sleigh bigendian=\"" + std::string(trans->isBigEndian() ? "true" : "false") +
+		"\" uniqbase=\"0x" + to_string(uniqBase, hex) + "\">\n  " + procSpaces + "\n</sleigh>\n";
+
+	delete doc;
+	setupTrace(cb, "compiler spec apply complete");
+	xmlOptions = getOptions(opt);
+	setupTrace(cb, "options xml complete");
+	packedOptions = getPackedOptions(opt);
+	setupTrace(cb, "packed options complete");
+	symbolIds.clear();
+	functionSymbolEntries.clear();
+	namespacePaths.clear();
+	namespaceIdsByPath.clear();
+	namespaceNames.clear();
+	nextNamespaceId = 1;
+	setupTrace(cb, "interface setup complete");
+}
+
+/**
+ * Initialize decompiler for a particular platform
+ * @param cback = callback object for decompiler
+ * @param pspecxml = string containing .pspec xml
+ * @param cspecxml = string containing .cspec xml
+ * @param tspecxml = XML string containing translator spec
+ */
+void DecompInterface::registerProgram()
+{
+	//callback.setShowNamespace(showNamespace);
+	//callback->status("setup");
+	callback->launchDecompiler();
+	statusGood = true;
+	std::vector<uchar> revec;
+	try {
+		write(command_start, sizeof(command_start));
+		writeString("registerProgram");
+		writeString(pspecxml); //*.pspec
+		writeString(cspecxml); //*.cspec
+		writeString(tspecxml); //Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/app/plugin/processors/sleigh/SleighLanguage.java
+		writeString(coretypesxml); //Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/program/model/pcode/PcodeDataTypeManager.java
+		write(command_end, sizeof(command_end));
+		callback->protocolRecorder("command(\"registerProgram\", \"" + escapeCStr(pspecxml) + "\", \"" + escapeCStr(cspecxml) + "\", \"" + escapeCStr(tspecxml) + "\", \"" + escapeCStr(coretypesxml) + "\")", true);
+		revec = readResponse();
+	}
+	catch (DecompError& /*e*/) {
+		statusGood = false;
+		throw;
+	}
+	archId = strtol(std::string(revec.begin(), revec.end()).c_str(), nullptr, 10);
+	std::vector<uchar> buf = sendCommand1Param("setOptions", packedOptions);
+	//cb->status("setOptions " + std::string(buf.begin(), buf.end()));
+	if (std::string(buf.begin(), buf.end()) != "t") {
+		statusGood = false;
+		throw DecompError("Did not accept decompiler options");
+	}
+}
+
+/**
+ * Free decompiler resources
+ */
+int DecompInterface::deregisterProgram() {
+	if (!statusGood) {
+		throw DecompError("deregisterProgram called on bad process");
+	}
+	statusGood = false;
+	// Once a program is deregistered, the process is never
+	// used again
+	write(command_start, sizeof(command_start));
+	writeString("deregisterProgram");
+	writeString(std::to_string(archId));
+	write(command_end, sizeof(command_end));
+	callback->protocolRecorder("command(\"deregisterProgram\", \"" + escapeCStr(std::to_string(archId)) + "\")", true);
+	std::vector<uchar> revec = readResponse();
+	return strtol(std::string(revec.begin(), revec.end()).c_str(), nullptr, 10);
+}
+
+/**
+ * Send a single command to the decompiler with no parameters and return response
+ * @param command is the name of the command to execute
+ * @return the response String
+ */
+std::vector<uchar> DecompInterface::sendCommand(std::string command) {
+	if (!statusGood) {
+		throw DecompError(command + " called on bad process");
+	}
+	std::vector<uchar> resbuf;
+	try {
+		write(command_start, sizeof(command_start));
+		writeString(command);
+		writeString(std::to_string(archId));
+		write(command_end, sizeof(command_end));
+		callback->protocolRecorder("command(\""+ escapeCStr(command) + "\", \"" + escapeCStr(std::to_string(archId)) + "\")", true);
+		resbuf = readResponse();
+	}
+	catch (DecompError& /*e*/) {
+		statusGood = false;
+		throw;
+	}
+	return resbuf;
+}
+
+/**
+ * @param command the decompiler should execute
+ * @param param an additional parameter for the command
+ * @param timeoutSecs the number of seconds to run before timing out
+ * @return the response string
+ */
+std::vector<uchar> DecompInterface::sendCommand1ParamTimeout(std::string command,
+	std::string param, int timeoutSecs) {
+	if (!statusGood) {
+		throw DecompError(command + " called on bad process");
+	}
+	std::vector<uchar> resbuf;
+	auto err = std::make_shared<std::string>();
+	std::packaged_task<std::vector<uchar>(std::string, std::string)>
+		task([err, this] (std::string command, std::string param) -> std::vector<uchar> {
+		try {
+			write(command_start, sizeof(command_start));
+			writeString(command);
+			writeString(std::to_string(archId));
+			writeString(param);
+			write(command_end, sizeof(command_end));
+			callback->protocolRecorder("command(\"" + escapeCStr(command) + "\", \"" + escapeCStr(std::to_string(archId)) + "\", \"" + escapeCStr(param) + "\")", true);
+			return readResponse();
+		} catch (BadDataError& e) {
+			*err = e.explain;
+			statusGood = false;
+			return std::vector<uchar>();
+		} catch (SleighError& e) { //register lookup error
+			*err = e.explain;
+			statusGood = false;
+			return std::vector<uchar>();
+		} catch (DecompError& e) {
+			*err = e.explain;
+			statusGood = false;
+			return std::vector<uchar>();
+		} catch (std::exception& e) {
+			*err = e.what();
+			statusGood = false;
+			return std::vector<uchar>();
+		} catch (...) {
+			*err = "Unknown decompiler worker exception";
+			statusGood = false;
+			return std::vector<uchar>();
+		}
+	});
+	std::future<std::vector<uchar>> future = task.get_future();
+	std::thread t(std::move(task), command, param);
+	//GetProcessMemoryInfo?
+	std::future_status status = future.wait_for(std::chrono::seconds(timeoutSecs));
+	if (status != std::future_status::ready) {
+		callback->protocolRecorder("exception(\"Timeout\", \"" + escapeCStr(command) + " timed out after " + std::to_string(timeoutSecs) + " seconds\")", true);
+		callback->terminate();
+		t.detach();
+		statusGood = false;
+		throw DecompError("process timeout");
+	}
+	resbuf = future.get();
+	t.join();
+	if (err->size() != 0) throw DecompError(*err);
+	return resbuf;
+}
+
+/**
+ * Send a command with 2 parameters to the decompiler and read the result
+ * @param command string to send
+ * @param param1  is the first parameter string
+ * @param param2  is the second parameter string
+ * @return the result string
+ */
+std::vector<uchar> DecompInterface::sendCommand2Params(std::string command,
+	std::string param1, std::string param2)
+{
+	if (!statusGood) {
+		throw DecompError(command + " called on bad process");
+	}
+	std::vector<uchar> resbuf;
+	try {
+		write(command_start, sizeof(command_start));
+		writeString(command);
+		writeString(std::to_string(archId));
+		writeString(param1);
+		writeString(param2);
+		write(command_end, sizeof(command_end));
+		callback->protocolRecorder("command(\"" + escapeCStr(command) + "\", \"" + escapeCStr(std::to_string(archId)) + "\", \"" + escapeCStr(param1) + "\", \"" + escapeCStr(param2) + "\")", true);
+		resbuf = readResponse();
+	}
+	catch (DecompError& /*e*/) {
+		statusGood = false;
+		throw;
+	}
+	return resbuf;
+}
+
+void DecompInterface::setMaxResultSize(int maxResultSizeMBytes) {
+	maxResultSizeMBYtes = maxResultSizeMBytes;
+}
+
+void DecompInterface::setShowNamespace(bool showNamespace) {
+	showNamespace = showNamespace;
+	//callback.setShowNamespace(showNamespace);
+}
+
+/**
+ * Send a command to the decompiler with one parameter and return the result
+ * @param command is the command string
+ * @param param1 is the parameter as a string
+ * @return the result string
+ */
+std::vector<uchar> DecompInterface::sendCommand1Param(std::string command, std::string param1)
+{
+	if (!statusGood) {
+		throw DecompError(command + " called on bad process");
+	}
+	std::vector<uchar> resbuf;
+	try {
+		write(command_start, sizeof(command_start));
+		writeString(command);
+		writeString(std::to_string(archId));
+		writeString(param1);
+		write(command_end, sizeof(command_end));
+		callback->protocolRecorder("command(\"" + escapeCStr(command) + "\", \"" + escapeCStr(std::to_string(archId)) + "\", \"" + escapeCStr(param1) + "\")", true);
+		resbuf = readResponse();
+	} catch (DecompError& /*e*/) {
+		statusGood = false;
+		throw;
+	}
+	return resbuf;
+}
+
+/**
+* This allows the application to the type of analysis
+* performed by the decompiler, by giving the name of
+* an analysis class. Right now, there are a few
+* predefined classes. But there soon may be support
+* for applications to define their own class and
+* tailoring the decompiler's behaviour for that class.
+* <p>
+* The current predefined analysis class are:
+* <ul>
+*   <li>"decompile" - this is the default, and performs all
+*      analysis steps suitable for producing C code.
+*   <li>"normalize" - omits type recovery from the analysis
+*      and some of the final clean-up steps involved in
+*      making valid C code.  It is suitable for creating
+*      normalized pcode syntax trees of the dataflow.
+*   <li>"firstpass" - does no analysis, but produces an
+*      unmodified syntax tree of the dataflow from the
+*   <li>"register" - does ???.
+*   <li>"paramid" - does required amount of decompilation
+*      followed by analysis steps that send parameter
+*      measure information for parameter id analysis.
+*      raw pcode.
+* </ul>
+*
+* <p>
+* This property should ideally be set once before the
+* openProgram call is made, but it can be used repeatedly
+* if the application needs to change analysis style in the
+* middle of a sequence of decompiles.  Unless the style
+* changes, the method does NOT need to be called repeatedly.
+* Even after a crash, the new decompiler process will
+* automatically configured with the cached style value.
+*
+* @param actionstring "decompile"|"normalize"|"register"|"firstpass"|"paramid"
+* @return true - if the decompiler process was successfully configured
+*/
+bool DecompInterface::setSimplificationStyle(std::string actionstring) {
+	//actionname = actionstring;
+	// Property can be set before process exists
+	//if (decompProcess == nullptr) {
+	//	return true;
+	//}
+	try {
+		//verifyProcess();
+		std::vector<uchar> buf = sendCommand2Params("setAction", actionstring, "");
+		return std::string(buf.begin(), buf.end()).c_str() == "t";
+	}
+	catch (DecompError& /*e*/) {
+		// don't care
+		throw;
+	}
+	//stopProcess();
+	return false;
+}
+
+class TreeHandlerWhitespace : public ContentHandler {
+	Element* root;
+	Element* cur;
+	string error;
+public:
+	TreeHandlerWhitespace(Element* rt) { root = rt; cur = root; }
+	virtual ~TreeHandlerWhitespace(void) {}
+	virtual void setDocumentLocator(Locator locator) {}
+	virtual void startDocument(void) {}
+	virtual void endDocument(void) {}
+	virtual void startPrefixMapping(const string& prefix, const string& uri) {}
+	virtual void endPrefixMapping(const string& prefix) {}
+	virtual void startElement(const string& namespaceURI, const string& localName,
+		const string& qualifiedName, const Attributes& atts)
+	{
+		Element* newel = new Element(cur);
+		cur->addChild(newel);
+		cur = newel;
+		newel->setName(localName);
+		for (int4 i = 0; i < atts.getLength(); ++i)
+			newel->addAttribute(atts.getLocalName(i), atts.getValue(i));
+	}
+	virtual void endElement(const string& namespaceURI, const string& localName,
+		const string& qualifiedName)
+	{
+		cur = cur->getParent();
+	}
+	virtual void characters(const char* text, int4 start, int4 length)
+	{
+		cur->addContent(text, start, length);
+	}
+	virtual void ignorableWhitespace(const char* text, int4 start, int4 length)
+	{
+		cur->addContent(text, start, length);
+	}
+	virtual void processingInstruction(const string& target, const string& data) {}
+	virtual void setVersion(const string& val) {}
+	virtual void setEncoding(const string& val) {}
+	virtual void skippedEntity(const string& name) {}
+	virtual void setError(const string& errmsg) { error = errmsg; }
+	const string& getError(void) const { return error; }
+};
+
+Document* xml_tree_whitespace(istream& i)
+{
+	Document* doc = new Document();
+	TreeHandlerWhitespace handle(doc);
+	if (0 != xml_parse(i, &handle)) {
+		delete doc;
+		throw XmlError(handle.getError());
+	}
+	return doc;
+}
+
+string getHasAttributeValue(Element* pEl, const string& nm)
+{
+	for (uint4 i = 0; i < pEl->getNumAttributes(); ++i)
+		if (pEl->getAttributeName(i) == nm)
+			return pEl->getAttributeValue(i);
+	return "";
+}
+
+void reduceShortCircuits(std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph)
+{
+	std::vector<std::vector<unsigned int>> succs;
+	succs.resize(blockGraph.size());
+	for (size_t i = 0; i < blockGraph.size(); i++) {
+		for (int j = 0; j < std::get<0>(blockGraph[i]).size(); j++) {
+			succs[std::get<0>(blockGraph[i])[j]].push_back(i);
+		}
+	}
+	for (size_t i = 0; i < blockGraph.size(); i++) {
+		if (std::get<1>(blockGraph[i]).empty() && std::get<0>(blockGraph[i]).size() == 1 &&
+			succs[i].size() == succs[std::get<0>(blockGraph[i])[0]].size()) {
+			size_t foundj = -1;
+			for (size_t j = 0; j < succs[i].size(); j++) {
+				size_t k;
+				for (k = 0; k < succs[std::get<0>(blockGraph[i])[0]].size(); k++) {
+					if (succs[std::get<0>(blockGraph[i])[0]][k] == i) continue;
+					if (succs[i][j] == succs[std::get<0>(blockGraph[i])[0]][k]) break;
+				}
+				if (k != succs[std::get<0>(blockGraph[i])[0]].size()) continue;
+				else if (foundj == -1) foundj = j;
+				else {
+					foundj = -1; break;
+				}
+			}
+			if (foundj != -1 && succs[i][foundj] != std::get<0>(blockGraph[i])[0]) { //if successor found is also predecessor it matches a do { if (cond) break; ... }, any other undetectable false patterns?
+				std::get<0>(blockGraph[succs[i][foundj]]).push_back(std::get<0>(blockGraph[i])[0]);
+				succs[std::get<0>(blockGraph[i])[0]].push_back(succs[i][foundj]);
+				for (size_t j = 0; j < succs[std::get<0>(blockGraph[i])[0]].size(); j++) {
+					if (succs[std::get<0>(blockGraph[i])[0]][j] == i) {
+						succs[std::get<0>(blockGraph[i])[0]].erase(succs[std::get<0>(blockGraph[i])[0]].begin() + j);
+						break;
+					}
+				}
+				std::get<0>(blockGraph[i]).erase(std::get<0>(blockGraph[i]).begin());
+				for (size_t j = 0; j < succs[i].size(); j++) {
+					for (size_t k = 0; k < std::get<0>(blockGraph[succs[i][j]]).size(); k++) {
+						if (std::get<0>(blockGraph[succs[i][j]])[k] == i) {
+							std::get<0>(blockGraph[succs[i][j]]).erase(std::get<0>(blockGraph[succs[i][j]]).begin() + k);
+							break;
+						}
+					}
+				}
+				succs[i].erase(succs[i].begin(), succs[i].end());
+			}
+		}
+	}
+}
+
+void removeUnusedNodes(std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph)
+{
+	if (blockGraph.empty())
+		return;
+
+	for (size_t i = 0; i < blockGraph.size(); i++) {
+		std::vector<unsigned int>& edges = std::get<0>(blockGraph[i]);
+		edges.erase(std::remove_if(edges.begin(), edges.end(),
+			[&blockGraph](unsigned int target) {
+				return target >= blockGraph.size();
+			}), edges.end());
+		std::sort(edges.begin(), edges.end());
+		edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
+	}
+
+	std::vector<std::vector<unsigned int>> refs;
+	refs.resize(blockGraph.size());
+	for (size_t i = 0; i < blockGraph.size(); i++) {
+		for (size_t j = 0; j < std::get<0>(blockGraph[i]).size(); j++) {
+			refs[std::get<0>(blockGraph[i])[j]].push_back((unsigned int)i);
+		}
+	}
+
+	//now renumber the graph to remove the holes
+	std::map<size_t, size_t> nodeMap;
+	std::vector<size_t> eraseVec;
+	int num = 0;
+	for (size_t i = 0; i < blockGraph.size(); i++) {
+		const bool isolated = std::get<0>(blockGraph[i]).empty() && refs[i].empty();
+		if (i != 0 && isolated)
+			eraseVec.push_back(i);
+		else
+			nodeMap[i] = num++;
+	}
+	for (size_t i = 0; i < blockGraph.size(); i++) {
+		std::get<2>(blockGraph[i]) = i;
+		std::vector<unsigned int>& edges = std::get<0>(blockGraph[i]);
+		for (size_t j = 0; j < edges.size();) {
+			std::map<size_t, size_t>::iterator mapped = nodeMap.find(edges[j]);
+			if (mapped == nodeMap.end()) {
+				edges.erase(edges.begin() + j);
+			} else {
+				edges[j] = (unsigned int)mapped->second;
+				j++;
+			}
+		}
+	}
+	for (size_t i = eraseVec.size() - 1; i != ~0; i--) blockGraph.erase(blockGraph.begin() + eraseVec[i]);
+}
+
+std::string DecompInterface::convertSourceDoc(Element* el,
+	std::string& displayXml, std::string& funcProto, std::string& funcColorProto,
+	std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph)
+{
+	//Ghidra/Features/Decompiler/src/decompile/cpp/prettyprint.cc
+	//colors are keyword, comment, type, funcname, var, const, param and global
+	std::string s;
+	std::stack<std::pair<Element*, bool>> elements;
+	elements.push(std::pair<Element*, bool>(el, true));
+	std::stack<std::pair<unsigned int, std::vector<std::pair<size_t, unsigned int>>>> blockPath;
+	size_t protooff, dispprotooff;
+	size_t walkCount = 0;
+	while (!elements.empty()) {
+		if (++walkCount > 1000000)
+			throw DecompError("Source document walk exceeded iteration guard at element " + elements.top().first->getName());
+		std::pair<Element*, bool>& ref = elements.top();
+		el = ref.first;
+		if (!ref.second) { //emission is not upon leaving a block - an additional containment relationship is present
+			//emission is upon reaching sibling block, or leaving the parent block
+			if (el->getName() == "block") {
+				unsigned int idx = blockPath.top().first;
+				std::vector<std::pair<size_t, unsigned int>> pairVec = blockPath.top().second;
+				blockPath.pop();
+				if (!blockPath.empty() && idx == blockPath.top().first) { //cannot process if parent is same block as display can be out of order
+					blockPath.top().second.insert(blockPath.top().second.end(), pairVec.begin(), pairVec.end());
+					pairVec.clear();
+				}
+				//if (idx & 0x80000000) idx = ~idx;
+				unsigned int lastsib = -1;
+				std::string spc;
+				if (std::get<1>(blockGraph[idx]).size() != 0) {
+					std::string::reverse_iterator lnl = std::find(std::get<1>(blockGraph[idx]).rbegin(), std::get<1>(blockGraph[idx]).rend(), '\n');
+					std::string::iterator it = std::find_if_not(
+						lnl.base(),
+						std::get<1>(blockGraph[idx]).end(),
+						[](unsigned char ch) { return std::isspace(ch) != 0; });
+					std::string st;
+					std::copy_if(lnl.base(), it, std::back_inserter(st), [](char ch) { return ch == ' '; });
+					if (!st.empty()) spc = st;
+				}
+				bool bChanged = false;
+				std::string tline;
+				for (int i = 0; i < pairVec.size(); i++) {
+					if (pairVec[i].second == -1) {
+						std::string precline;
+						if (i == pairVec.size() - 1)
+							precline = displayXml.substr(pairVec[i].first);
+						else
+							precline = displayXml.substr(pairVec[i].first, pairVec[i + 1].first - pairVec[i].first);
+						tline += precline;
+						std::string::reverse_iterator lnl = std::find(precline.rbegin(), precline.rend(), '\n');
+						std::string::iterator it = std::find_if_not(
+							lnl.base(),
+							precline.end(),
+							[](unsigned char ch) { return std::isspace(ch) != 0; });
+						std::string st;
+						std::copy_if(lnl.base(), it, std::back_inserter(st), [](char ch) { return ch == ' '; });
+						if (!st.empty()) spc = st;
+					} else if (std::find(std::get<0>(blockGraph[pairVec[i].second]).begin(), std::get<0>(blockGraph[pairVec[i].second]).end(), idx) != std::get<0>(blockGraph[pairVec[i].second]).end()) {
+						//} else if (pairVec[i].second != idx) {
+						//if (lastsib != -1) blockGraph[lastsib].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(idx));
+						lastsib = pairVec[i].second;
+						std::get<1>(blockGraph[idx]) += tline;
+						tline.clear();
+						std::get<1>(blockGraph[idx]) += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(pairVec[i].second));
+					} else if (idx == pairVec[i].second) {
+					} else {
+						bool bLinked = std::find(std::get<0>(blockGraph[pairVec[i].second]).begin(), std::get<0>(blockGraph[pairVec[i].second]).end(), lastsib) != std::get<0>(blockGraph[pairVec[i].second]).end();
+						if (lastsib != -1 && bLinked && idx != lastsib) {
+							idx = lastsib;
+							bChanged = true;
+						}
+						std::get<1>(blockGraph[idx]) += tline;
+						tline.clear();
+						if (lastsib != -1 && bLinked) std::get<1>(blockGraph[idx]) += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(pairVec[i].second));
+						lastsib = pairVec[i].second;
+					}
+				}
+				std::get<1>(blockGraph[idx]) += tline;
+				//if (lastsib != -1 && !tline.empty()) blockGraph[lastsib].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(idx));
+				//if leaving a parent into the same parent, assume a sibling situation has occurred
+				if (!blockPath.empty()) {
+					if (lastsib != -1 && tline.empty() && bChanged) blockPath.top().second.push_back(std::pair<size_t, unsigned int>(displayXml.size(), lastsib));
+					blockPath.top().second.push_back(std::pair<size_t, unsigned int>(displayXml.size(), -1));
+					//if (blockPath.top().first != lastsib)
+					//	blockGraph[idx].second += callback->emit("comment", "comment", "\n" + spc + "  " "//" + std::to_string(blockPath.top().first));
+						//blockPath.top().first = ~idx; //mark to use next child sibling instead
+					//} else if (blockPath.top().first & 0x80000000) {
+						//blockPath.top().first = ~idx;
+					//}
+				}
+			} else if (el->getName() == "funcproto") {
+				funcProto = s.substr(protooff);
+				funcColorProto = displayXml.substr(dispprotooff);
+			}
+			elements.pop();
+			continue;
+		}
+		ref.second = false;
+		//"clang_document"
+		if (el->getName() == "function") { //syntax tree is followed by source code
+		} else if (el->getName() == "block") {
+			unsigned int newnum = strtoul(el->getAttributeValue("blockref").c_str(), nullptr, 0);
+			if (newnum >= blockGraph.size())
+				throw DecompError("Source document references missing block " + std::to_string(newnum));
+			//if (blockPath.top().first != newnum) { }
+			if (!blockPath.empty()) blockPath.top().second.push_back(std::pair<size_t, unsigned int>(displayXml.size(), newnum));
+			blockPath.push(std::pair<unsigned int, std::vector<std::pair<size_t, unsigned int>>>(newnum, std::vector<std::pair<size_t, unsigned int>>()));
+			blockPath.top().second.push_back(std::pair<size_t, unsigned int>(displayXml.size(), -1));
+		} else if (el->getName() == "statement") {
+		} else if (el->getName() == "funcproto") {
+			protooff = s.size();
+			dispprotooff = displayXml.size();
+		} else if (el->getName() == "return_type") {
+		} else if (el->getName() == "vardecl") {
+		} else if (el->getName() == "syntax") {
+			//el->getAttributeValue("open");
+			//el->getAttributeValue("close");
+			//"keyword"
+			s += el->getContent();
+			displayXml += callback->emit(el->getName(), getHasAttributeValue(el, "color"), el->getContent());
+		} else if (el->getName() == "break") {
+			intb idx = 0;
+			std::string indent = el->getAttributeValue("indent");
+			if (!indent.empty())
+				idx = strtoll(indent.c_str(), nullptr, 0);
+			if (idx < 0)
+				idx = 0;
+			if (idx > 4096)
+				idx = 4096;
+			s += "\n";
+			displayXml += "\n";
+			while (idx--) {
+				s += " "; displayXml += " ";
+			}
+		} else if (el->getName() == "comment") {
+			//"comment"
+			//el->getAttributeValue("space"); //e.g. "ram"
+			//el->getAttributeValue("ram"); //e.g. "0x140001010"
+			s += el->getContent();
+			displayXml += callback->emit(el->getName(), getHasAttributeValue(el, "color"), el->getContent());
+		} else if (el->getName() == "variable") {
+			//"param", "const", "var"
+			s += el->getContent();
+			displayXml += callback->emit(el->getName(), getHasAttributeValue(el, "color"), el->getContent());
+		} else if (el->getName() == "type") {
+			//"type"
+			//el->getAttributeValue("id"); //szCoreTypes ids given if non-zero only
+			s += el->getContent();
+			displayXml += callback->emit(el->getName(), getHasAttributeValue(el, "color"), el->getContent());
+		} else if (el->getName() == "op") {
+			//"keyword"
+			s += el->getContent();
+			displayXml += callback->emit(el->getName(), getHasAttributeValue(el, "color"), el->getContent());
+		} else if (el->getName() == "funcname") {
+			//"funcname"
+			s += el->getContent();
+			displayXml += callback->emit(el->getName(), getHasAttributeValue(el, "color"), el->getContent());
+		} else if (el->getName() == "label") {
+			s += el->getContent();
+			displayXml += callback->emit(el->getName(), getHasAttributeValue(el, "color"), el->getContent());
+		} else if (el->getName() == "field") {
+			s += el->getContent();
+			displayXml += callback->emit(el->getName(), getHasAttributeValue(el, "color"), el->getContent());
+		} else {
+
+		}
+		const List& list(el->getChildren());
+		List::const_reverse_iterator iter;
+		for (iter = list.rbegin(); iter != list.rend(); ++iter) {
+			el = *iter;
+			elements.push(std::pair<Element*, bool>(el, true));
+		}
+	}
+	return s;
+}
+
+int DecompInterface::coreTypeLookup(size_t size, std::string metatype)
+{
+	//special size handling for void=0, char=1/2, bool=1, code=1???
+	for (int i = 0; i < numDefCoreTypes; i++) {
+		if (defaultCoreTypes[i].metaType == metatype) {
+			if (defaultCoreTypes[i].size == size) return i;
+		}
+	}
+	return -1;
+}
+
+std::string DecompInterface::regToSpacebase(int regidx)
+{
+	for (int4 i = 0; i < trans->numSpaces(); i++) {
+		AddrSpace* as = trans->getSpace(i);
+		if (as->getType() == IPTR_SPACEBASE && as->numSpacebase() == 1) {
+			//as->getSpacebaseFull(0) not yet truncated and would return incorrect register offset
+			const VarnodeData& vd = as->getSpacebase(0);
+			if (vd.space->getName() == "register" && vd.offset == regidx) {
+				return as->getName();
+			}
+		}
+	}
+	return "";
+}
+
+int DecompInterface::spacebaseToReg(std::string name)
+{
+	AddrSpace* as = trans->getSpaceByName(name);
+	if (as != nullptr && as->getType() == IPTR_SPACEBASE && as->numSpacebase() == 1) {
+		return as->getSpacebase(0).offset;
+	}
+	return -1;
+}
+
+int DecompInterface::regNameToIndex(std::string regName)
+{
+//	try {
+		VarnodeSymbol* sym = (VarnodeSymbol*)trans->findSymbol(regName);
+		if (sym != nullptr && sym->getType() == SleighSymbol::varnode_symbol)
+			return sym->getFixedVarnode().offset;
+		//return trans->getRegister(regName).offset;
+	//} catch (SleighError&) {
+		transform(regName.begin(), regName.end(), regName.begin(),
+			islower(regName[0]) ? ::toupper : ::tolower);
+		sym = (VarnodeSymbol*)trans->findSymbol(regName);
+		if (sym != nullptr && sym->getType() == SleighSymbol::varnode_symbol)
+			return sym->getFixedVarnode().offset;
+		return -1; //trans->getRegister(regName).offset; //case-sensitive
+	//}
+}
+
+std::string DecompInterface::getRegisterFromIndex(unsigned long long offs, int size)
+{
+	return trans->getRegisterName(trans->getSpaceByName("register"), offs, size);
+}
+
+void parseTypeInfo(Element* el, std::vector<TypeInfo>& ti);
+
+static void parseSizedAddress(Element* el, SizedAddrInfo& addr)
+{
+	addr.addr.space = getHasAttributeValue(el, "space");
+	if (addr.addr.space == "join") {
+		for (int i = 0; i < el->getNumAttributes(); i++) {
+			if (el->getAttributeName(i).substr(0, 5) == "piece") {
+				int idx = strtoull(el->getAttributeName(i).substr(5).c_str(), nullptr, 10) - 1;
+				SizedAddrInfo inf;
+				size_t off = el->getAttributeValue(i).find(':');
+				inf.addr.space = el->getAttributeValue(i).substr(0, off);
+				std::string rest = el->getAttributeValue(i).substr(off + 1);
+				off = rest.find(':');
+				inf.addr.offset = strtoull(rest.substr(0, off).c_str(), nullptr, 16);
+				inf.size = strtoull(rest.substr(off + 1).c_str(), nullptr, 10);
+				if (addr.addr.joins.size() <= idx) addr.addr.joins.resize(idx + 1);
+				addr.addr.joins[idx] = inf;
+			}
+		}
+	} else if (addr.addr.space.size() != 0) {
+		addr.addr.offset = strtoull(el->getAttributeValue("offset").c_str(), nullptr, 16);
+		addr.size = strtoull(el->getAttributeValue("size").c_str(), nullptr, 10);
+	}
+}
+
+static void parseParamMeasures(Element* el, FuncProtoInfo& fpi)
+{
+	fpi = {};
+	fpi.extraPop = -1;
+	int inputIndex = 0;
+	bool sawOutput = false;
+	const List& list(el->getChildren());
+	for (List::const_iterator iter = list.begin(); iter != list.end(); ++iter) {
+		Element* child = *iter;
+		if (child->getName() == "proto") {
+			fpi.model = child->getAttributeValue("model");
+			std::string extrapop = child->getAttributeValue("extrapop");
+			fpi.extraPop = extrapop == "unknown" ? -1 : strtoull(extrapop.c_str(), nullptr, 0);
+		} else if (child->getName() == "input" || child->getName() == "output") {
+			SymInfo sym = {};
+			sym.argIndex = child->getName() == "input" ? inputIndex++ : -1;
+			if (sym.argIndex >= 0)
+				sym.pi.name = "param_" + std::to_string(sym.argIndex);
+			const List& params = child->getChildren();
+			for (List::const_iterator paramIt = params.begin(); paramIt != params.end(); ++paramIt) {
+				if ((*paramIt)->getName() == "addr")
+					parseSizedAddress(*paramIt, sym.addr);
+				else if ((*paramIt)->getName() == "type" ||
+					(*paramIt)->getName() == "typeref" ||
+					(*paramIt)->getName() == "void")
+					parseTypeInfo(child, sym.pi.ti);
+			}
+			if (child->getName() == "input") {
+				fpi.syminfo.push_back(sym);
+			} else {
+				fpi.retType = sym;
+				sawOutput = true;
+			}
+		}
+	}
+	if (!sawOutput || fpi.retType.pi.ti.empty())
+		fpi.retType.pi.ti.push_back(TypeInfo{ "void", 0, "void" });
+}
+
+void parseFuncProto(Element* el, FuncProtoInfo& fpi)
+{
+	const List& list(el->getChildren());
+	List::const_iterator iter;
+	for (iter = list.begin(); iter != list.end(); ++iter) {
+		el = *iter;
+		if (el->getName() == "prototype") {
+			fpi.model = el->getAttributeValue("model");
+			fpi.extraPop = el->getAttributeValue("extrapop") == "unknown" ? -1 : strtoull(el->getAttributeValue("extrapop").c_str(), nullptr, 10);
+			for (int i = 0; i < el->getNumAttributes(); i++) {
+				if (el->getAttributeName(i) == "inline" && el->getAttributeValue(i) == "true") fpi.isInline = true;
+				else if (el->getAttributeName(i) == "noreturn" && el->getAttributeValue(i) == "true") fpi.isNoReturn = true;
+				else if (el->getAttributeName(i) == "hasthis" && el->getAttributeValue(i) == "true") fpi.hasThis = true;
+				else if (el->getAttributeName(i) == "custom" && el->getAttributeValue(i) == "true") fpi.customStorage = true;
+				else if (el->getAttributeName(i) == "constructor" && el->getAttributeValue(i) == "true") fpi.isConstruct = true;
+				else if (el->getAttributeName(i) == "destructor" && el->getAttributeValue(i) == "true") fpi.isDestruct = true;
+				else if (el->getAttributeName(i) == "dotdotdot" && el->getAttributeValue(i) == "true") fpi.dotdotdot = true;
+			}
+			const List& lst(el->getChildren());
+			for (List::const_iterator protoIt = lst.begin(); protoIt != lst.end(); ++protoIt) {
+				el = *protoIt;
+				if (el->getName() == "returnsym") {
+					fpi.retType.argIndex = -1;
+					const List& lt(el->getChildren());
+					for (List::const_iterator it = lt.begin(); it != lt.end(); ++it) {
+						if ((*it)->getName() == "addr") {
+							fpi.retType.addr.addr.space = getHasAttributeValue(*it, "space");
+							if (fpi.retType.addr.addr.space == "join") {
+								for (int i = 0; i < (*it)->getNumAttributes(); i++) {
+									if ((*it)->getAttributeName(i).substr(0, 5) == "piece") {
+										int idx = strtoull((*it)->getAttributeName(i).substr(5).c_str(), nullptr, 10) - 1;
+										SizedAddrInfo inf;
+										size_t off = (*it)->getAttributeValue(i).find(':');
+										inf.addr.space = (*it)->getAttributeValue(i).substr(0, off);
+										std::string rest = (*it)->getAttributeValue(i).substr(off + 1);
+										off = rest.find(':');
+										inf.addr.offset = strtoull(rest.substr(0, off).c_str(), nullptr, 16);
+										inf.size = strtoull(rest.substr(off + 1).c_str(), nullptr, 10);
+										if (fpi.retType.addr.addr.joins.size() <= idx) fpi.retType.addr.addr.joins.resize(idx + 1);
+										fpi.retType.addr.addr.joins[idx] = inf; //fpi.retType.joins.push_back(inf);
+									}
+								}
+							} else if (fpi.retType.addr.addr.space.size() != 0) {
+								fpi.retType.addr.addr.offset = strtoull((*it)->getAttributeValue("offset").c_str(), nullptr, 16);
+								fpi.retType.addr.size = strtoull((*it)->getAttributeValue("size").c_str(), nullptr, 10);
+							}
+						}
+					}
+					parseTypeInfo(el, fpi.retType.pi.ti);
+				} else if (el->getName() == "killedbycall") {
+					const List& lt(el->getChildren());
+					for (List::const_iterator it = lt.begin(); it != lt.end(); ++it) {
+						if ((*it)->getName() == "addr") {
+							SizedAddrInfo sai;
+							sai.addr.space = (*it)->getAttributeValue("space");
+							sai.addr.offset = strtoull((*it)->getAttributeValue("offset").c_str(), nullptr, 16);
+							sai.size = strtoull((*it)->getAttributeValue("size").c_str(), nullptr, 10);
+							fpi.killedByCall.push_back(sai);
+						}
+					}
+				} else if (el->getName() == "internallist") {
+					const List& lt(el->getChildren());
+					for (List::const_iterator it = lt.begin(); it != lt.end(); ++it) {
+						if ((*it)->getName() == "param") {
+							SymInfo sym;
+							sym.pi.name = (*it)->getAttributeValue("name");
+							parseTypeInfo(*it, sym.pi.ti);
+							fpi.syminfo.push_back(sym);
+						}
+					}
+				}
+			}
+			break;
+		}
+	}
+}
+
+void parseTypeInfo(Element* el, std::vector<TypeInfo>& ti)
+{
+	const List& list(el->getChildren());
+	List::const_iterator iter;
+	for (iter = list.begin(); iter != list.end(); ++iter) {
+		el = *iter;
+		if (el->getName() == "type") {
+			TypeInfo typ;
+			typ.typeName = el->getAttributeValue("name");
+			typ.size = strtoull(el->getAttributeValue("size").c_str(), nullptr, 10);
+			typ.metaType = el->getAttributeValue("metatype");
+			if (typ.metaType == "ptr") {
+				ti.push_back(typ);
+				parseTypeInfo(el, ti);
+			} else if (typ.metaType == "struct") {
+				const List& lst(el->getChildren());
+				List::const_iterator it;
+				for (it = lst.begin(); it != lst.end(); ++it) {
+					if ((*it)->getName() == "field") {
+						StructMemberInfo smi;
+						smi.name = (*it)->getAttributeValue("name");
+						smi.offset = strtoull((*it)->getAttributeValue("offset").c_str(), nullptr, 10);
+						parseTypeInfo(*it, smi.ti);
+						typ.structMembers.push_back(smi);
+					}
+				}
+				ti.push_back(typ);
+			} else if (typ.metaType == "array") {
+				typ.arraySize = strtoull(el->getAttributeValue("arraysize").c_str(), nullptr, 10);
+				ti.push_back(typ);
+				parseTypeInfo(el, ti);
+			} else if (typ.metaType == "code") {
+				parseFuncProto(el, typ.funcInfo);
+				ti.push_back(typ);
+			} else if (typ.metaType == "void") {
+				ti.push_back(typ);
+			} else {
+				//enum, utf, char
+				for (int i = 0; i < el->getNumAttributes(); i++) {
+					if (el->getAttributeName(i) == "enum" && el->getAttributeValue(i) == "true") {
+						typ.isEnum = true;
+						const List& lst(el->getChildren());
+						List::const_iterator it;
+						for (it = lst.begin(); it != lst.end(); ++it) {
+							if ((*it)->getName() == "val") {
+								typ.enumMembers.push_back(std::pair<std::string, unsigned long long>
+									((*it)->getAttributeValue("name"), strtoull((*it)->getAttributeValue("value").c_str(), nullptr, 10)));
+							}
+						}
+					} else if (el->getAttributeName(i) == "utf" && el->getAttributeValue(i) == "true")
+						typ.isUtf = true;
+					else if (el->getAttributeName(i) == "char" && el->getAttributeValue(i) == "true")
+						typ.isChar = true;
+				}
+				ti.push_back(typ);
+			}
+			break;
+		} else if (el->getName() == "typeref") {
+			TypeInfo typ;
+			typ.typeName = el->getAttributeValue("name");
+			typ.size = -1;
+			ti.push_back(typ);
+			break;
+		} else if (el->getName() == "void") {
+			TypeInfo typ;
+			typ.typeName = "void";
+			typ.size = 0;
+			typ.metaType = "void";
+			ti.push_back(typ);
+			break;
+		}
+	}
+}
+
+static const std::map<uint4, std::string>& packedElementNames()
+{
+	static const std::map<uint4, std::string> names = {
+		{1,"data"},{2,"input"},{3,"off"},{4,"output"},{5,"returnaddress"},{6,"symbol"},{7,"target"},{8,"val"},{9,"value"},{10,"void"},
+		{11,"addr"},{12,"range"},{13,"rangelist"},{14,"register"},{15,"seqnum"},{16,"varnode"},
+		{17,"break"},{18,"clang_document"},{19,"funcname"},{20,"funcproto"},{21,"label"},{22,"return_type"},{23,"statement"},{24,"syntax"},{25,"vardecl"},{26,"variable"},
+		{27,"op"},{28,"sleigh"},{29,"space"},{30,"spaceid"},{31,"spaces"},{32,"space_base"},{33,"space_other"},{34,"space_overlay"},{35,"space_unique"},{36,"truncate_space"},
+		{39,"char_size"},{41,"coretypes"},{42,"data_organization"},{43,"def"},{47,"entry"},{48,"enum"},{49,"field"},{51,"integer_size"},{54,"long_size"},{57,"pointer_size"},{59,"size_alignment_map"},{60,"type"},{62,"typegrp"},{63,"typeref"},{65,"wchar_size"},
+		{67,"collision"},{68,"db"},{69,"equatesymbol"},{70,"externrefsymbol"},{71,"facetsymbol"},{72,"functionshell"},{73,"hash"},{74,"hole"},{75,"labelsym"},{76,"mapsym"},{77,"parent"},{78,"property_changepoint"},{79,"rangeequalssymbols"},{80,"scope"},{81,"symbollist"},{82,"high"},
+		{86,"comment"},{87,"commentdb"},{88,"text"},{98,"inst"},{102,"bhead"},{103,"block"},{104,"blockedge"},{105,"edge"},
+		{113,"iop"},{114,"unimpl"},{115,"ast"},{116,"function"},{117,"highlist"},{118,"jumptablelist"},{119,"varnodes"},
+		{120,"context_data"},{121,"context_points"},{122,"context_pointset"},{123,"context_set"},{124,"set"},{125,"tracked_pointset"},{126,"tracked_set"},
+		{106,"parammeasures"},{107,"proto"},{108,"rank"},
+		{160,"group"},{161,"internallist"},{162,"killedbycall"},{163,"likelytrash"},{164,"localrange"},{165,"model"},{166,"param"},{167,"paramrange"},{168,"pentry"},{169,"prototype"},{170,"resolveprototype"},{171,"retparam"},{172,"returnsym"},{173,"unaffected"},
+		{228,"localdb"},{229,"doc"}
+	};
+	return names;
+}
+
+static const std::map<uint4, std::string>& packedAttributeNames()
+{
+	static const std::map<uint4, std::string> names = {
+		{1,"XMLcontent"},{2,"align"},{3,"bigendian"},{4,"constructor"},{5,"destructor"},{6,"extrapop"},{7,"format"},{8,"hiddenretparm"},{9,"id"},{10,"index"},{11,"indirectstorage"},{12,"metatype"},{13,"model"},{14,"name"},{15,"namelock"},{16,"offset"},{17,"readonly"},{18,"ref"},{19,"size"},{20,"space"},{21,"thisptr"},{22,"type"},{23,"typelock"},{24,"val"},{25,"value"},{26,"wordsize"},
+		{27,"first"},{28,"last"},{29,"uniq"},{30,"addrtied"},{31,"grp"},{32,"input"},{33,"persists"},{34,"unaff"},
+		{35,"blockref"},{36,"close"},{37,"color"},{38,"indent"},{39,"off"},{40,"open"},{41,"opref"},{42,"varref"},{43,"code"},
+		{47,"alignment"},{48,"arraysize"},{49,"char"},{50,"core"},{52,"incomplete"},{56,"opaquestring"},{57,"signed"},{58,"structalign"},{59,"utf"},{60,"varlength"},
+		{61,"cat"},{62,"field"},{63,"merge"},{64,"scopeidbyname"},{65,"volatile"},{66,"class"},{67,"repref"},{68,"symref"},
+		{75,"altindex"},{76,"depth"},{77,"end"},{78,"opcode"},{79,"rev"},{84,"nocode"},
+		{114,"custom"},{115,"dotdotdot"},{116,"extension"},{117,"hasthis"},{118,"inline"},{119,"killedbycall"},{120,"maxsize"},{121,"minsize"},{122,"modellock"},{123,"noreturn"},{124,"pointermax"},{125,"separatefloat"},{126,"stackshift"},{127,"strategy"},{128,"thisbeforeretpointer"},{129,"voidlock"},
+		{149,"storage"},{150,"stackspill"}
+	};
+	return names;
+}
+
+class PackedXmlBridge {
+	const std::string& data;
+	size_t pos = 0;
+	const Translate* trans;
+
+	uint1 readByte()
+	{
+		if (pos >= data.size()) throw DecompError("Packed XML output ended unexpectedly");
+		return (uint1)data[pos++];
+	}
+
+	uint4 readId(uint1 header)
+	{
+		uint4 id = header & PackedFormat::ELEMENTID_MASK;
+		if ((header & PackedFormat::HEADEREXTEND_MASK) != 0) {
+			id <<= PackedFormat::RAWDATA_BITSPERBYTE;
+			id |= readByte() & PackedFormat::RAWDATA_MASK;
+		}
+		return id;
+	}
+
+	uint8 readInteger(uint4 len)
+	{
+		uint8 res = 0;
+		for (uint4 i = 0; i < len; i++)
+			res = (res << PackedFormat::RAWDATA_BITSPERBYTE) | (readByte() & PackedFormat::RAWDATA_MASK);
+		return res;
+	}
+
+	std::string elementName(uint4 id) const
+	{
+		const auto& names = packedElementNames();
+		auto it = names.find(id);
+		return it == names.end() ? "elem_" + std::to_string(id) : it->second;
+	}
+
+	std::string attributeName(uint4 id) const
+	{
+		const auto& names = packedAttributeNames();
+		auto it = names.find(id);
+		return it == names.end() ? "attr_" + std::to_string(id) : it->second;
+	}
+
+	std::string escapeXml(const std::string& val) const
+	{
+		std::ostringstream out;
+		for (unsigned char ch : val) {
+			switch (ch) {
+			case '&': out << "&amp;"; break;
+			case '<': out << "&lt;"; break;
+			case '>': out << "&gt;"; break;
+			case '"': out << "&quot;"; break;
+			case '\'': out << "&apos;"; break;
+			default:
+				if (ch == 0x9 || ch == 0xa || ch == 0xd || ch >= 0x20)
+					out << (char)ch;
+				break;
+			}
+		}
+		return out.str();
+	}
+
+	std::string spaceName(uint8 index) const
+	{
+		if (index < (uint8)trans->numSpaces()) {
+			AddrSpace* spc = trans->getSpace((int4)index);
+			if (spc != nullptr) return spc->getName();
+		}
+		return "space_" + std::to_string(index);
+	}
+
+	std::string specialSpaceName(uint4 code) const
+	{
+		switch (code) {
+		case PackedFormat::SPECIALSPACE_STACK: return "stack";
+		case PackedFormat::SPECIALSPACE_JOIN: return "join";
+		case PackedFormat::SPECIALSPACE_FSPEC: return "fspec";
+		case PackedFormat::SPECIALSPACE_IOP: return "iop";
+		case PackedFormat::SPECIALSPACE_SPACEBASE: return "spacebase";
+		default: return "special_" + std::to_string(code);
+		}
+	}
+
+	std::string readAttributeValue(uint1 typeByte)
+	{
+		uint4 typeCode = typeByte >> PackedFormat::TYPECODE_SHIFT;
+		uint4 lenCode = typeByte & PackedFormat::LENGTHCODE_MASK;
+		switch (typeCode) {
+		case PackedFormat::TYPECODE_BOOLEAN:
+			return lenCode == 0 ? "false" : "true";
+		case PackedFormat::TYPECODE_SIGNEDINT_POSITIVE:
+			return std::to_string((intb)readInteger(lenCode));
+		case PackedFormat::TYPECODE_SIGNEDINT_NEGATIVE:
+			return std::to_string(-(intb)readInteger(lenCode));
+		case PackedFormat::TYPECODE_UNSIGNEDINT:
+		{
+			std::ostringstream out;
+			out << "0x" << std::hex << readInteger(lenCode);
+			return out.str();
+		}
+		case PackedFormat::TYPECODE_ADDRESSSPACE:
+			return spaceName(readInteger(lenCode));
+		case PackedFormat::TYPECODE_SPECIALSPACE:
+			return specialSpaceName(lenCode);
+		case PackedFormat::TYPECODE_STRING:
+		{
+			uint8 len = readInteger(lenCode);
+			if (pos + len > data.size()) throw DecompError("Packed XML string exceeds output size");
+			std::string res = data.substr(pos, (size_t)len);
+			pos += (size_t)len;
+			return res;
+		}
+		default:
+			throw DecompError("Unknown packed XML attribute type " + std::to_string(typeCode));
+		}
+	}
+
+	void parseElement(std::ostringstream& out)
+	{
+		uint1 header = readByte();
+		if ((header & PackedFormat::HEADER_MASK) != PackedFormat::ELEMENT_START)
+			throw DecompError("Packed XML expected element start");
+		uint4 elemId = readId(header);
+		std::string name = elementName(elemId);
+		out << '<' << name;
+		std::string content;
+		while (pos < data.size() && (((uint1)data[pos] & PackedFormat::HEADER_MASK) == PackedFormat::ATTRIBUTE)) {
+			uint1 attrHeader = readByte();
+			uint4 attrId = readId(attrHeader);
+			uint1 typeByte = readByte();
+			std::string val = readAttributeValue(typeByte);
+			if (attrId == ATTRIB_CONTENT.getId())
+				content += val;
+			else
+				out << ' ' << attributeName(attrId) << "=\"" << escapeXml(val) << '"';
+		}
+		out << '>';
+		if (!content.empty()) out << escapeXml(content);
+		while (pos < data.size() && (((uint1)data[pos] & PackedFormat::HEADER_MASK) == PackedFormat::ELEMENT_START))
+			parseElement(out);
+		uint1 endHeader = readByte();
+		if ((endHeader & PackedFormat::HEADER_MASK) != PackedFormat::ELEMENT_END)
+			throw DecompError("Packed XML expected element end");
+		uint4 endId = readId(endHeader);
+		if (endId != elemId) throw DecompError("Packed XML element close mismatch");
+		out << "</" << name << '>';
+	}
+
+public:
+	PackedXmlBridge(const std::string& bytes, const Translate* tr) : data(bytes), trans(tr) {}
+
+	std::string convert()
+	{
+		std::ostringstream out;
+		parseElement(out);
+		if (pos != data.size())
+			throw DecompError("Packed XML output has trailing data");
+		return out.str();
+	}
+};
+
+static std::string packedXmlToXml(const std::string& packed, const Translate* trans)
+{
+	PackedXmlBridge bridge(packed, trans);
+	return bridge.convert();
+}
+
+//language id and compiler id from ldefs can be used for loading the patterns (for byte searching to find functions though - not a decompiler level issue):
+//data/patterns/patternconstraints.xml
+//patternconstraints -> language id="" -> compiler id="" -> <patternfile>name</patternfile>
+std::string DecompInterface::doDecompile(DecMode dm, AddrInfo addr, std::string & displayXml,
+	std::string& funcProto, std::string& funcColorProto, FuncProtoInfo& symInf,
+	std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph)
+{
+	std::vector<uchar> buf;
+	if (dm.actionname.empty()) {
+		throw DecompError("Decompile action not specified");
+	}
+	displayXml.clear();
+	funcProto.clear();
+	funcColorProto.clear();
+	blockGraph.clear();
+	if (dm.actionname == "decompile") setSimplificationStyle(dm.actionname);
+	//Ghidra/Features/Decompiler/src/decompile/cpp/ghidra_process.hh
+	//"normalize", "jumptable", "paramid", "register", "firstpass"
+	if (dm.actionname != "decompile") {
+		buf = sendCommand2Params("setAction", dm.actionname, "");
+		if (std::string(buf.begin(), buf.end()) != "t") {
+			throw DecompError("Could not set decompile action");
+		}
+	}
+	//run with noc and notree to just get a document with a function prototype doc -> function -> addr/localdb/prototype as used for queries
+	if (!dm.printSyntaxTree && lastdm.printSyntaxTree) {
+		buf = sendCommand2Params("setAction", "", "notree"); //"true"
+		if (std::string(buf.begin(), buf.end()) != "t") {
+			throw DecompError("Could not turn off syntax tree");
+		}
+	} else if (dm.printSyntaxTree && !lastdm.printSyntaxTree)
+		toggleSyntaxTree(dm.printSyntaxTree);
+	if (!dm.printCCode && lastdm.printCCode) {
+		buf = sendCommand2Params("setAction", "", "noc"); //"c"
+		if (std::string(buf.begin(), buf.end()) != "t") {
+			throw DecompError("Could not turn off C printing");
+		}
+	} else if (dm.printCCode && !lastdm.printCCode)
+		toggleCCode(dm.printCCode);
+	if (dm.sendParamMeasures && !lastdm.sendParamMeasures) {
+		buf = sendCommand2Params("setAction", "", "parammeasures"); //"noparammeasures"
+		if (std::string(buf.begin(), buf.end()) != "t") {
+			throw DecompError("Could not turn on sending of parameter measures");
+		}
+	} else if (!dm.sendParamMeasures && lastdm.sendParamMeasures)
+		toggleParamMeasures(dm.sendParamMeasures);
+	if (dm.jumpLoad && !lastdm.jumpLoad) {
+		buf = sendCommand2Params("setAction", "", "jumpload"); //"nojumpload"
+		if (std::string(buf.begin(), buf.end()) != "t") {
+			throw DecompError("Could not turn on jumptable loads");
+		}
+	} else if (!dm.jumpLoad && lastdm.jumpLoad)
+		toggleJumpLoads(dm.jumpLoad);
+	lastdm = dm;
+	startOffs = addr;
+	buf = sendCommand1ParamTimeout("decompileAt", getPackedAddress(addr), toutSecs);
+	callback->protocolRecorder("doDecompile response bytes=\"" + std::to_string(buf.size()) + "\"", false);
+	std::vector<uchar> flushBuf = sendCommand("flushNative");
+	callback->protocolRecorder("doDecompile flushNative result=\"" +
+		escapeCStr(std::string(flushBuf.begin(), flushBuf.end())) + "\"", false);
+	std::string decompXml = std::string(buf.begin(), buf.end());
+	if (decompXml.size() == 0) throw DecompError("Empty decompiler response due to error");
+	if (((uint1)decompXml[0] & PackedFormat::HEADER_MASK) == PackedFormat::ELEMENT_START) {
+		callback->protocolRecorder("doDecompile unpack packed XML", false);
+		decompXml = packedXmlToXml(decompXml, trans);
+	}
+	callback->protocolRecorder("doDecompile XML bytes=\"" + std::to_string(decompXml.size()) + "\"", false);
+	istringstream str(decompXml);
+	//doc -> function ->
+	//<ast>
+		//<varnodes> -> <addr... ref="#"> ...
+		//<block index="0..n"> -> <rangelist> -> <range>...
+		//					   -> <op code="#"><seqnum space="" offset="" uniq="#"> -> <addr ref="#"/>... </seqnum></op>...
+		//<blockedge index="1..n"><edge end="0" rev="0"/><edge end="11" rev="0"/></blockedge>...
+	//</ast>
+	//<highlist> -> <high repref="#" class="local" symref="#">... -> <type... ref="#" core="true/false"> -> <addr>
+	//<prototype ...>
+	//if bad XML was returned due to a problem, should not crash here
+	Document* doc = nullptr;
+	try {
+		doc = xml_tree_whitespace(str);
+	} catch (XmlError& /*err*/) {
+		const size_t previewSize = 4096;
+		throw DecompError("Unable to parse XML: " +
+			decompXml.substr(0, std::min(previewSize, decompXml.size())) +
+			(decompXml.size() > previewSize ? "...[truncated]" : ""));
+	}
+	callback->protocolRecorder("doDecompile XML parsed", false);
+	Element* el = doc->getRoot();
+	const List& list(el->getChildren());
+	List::const_iterator iter;
+	bool bFirst = true;
+	for (iter = list.begin(); iter != list.end(); ++iter) {
+		if ((*iter)->getName() == "parammeasures") {
+			callback->protocolRecorder("doDecompile parammeasures begin", false);
+			parseParamMeasures(*iter, symInf);
+			callback->protocolRecorder("doDecompile parammeasures complete model=\"" +
+				escapeCStr(symInf.model) + "\" inputs=\"" +
+				std::to_string(symInf.syminfo.size()) + "\"", false);
+		} else if ((*iter)->getName() == "function") { //first function contains prototype, AST, other info, next one is C code
+			callback->protocolRecorder(std::string("doDecompile function element first=\"") +
+				(bFirst ? "true" : "false") + "\"", false);
+			if (!bFirst) {
+				callback->protocolRecorder("doDecompile convert source begin", false);
+				reduceShortCircuits(blockGraph);
+				decompXml = convertSourceDoc(*iter, displayXml, funcProto, funcColorProto, blockGraph);
+				removeUnusedNodes(blockGraph);
+				callback->protocolRecorder("doDecompile convert source complete", false);
+				break;
+			}
+			bFirst = !bFirst;
+			el = *iter;
+			callback->protocolRecorder("doDecompile parse prototype begin", false);
+			parseFuncProto(el, symInf);
+			callback->protocolRecorder("doDecompile parse prototype complete", false);
+			const List& lst(el->getChildren());
+			List::const_iterator itert;
+			for (itert = lst.begin(); itert != lst.end(); ++itert) {
+				if ((*itert)->getName() == "comment") { //indicates an error message was thrown
+					//return decompXml;
+				} else if ((*itert)->getName() == "addr") {
+				} else if ((*itert)->getName() == "localdb") {
+					callback->protocolRecorder("doDecompile localdb begin", false);
+					el = *itert;
+					const List& lt(el->getChildren());
+					for (List::const_iterator scopeIt = lt.begin(); scopeIt != lt.end(); ++scopeIt) {
+						if ((*scopeIt)->getName() == "scope") {
+							el = *scopeIt;
+							const List& ls(el->getChildren());
+							for (List::const_iterator symbolListIt = ls.begin(); symbolListIt != ls.end(); ++symbolListIt) {
+								if ((*symbolListIt)->getName() == "symbollist") {
+									el = *symbolListIt;
+									const List& l(el->getChildren());
+									for (List::const_iterator mapSymIt = l.begin(); mapSymIt != l.end(); ++mapSymIt) {
+										if ((*mapSymIt)->getName() == "mapsym") {
+											SymInfo sym = {};
+											el = *mapSymIt;
+											const List& li(el->getChildren());
+											List::const_iterator it;
+											for (it = li.begin(); it != li.end(); ++it) {
+												el = *it;
+												if (el->getName() == "symbol") {
+													if (el->getAttributeValue("name").compare(0, 7, "$$undef") != 0)
+														sym.pi.name = el->getAttributeValue("name");
+													if (strtoull(el->getAttributeValue("cat").c_str(), nullptr, 10) == 0)
+														sym.argIndex = strtoull(el->getAttributeValue("index").c_str(), nullptr, 16);
+													else sym.argIndex = -1;
+													parseTypeInfo(el, sym.pi.ti);
+												} else if (el->getName() == "addr") {
+													sym.addr.addr.space = getHasAttributeValue(el, "space");
+													if (sym.addr.addr.space == "join") {
+														for (int i = 0; i < el->getNumAttributes(); i++) {
+															if (el->getAttributeName(i).substr(0, 5) == "piece") {
+																int idx = strtoull(el->getAttributeName(i).substr(5).c_str(), nullptr, 10) - 1;
+																SizedAddrInfo inf;
+																size_t off = el->getAttributeValue(i).find(':');
+																inf.addr.space = el->getAttributeValue(i).substr(0, off);
+																std::string rest = el->getAttributeValue(i).substr(off + 1);
+																off = rest.find(':');
+																inf.addr.offset = strtoull(rest.substr(0, off).c_str(), nullptr, 16);
+																inf.size = strtoull(rest.substr(off + 1).c_str(), nullptr, 10);
+																if (sym.addr.addr.joins.size() <= idx) sym.addr.addr.joins.resize(idx + 1);
+																sym.addr.addr.joins[idx] = inf; //sym.joins.push_back(inf);
+															}
+														}
+													} else if (sym.addr.addr.space != "")
+														sym.addr.addr.offset = strtoull(el->getAttributeValue("offset").c_str(), nullptr, 16);
+												} else if (el->getName() == "rangelist") {
+													const List& lii(el->getChildren());
+													for (List::const_iterator rangeIt = lii.begin(); rangeIt != lii.end(); ++rangeIt) {
+														if ((*rangeIt)->getName() == "range") {
+															sym.range.space = (*rangeIt)->getAttributeValue("space");
+															sym.range.beginoffset = strtoull((*rangeIt)->getAttributeValue("first").c_str(), nullptr, 16);
+															sym.range.endoffset = strtoull((*rangeIt)->getAttributeValue("last").c_str(), nullptr, 16);
+															break;
+														}
+													}
+												}
+											}
+											symInf.syminfo.push_back(sym);
+										}
+										std::sort(symInf.syminfo.begin(), symInf.syminfo.end(),
+											[](const SymInfo & a, const SymInfo & b) { 
+												int r = a.addr.addr.space.compare(b.addr.addr.space);
+												return r == 0 ? a.addr.addr.offset < b.addr.addr.offset : r < 0; });
+									}
+									break;
+								}
+							}
+							break;
+						}
+					}
+					callback->protocolRecorder("doDecompile localdb complete", false);
+				} else if ((*itert)->getName() == "ast") {
+					callback->protocolRecorder("doDecompile ast begin", false);
+					const List& lt((*itert)->getChildren());
+					List::const_iterator itr;
+					blockGraph.resize(1); //first node has no in edges and is not included
+					for (itr = lt.begin(); itr != lt.end(); ++itr) {
+						el = *itr;
+						if (el->getName() == "block") {
+							//rangelist -> range...
+							//op...
+						} else if (el->getName() == "blockedge") {
+							unsigned int idx = strtoul(el->getAttributeValue("index").c_str(), nullptr, 10);
+							if (blockGraph.size() <= idx) blockGraph.resize(idx + 1);
+							const List& l(el->getChildren());
+							List::const_iterator it;
+							for (it = l.begin(); it != l.end(); ++it) {
+								el = *it;
+								if (el->getName() == "edge") { //inbound edges
+									std::get<0>(blockGraph[idx]).push_back(strtoul(el->getAttributeValue("end").c_str(), nullptr, 10));
+								}
+							}
+						}
+					}
+					callback->protocolRecorder("doDecompile ast complete", false);
+				}
+			}
+		}
+	}
+	callback->protocolRecorder("doDecompile parsed document complete", false);
+	delete doc;
+
+	return decompXml;
+}
+
+bool DecompInterface::toggleSyntaxTree(bool val)
+{
+	lastdm.printSyntaxTree = val;
+	std::vector<uchar> buf = sendCommand2Params("setAction", "", val ? "tree" : "notree");
+	return std::string(buf.begin(), buf.end()) == "t";
+}
+
+bool DecompInterface::toggleCCode(bool val)
+{
+	lastdm.printCCode = val;
+	std::vector<uchar> buf = sendCommand2Params("setAction", "", val ? "c" : "noc");
+	return std::string(buf.begin(), buf.end()) == "t";
+}
+
+bool DecompInterface::toggleParamMeasures(bool val)
+{
+	lastdm.sendParamMeasures = val;
+	std::vector<uchar> buf = sendCommand2Params("setAction", "", val ? "parammeasures" : "noparammeasures");
+	return std::string(buf.begin(), buf.end()) == "t";
+}
+
+bool DecompInterface::toggleJumpLoads(bool val)
+{
+	lastdm.jumpLoad = val;
+	std::vector<uchar> buf = sendCommand2Params("setAction", "", val ? "jumpload" : "nojumpload");
+	return std::string(buf.begin(), buf.end()) == "t";
+}
+
+bool DecompInterface::setOptions(Options opt)
+{
+	xmlOptions = getOptions(opt);
+	packedOptions = getPackedOptions(opt);
+	std::vector<uchar> buf = sendCommand1Param("setOptions", packedOptions);
+	//cb->status("setOptions " + std::string(buf.begin(), buf.end()));
+	if (std::string(buf.begin(), buf.end()) != "t") {
+		statusGood = false;
+		throw DecompError("Did not accept decompiler options");
+	}
+	return true;
+}
+
+void DecompInterface::getProtoEvals(std::string cspec,
+	std::vector<std::string>& vec, int* defaultIdx)
+{
+	ifstream s(cspec.c_str());
+	Document* doc;
+	try {
+		doc = xml_tree(s);
+	} catch (XmlError& /*err*/) {
+		//throw DecompError("Compiler spec file not found or could not be parsed: " + err.explain);
+		return;
+	}
+	Element* el = doc->getRoot();
+	const List& list(el->getChildren());
+	List::const_iterator iter;
+	for (iter = list.begin(); iter != list.end(); ++iter) {
+		el = *iter;
+		if (el->getName() == "default_proto") {
+			const List& lst(el->getChildren());
+			List::const_iterator it;
+			for (it = lst.begin(); it != lst.end(); ++it) {
+				el = *it; //el->getName() == "prototype"
+				*defaultIdx = vec.size();
+				vec.push_back(el->getAttributeValue("name"));
+				//break;
+			}
+			//break;
+		} else if (el->getName() == "prototype") {
+			//callStyle = el->getAttributeValue("name");
+			//CALLMECHANISM_TYPE is for Dalvik/JVM all so far are dynamic
+			//input, output, pcode inject="uponentry/uponreturn" dynamic="true/false" then use el->getAttributeValue("name") + "@@inject_uponentry" or "@@inject_uponreturn"; -> body
+			vec.push_back(el->getAttributeValue("name"));
+		} else if (el->getName() == "resolveprototype") {
+			vec.push_back(el->getAttributeValue("name"));
+		}
+	}
+}
+
+//Ghidra/Processors/*/data/languages/*.ldefs
+//ghidra_9.0.4\Ghidra\Processors>dir *.ldefs/s/b
+//could narrow down with external tool, followed by bit size and endianness
+void DecompInterface::getLangFiles(std::string processorpath, std::string externaltool,
+	std::map<std::string, std::vector<int>>& toolMap,
+	std::vector<LangInfo> & li) //tools such as "gnu", "IDA-PRO", "DWARF.register.mapping.file"
+{
+	std::vector<string> res;
+	FileManage::directoryList(res, processorpath, false);
+	for (std::vector<string>::iterator it = res.begin(); it != res.end(); it++) {
+		std::vector<string> ldefs;
+		FileManage::matchListDir(ldefs, ".ldefs", true, *it + "/data/languages/", false);
+		for (std::vector<string>::iterator its = ldefs.begin(); its != ldefs.end(); its++) {
+			ifstream s(its->c_str());
+			Document* doc;
+			try {
+				doc = xml_tree(s);
+			} catch (XmlError& /*err*/) {
+				continue;
+			}
+			Element* el = doc->getRoot();
+			const List& list(el->getChildren());
+			List::const_iterator iter;
+			for (iter = list.begin(); iter != list.end(); ++iter) {
+				el = *iter;
+				if (el->getName() == "language") {
+					std::map<std::string, std::string> compilers;
+					const List& lst(el->getChildren());
+					List::const_iterator t;
+					for (t = lst.begin(); t != lst.end(); ++t) {
+						Element* e = *t;
+						if (e->getName() == "compiler") {
+							compilers[e->getAttributeValue("id")] = e->getAttributeValue("spec");
+						} else if (e->getName() == "external_name") {
+							if (e->getAttributeValue("tool") == externaltool) {
+								std::string str = e->getAttributeValue("name");
+								std::transform(str.begin(), str.end(), str.begin(), [](unsigned char c) { return std::tolower(c); });
+								//if (toolMap.find(str) == toolMap.end()) toolMap[str].clear();// = std::vector<int>();
+								toolMap[str].push_back(li.size());
+							}
+						}
+					}
+					li.push_back(LangInfo{ *it + "/data/languages/",
+						el->getAttributeValue("processor"),
+						el->getAttributeValue("endian") == "big",
+						(int)strtol(el->getAttributeValue("size").c_str(), nullptr, 10),
+						el->getAttributeValue("slafile"),
+						el->getAttributeValue("processorspec"), compilers });
+				}
+			}
+			delete doc;
+		}
+	}
+}

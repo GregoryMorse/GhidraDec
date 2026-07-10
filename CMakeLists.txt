@@ -1,15 +1,28 @@
-cmake_minimum_required(VERSION 3.6)
+cmake_minimum_required(VERSION 3.19)
 
 project(ghidradec-idaplugin CXX C)
-set(RELEASE_VERSION "1.3")
 
-set(GHIDRA_VER "10.1.2")
-set(GHIDRA_SRC_ZIP "Ghidra_${GHIDRA_VER}_build.zip")
-set(GHIDRA_SRC_ZIP_HASH "c8614fa0145254c3540b50df808645290282adc797f1cce948ee3c3dfe9faa1d")
+include(cmake/GhidraDecManifest.cmake)
+ghidradec_manifest_load_project()
+ghidradec_manifest_load_dependencies()
 
-if(NOT EXISTS ${GHIDRA_SRC_ZIP})
-	file(DOWNLOAD "https://github.com/NationalSecurityAgency/ghidra/archive/refs/tags/${GHIDRA_SRC_ZIP}" ${GHIDRA_SRC_ZIP} TIMEOUT 60 EXPECTED_HASH SHA256=${GHIDRA_SRC_ZIP_HASH})
+set(RELEASE_VERSION "${GHIDRADEC_RELEASE_VERSION}")
+set(GHIDRADEC_IDA_VERSION "${GHIDRADEC_DEFAULT_IDA_SDK}" CACHE STRING "IDA SDK version from ghidradec.targets.json.")
+set(GHIDRA_VER "${GHIDRADEC_DEFAULT_GHIDRA_VERSION}" CACHE STRING "Ghidra version used by the plugin.")
+set(GHIDRA_INSTALL_DIR "" CACHE PATH "Optional path to a local Ghidra installation.")
+set(GHIDRA_DECOMPILER_CPP_DIR "" CACHE PATH "Optional path to Ghidra's decompiler C++ sources.")
+set(GHIDRADEC_GENERATED_DEPS_DIR "${CMAKE_SOURCE_DIR}/build/deps" CACHE PATH "Generated dependency source root.")
+set(GHIDRADEC_GHIDRA_SOURCE_DIR "${GHIDRADEC_GENERATED_DEPS_DIR}/ghidra-decompiler/Ghidra" CACHE PATH "Generated full Ghidra decompiler C++ source copy.")
+set(GHIDRADEC_GHIDRA_DECOMPILE_DIR "${GHIDRADEC_GENERATED_DEPS_DIR}/ghidra-decompiler/decompile" CACHE PATH "Generated Ghidra decompiler source subset used by this build.")
+option(GHIDRADEC_REFRESH_GHIDRA_SOURCES "Refresh generated decompiler sources from GHIDRA_DECOMPILER_CPP_DIR during configure." OFF)
+
+set(GHIDRADEC_DEFAULT_DEPLOY_DIR "")
+if(WIN32 AND DEFINED ENV{APPDATA})
+	file(TO_CMAKE_PATH "$ENV{APPDATA}/Hex-Rays/IDA Pro/plugins" GHIDRADEC_DEFAULT_DEPLOY_DIR)
 endif()
+option(GHIDRADEC_AUTO_DEPLOY "Try to copy built IDA plugins to GHIDRADEC_DEPLOY_DIR after each successful build." OFF)
+set(GHIDRADEC_DEPLOY_DIR "${GHIDRADEC_DEFAULT_DEPLOY_DIR}" CACHE PATH "Optional IDA plugin directory for GHIDRADEC_AUTO_DEPLOY.")
+
 set(GHIDRA_DEC_DEPS
 	"address.*"
 	"context.*"
@@ -19,6 +32,7 @@ set(GHIDRA_DEC_DEPS
 	"float.*"
 	"globalcontext.*"
 	"loadimage.*"
+	"marshal.*"
 	"memstate.*"
 	"opbehavior.*"
 	"opcodes.*"
@@ -26,7 +40,9 @@ set(GHIDRA_DEC_DEPS
 	"pcodecompile.*"
 	"pcodeparse.*"
 	"pcoderaw.*"
+	"rangemap.hh"
 	"semantics.*"
+	"slaformat.*"
 	"sleigh.*"
 	"sleighbase.*"
 	"slghpatexpress.*"
@@ -35,25 +51,43 @@ set(GHIDRA_DEC_DEPS
 	"space.*"
 	"translate.*"
 	"types.h"
-	"xml.*")
+	"xml.*"
+	"compression.*"
+	"crc32.*")
 
-set(GHIDRA_DEC_PATH "ghidra-Ghidra_${GHIDRA_VER}_build/Ghidra/Features/Decompiler/src/decompile/cpp/")
-list(TRANSFORM GHIDRA_DEC_DEPS PREPEND "${GHIDRA_DEC_PATH}")
-file(ARCHIVE_EXTRACT INPUT ${GHIDRA_SRC_ZIP} DESTINATION ${CMAKE_SOURCE_DIR}/Ghidra PATTERNS "${GHIDRA_DEC_PATH}*")
-file(ARCHIVE_EXTRACT INPUT ${GHIDRA_SRC_ZIP} DESTINATION ${CMAKE_SOURCE_DIR}/decompile PATTERNS ${GHIDRA_DEC_DEPS})
-file(GLOB FILES_EXTRACTED RELATIVE "${CMAKE_SOURCE_DIR}/Ghidra/${GHIDRA_DEC_PATH}" "${CMAKE_SOURCE_DIR}/Ghidra/${GHIDRA_DEC_PATH}*")
-foreach(FNAME IN LISTS FILES_EXTRACTED)
-	file(RENAME "${CMAKE_SOURCE_DIR}/Ghidra/${GHIDRA_DEC_PATH}${FNAME}" "${CMAKE_SOURCE_DIR}/Ghidra/${FNAME}")
-endforeach()
-file(REMOVE_RECURSE "${CMAKE_SOURCE_DIR}/Ghidra/ghidra-Ghidra_${GHIDRA_VER}_build")
-file(GLOB FILES_EXTRACTED RELATIVE "${CMAKE_SOURCE_DIR}/decompile/${GHIDRA_DEC_PATH}" "${CMAKE_SOURCE_DIR}/decompile/${GHIDRA_DEC_PATH}*")
-foreach(FNAME IN LISTS FILES_EXTRACTED)
-	file(RENAME "${CMAKE_SOURCE_DIR}/decompile/${GHIDRA_DEC_PATH}${FNAME}" "${CMAKE_SOURCE_DIR}/decompile/${FNAME}")
-endforeach()
-file(REMOVE_RECURSE "${CMAKE_SOURCE_DIR}/decompile/ghidra-Ghidra_${GHIDRA_VER}_build")
-file(READ "${CMAKE_SOURCE_DIR}/decompile/filemanage.cc" filedata)
-string(REGEX REPLACE "GetFileAttributes\\(" "GetFileAttributesA(" filedata "${filedata}")
-file(WRITE "${CMAKE_SOURCE_DIR}/decompile/filemanage.cc" "${filedata}")
+if(GHIDRADEC_REFRESH_GHIDRA_SOURCES)
+	if(NOT GHIDRA_DECOMPILER_CPP_DIR AND GHIDRA_INSTALL_DIR)
+		set(GHIDRA_DECOMPILER_CPP_DIR "${GHIDRA_INSTALL_DIR}/Ghidra/Features/Decompiler/src/decompile/cpp")
+	endif()
+	if(NOT EXISTS "${GHIDRA_DECOMPILER_CPP_DIR}/address.cc")
+		message(FATAL_ERROR "Ghidra decompiler sources were not found under GHIDRA_DECOMPILER_CPP_DIR=${GHIDRA_DECOMPILER_CPP_DIR}")
+	endif()
+
+	file(MAKE_DIRECTORY "${GHIDRADEC_GHIDRA_SOURCE_DIR}")
+	file(MAKE_DIRECTORY "${GHIDRADEC_GHIDRA_DECOMPILE_DIR}")
+
+	file(GLOB GHIDRA_DEC_ALL_FILES CONFIGURE_DEPENDS "${GHIDRA_DECOMPILER_CPP_DIR}/*")
+	foreach(FNAME IN LISTS GHIDRA_DEC_ALL_FILES)
+		if(NOT IS_DIRECTORY "${FNAME}")
+			file(COPY "${FNAME}" DESTINATION "${GHIDRADEC_GHIDRA_SOURCE_DIR}")
+		endif()
+	endforeach()
+
+	foreach(PATTERN IN LISTS GHIDRA_DEC_DEPS)
+		file(GLOB GHIDRA_DEC_MATCHES CONFIGURE_DEPENDS "${GHIDRA_DECOMPILER_CPP_DIR}/${PATTERN}")
+		foreach(FNAME IN LISTS GHIDRA_DEC_MATCHES)
+			file(COPY "${FNAME}" DESTINATION "${GHIDRADEC_GHIDRA_DECOMPILE_DIR}")
+		endforeach()
+	endforeach()
+
+	file(READ "${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/filemanage.cc" filedata)
+	string(REGEX REPLACE "GetFileAttributes\\(" "GetFileAttributesA(" filedata "${filedata}")
+	file(WRITE "${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/filemanage.cc" "${filedata}")
+
+	if(EXISTS "${GHIDRA_DECOMPILER_CPP_DIR}/../zlib/zlib.h")
+		file(COPY "${GHIDRA_DECOMPILER_CPP_DIR}/../zlib" DESTINATION "${GHIDRADEC_GHIDRA_DECOMPILE_DIR}")
+	endif()
+endif()
 
 # Set the default build type to 'Release'
 if(NOT CMAKE_BUILD_TYPE)
@@ -62,14 +96,15 @@ if(NOT CMAKE_BUILD_TYPE)
 	set(CMAKE_BUILD_TYPE "${default_build_type}" CACHE STRING "Choose the type of build." FORCE)
 endif()
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 
 # Check that obligatory parameters were defined.
+ghidradec_manifest_resolve_ida_sdk("${GHIDRADEC_IDA_VERSION}")
 if(NOT IDA_SDK_DIR AND NOT IDA_SDK_DIR32)
-	message(FATAL_ERROR "Path to IDA SDK 7.x or 4-6.x was not specified. Use -DIDA_SDK_DIR=<path> or -DIDA_SDK_DIR32=<path>.")
+	message(FATAL_ERROR "Path to IDA SDK ${GHIDRADEC_IDA_VERSION} was not found. Run `python tools/ida_sdk.py ensure --version ${GHIDRADEC_IDA_VERSION}` or pass -DIDA_SDK_DIR=<path> / -DIDA_SDK_DIR32=<path>.")
 endif()
 if(NOT EXISTS "${IDA_SDK_DIR}" AND NOT EXISTS "${IDA_SDK_DIR32}")
 	message(FATAL_ERROR "Specified IDA SDK path does not exist.")
@@ -105,7 +140,7 @@ else()
 endif()
 
 # Global defines.
-add_definitions(-D__IDP__ -D__PLUGIN__ -DNO_OBSOLETE_FUNCS)
+add_definitions(-D__IDP__ -D__PLUGIN__ -DNO_OBSOLETE_FUNCS -DNO_GZIP)
 if(NOT IDA_SDK_DIR32)
 add_definitions(-D__X64__)
 endif()
@@ -128,68 +163,89 @@ endif()
 ## add_subdirectory(scripts)
 ## add_subdirectory(src)
 
-# Create release.
-if(GHIDRADEC_IDAPLUGIN_DOC)
-	set(RELEASE_DIR_NAME "ghidradec-idaplugin")
-	set(RELEASE_DIR "${CMAKE_CURRENT_BINARY_DIR}/${RELEASE_DIR_NAME}")
-	set(RELEASE_LICENSE_DIR "${RELEASE_DIR}/license")
-	if(MSVC) # Windows
-		set(RELEASE_OS_NAME "windows")
-	elseif(APPLE) # macOS
-		set(RELEASE_OS_NAME "macOS")
-	else() # Linux
-		set(RELEASE_OS_NAME "linux")
-	endif()
-	add_custom_target(release
-		DEPENDS user-guide idaplugin32 idaplugin64
-		COMMAND ${CMAKE_COMMAND} -E make_directory "${RELEASE_DIR}"
-		COMMAND ${CMAKE_COMMAND} -E make_directory "${RELEASE_LICENSE_DIR}"
-		COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/LICENSE" "${RELEASE_LICENSE_DIR}"
-		COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/LICENSE-THIRD-PARTY" "${RELEASE_LICENSE_DIR}"
-		COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/doc/user_guide/user_guide.pdf" "${RELEASE_DIR}"
-		COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:idaplugin32>" "${RELEASE_DIR}"
-		COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:idaplugin64>" "${RELEASE_DIR}"
-		COMMAND ${CMAKE_COMMAND} -E tar "cvf" "${CMAKE_CURRENT_BINARY_DIR}/${RELEASE_DIR_NAME}-v${RELEASE_VERSION}-${RELEASE_OS_NAME}.zip" --format=zip "${RELEASE_DIR}"
-	)
-endif()
-
 ##
 ## CMake build script for the IDA Pro plugin.
 ##
 
 # IDA SDK libs.
 if(IDA_SDK_DIR32)
-if(WIN32)
-	set(idasdk_ea32 "${IDA_SDK_DIR32}/lib/x86_win_vc_32/ida.lib")
-	set(idasdk_ea64 "${IDA_SDK_DIR32}/lib/x86_win_vc_64/ida.lib")
-elseif(APPLE)
-	set(idasdk_ea32 "${IDA_SDK_DIR32}/lib/x86_mac_gcc_32/libida.dylib")
-	set(idasdk_ea64 "${IDA_SDK_DIR32}/lib/x86_mac_gcc_64/libida64.dylib")
-elseif(UNIX) # APPLE is also UNIX, so it MUST be before this elseif().
-	set(idasdk_ea32 "${IDA_SDK_DIR32}/lib/x86_linux_gcc_32/libida.so")
-	set(idasdk_ea64 "${IDA_SDK_DIR32}/lib/x86_linux_gcc_64/libida64.so")
+	set(GHIDRADEC_IDA_SDK_ROOT "${IDA_SDK_DIR32}")
 else()
-	message(FATAL_ERROR "Unsupported system type: ${CMAKE_SYSTEM_NAME}")
+	set(GHIDRADEC_IDA_SDK_ROOT "${IDA_SDK_DIR}")
 endif()
-else()
-if(WIN32)
-	set(idasdk_ea32 "${IDA_SDK_DIR}/lib/x64_win_vc_32/ida.lib")
-	set(idasdk_ea64 "${IDA_SDK_DIR}/lib/x64_win_vc_64/ida.lib")
-elseif(APPLE)
-	set(idasdk_ea32 "${IDA_SDK_DIR}/lib/x64_mac_gcc_32/libida.dylib")
-	set(idasdk_ea64 "${IDA_SDK_DIR}/lib/x64_mac_gcc_64/libida64.dylib")
-elseif(UNIX) # APPLE is also UNIX, so it MUST be before this elseif().
-	set(idasdk_ea32 "${IDA_SDK_DIR}/lib/x64_linux_gcc_32/libida.so")
-	set(idasdk_ea64 "${IDA_SDK_DIR}/lib/x64_linux_gcc_64/libida64.so")
-else()
-	message(FATAL_ERROR "Unsupported system type: ${CMAKE_SYSTEM_NAME}")
-endif()
+
+function(ghidradec_find_ida_library OUT_VAR EA_MODE)
+	if(WIN32)
+		file(GLOB _preferred_candidates LIST_DIRECTORIES false
+			"${GHIDRADEC_IDA_SDK_ROOT}/lib/x64_win_vc_${EA_MODE}/ida.lib"
+			"${GHIDRADEC_IDA_SDK_ROOT}/lib/x64_win_${EA_MODE}/ida.lib")
+		file(GLOB _candidates LIST_DIRECTORIES false
+			"${GHIDRADEC_IDA_SDK_ROOT}/lib/*_win_vc_${EA_MODE}*/ida.lib"
+			"${GHIDRADEC_IDA_SDK_ROOT}/lib/*_win_${EA_MODE}*/ida.lib")
+	elseif(APPLE)
+		if(CMAKE_OSX_ARCHITECTURES)
+			list(GET CMAKE_OSX_ARCHITECTURES 0 _macos_target_arch)
+		else()
+			set(_macos_target_arch "${CMAKE_SYSTEM_PROCESSOR}")
+		endif()
+		string(TOLOWER "${_macos_target_arch}" _macos_target_arch)
+		if(_macos_target_arch STREQUAL "x86_64" OR _macos_target_arch STREQUAL "amd64")
+			set(_macos_ida_arch "x64")
+		elseif(_macos_target_arch STREQUAL "arm64" OR _macos_target_arch STREQUAL "aarch64")
+			set(_macos_ida_arch "arm64")
+		else()
+			set(_macos_ida_arch "${_macos_target_arch}")
+		endif()
+		if(_macos_ida_arch STREQUAL "arm64")
+			file(GLOB _preferred_candidates LIST_DIRECTORIES false
+				"${GHIDRADEC_IDA_SDK_ROOT}/lib/arm64_mac_*_${EA_MODE}*/libida*.dylib"
+				"${GHIDRADEC_IDA_SDK_ROOT}/lib/arm64_mac_${EA_MODE}*/libida*.dylib")
+			set(_candidates ${_preferred_candidates})
+		else()
+			file(GLOB _preferred_candidates LIST_DIRECTORIES false
+				"${GHIDRADEC_IDA_SDK_ROOT}/lib/x64_mac_*_${EA_MODE}*/libida*.dylib"
+				"${GHIDRADEC_IDA_SDK_ROOT}/lib/x64_mac_${EA_MODE}*/libida*.dylib")
+			set(_candidates ${_preferred_candidates})
+		endif()
+	elseif(UNIX)
+		file(GLOB _preferred_candidates LIST_DIRECTORIES false
+			"${GHIDRADEC_IDA_SDK_ROOT}/lib/x64_linux_*_${EA_MODE}/libida*.so"
+			"${GHIDRADEC_IDA_SDK_ROOT}/lib/x64_linux_${EA_MODE}/libida*.so")
+		file(GLOB _candidates LIST_DIRECTORIES false
+			"${GHIDRADEC_IDA_SDK_ROOT}/lib/*_linux_*_${EA_MODE}*/libida*.so"
+			"${GHIDRADEC_IDA_SDK_ROOT}/lib/*_linux_${EA_MODE}*/libida*.so")
+	else()
+		message(FATAL_ERROR "Unsupported system type: ${CMAKE_SYSTEM_NAME}")
+	endif()
+
+	if(_preferred_candidates)
+		list(SORT _preferred_candidates)
+		list(GET _preferred_candidates 0 _library)
+		set(${OUT_VAR} "${_library}" PARENT_SCOPE)
+		return()
+	endif()
+
+	if(_candidates)
+		list(SORT _candidates)
+		list(GET _candidates 0 _library)
+		set(${OUT_VAR} "${_library}" PARENT_SCOPE)
+	else()
+		set(${OUT_VAR} "" PARENT_SCOPE)
+	endif()
+endfunction()
+
+ghidradec_find_ida_library(idasdk_ea32 32)
+ghidradec_find_ida_library(idasdk_ea64 64)
+
+if(NOT idasdk_ea32 AND NOT idasdk_ea64)
+	message(FATAL_ERROR "No linkable IDA SDK libraries were found under ${GHIDRADEC_IDA_SDK_ROOT}/lib for ${CMAKE_SYSTEM_NAME}.")
 endif()
 # Includes.
 include_directories("..") # Make our includes work.
 include_directories(".") # Make our includes work.
-include_directories("decompile") # Make our includes work.
-include_directories("whereami") # Make our includes work.
+include_directories("src") # Make our includes work.
+include_directories("${GHIDRADEC_GHIDRA_DECOMPILE_DIR}") # Make generated Ghidra decompiler includes work.
+include_directories("${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib") # Make Ghidra 12 .sla compression support work.
 if(IDA_SDK_DIR32)
 include_directories(SYSTEM
 	"${IDA_SDK_DIR32}/include" # Make IDA SDK includes work.
@@ -202,153 +258,223 @@ endif()
 
 # GhidraDec idaplugin sources.
 set(IDAPLUGIN_SOURCES
-	code_viewer.cpp
-	config_generator.cpp
-	decompiler.cpp
-	defs.cpp
-	idaplugin.cpp
-	plugin_config.cpp
-	sleighinterface.cpp
+	src/code_viewer.cpp
+	src/config_generator.cpp
+	src/decompiler.cpp
+	src/defs.cpp
+	src/idaplugin.cpp
+	src/plugin_config.cpp
+	src/sleighinterface.cpp
 )
-
-find_program(YACC_EXECUTABLE NAMES bison win_bison byacc yacc)
-if(YACC_EXECUTABLE STREQUAL "YACC_EXECUTABLE-NOTFOUND")
-	message(FATAL_ERROR "Neither bison nor win_bison nor byacc nor yacc was found.")
-endif()
-message(STATUS "Parser generator: ${YACC_EXECUTABLE}")
-
-## bison: pcodeparse.y xml.y
-##if(WIN32)
-##	set(YACC_EXECUTABLE "win_bison.exe")
-##	$(YACC_EXECUTABLE) -p pcode -o
-##else()
-##	set(YACC_EXECUTABLE "bison")
-##endif()
-
-add_custom_command(
-	OUTPUT ${CMAKE_SOURCE_DIR}/decompile/xml.tab.cpp ${CMAKE_SOURCE_DIR}/decompile/xml.tab.h
-	SOURCE ${CMAKE_SOURCE_DIR}/decompile/xml.y
-	COMMAND ${YACC_EXECUTABLE} -p xml -o ${CMAKE_SOURCE_DIR}/decompile/xml.tab.cpp -d ${CMAKE_SOURCE_DIR}/decompile/xml.y
-	DEPENDS ${CMAKE_SOURCE_DIR}/decompile/xml.y
-)
-add_custom_command(
-	OUTPUT ${CMAKE_SOURCE_DIR}/decompile/pcodeparse.tab.cpp ${CMAKE_SOURCE_DIR}/decompile/pcodeparse.tab.h
-	SOURCE ${pcap_SOURCE_DIR}/decompile/pcodeparse.y
-	COMMAND ${YACC_EXECUTABLE} -p pcode -o ${CMAKE_SOURCE_DIR}/decompile/pcodeparse.tab.cpp -d ${CMAKE_SOURCE_DIR}/decompile/pcodeparse.y
-	DEPENDS ${CMAKE_SOURCE_DIR}/decompile/pcodeparse.y
-)
-
-##config and utils
-#set(RETDEC_CONFIG_SOURCES
-#	architecture.cpp
-#	base.cpp
-#	calling_convention.cpp
-#	classes.cpp
-#	config.cpp
-#	file_format.cpp
-#	file_type.cpp
-#	functions.cpp
-#	language.cpp
-#	objects.cpp
-#	parameters.cpp
-#	patterns.cpp
-#	segments.cpp
-#	storage.cpp
-#	tool_info.cpp
-#	types.cpp
-#	vtables.cpp
-#)
-
-#set(RETDEC_UTILS_SOURCES
-#	address.cpp
-#	alignment.cpp
-#	binary_path.cpp
-#	byte_value_storage.cpp
-#	conversion.cpp
-#	dynamic_buffer.cpp
-#	file_io.cpp
-#	filesystem_path.cpp
-#	math.cpp
-#	memory.cpp
-#	string.cpp 
-#	system.cpp
-#	time.cpp
-#)
-
-#set(JSON_CPP_SOURCES
-#	json_reader.cpp
-#	json_value.cpp
-#	json_writer.cpp
-#)
-
-#set(WHEREAMI_SOURCES
-#	whereami/whereami.c
-#)
 
 set(GHIDRA_SLEIGH_SOURCES
-	decompile/sleigh.cc
-	decompile/pcodeparse.tab.cpp
-	decompile/pcodecompile.cc
-	decompile/sleighbase.cc
-	decompile/slghsymbol.cc
-	decompile/slghpatexpress.cc
-	decompile/slghpattern.cc
-	decompile/semantics.cc
-	decompile/context.cc
-	decompile/filemanage.cc
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/sleigh.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/pcodeparse.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/pcodecompile.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/sleighbase.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/slghsymbol.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/slghpatexpress.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/slghpattern.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/semantics.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/context.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/slaformat.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/compression.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/filemanage.cc"
 )
 
 set(GHIDRA_CORE_SOURCES
-	decompile/xml.tab.cpp
-	decompile/space.cc
-	decompile/float.cc
-	decompile/address.cc
-	decompile/pcoderaw.cc
-	decompile/translate.cc
-	decompile/opcodes.cc
-	decompile/globalcontext.cc
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/xml.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/marshal.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/space.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/float.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/address.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/pcoderaw.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/translate.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/opcodes.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/globalcontext.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/crc32.cc"
 )
 
 set(GHIDRA_LIBSLA_NAMES
-	decompile/loadimage.cc
-	decompile/memstate.cc
-	decompile/emulate.cc
-	decompile/opbehavior.cc
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/loadimage.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/memstate.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/emulate.cc"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/opbehavior.cc"
 )
 
+set(GHIDRA_ZLIB_SOURCES
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib/adler32.c"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib/deflate.c"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib/inffast.c"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib/inflate.c"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib/inftrees.c"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib/trees.c"
+	"${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/zlib/zutil.c"
+)
+
+set(GHIDRADEC_REQUIRED_DECOMPILER_SOURCES
+	${GHIDRA_SLEIGH_SOURCES}
+	${GHIDRA_CORE_SOURCES}
+	${GHIDRA_LIBSLA_NAMES}
+	${GHIDRA_ZLIB_SOURCES}
+)
+foreach(_ghidradec_required_source IN LISTS GHIDRADEC_REQUIRED_DECOMPILER_SOURCES)
+	if(NOT EXISTS "${_ghidradec_required_source}")
+		message(FATAL_ERROR "Missing Ghidra decompiler source ${_ghidradec_required_source}. Run `python tools/deps.py ensure-ghidra-sources` before configuring, or configure with -DGHIDRADEC_REFRESH_GHIDRA_SOURCES=ON -DGHIDRA_DECOMPILER_CPP_DIR=<path>.")
+	endif()
+endforeach()
+
 # GhidraDec idaplugin libs.
-add_library(idaplugin32 SHARED ${IDAPLUGIN_SOURCES} ${GHIDRA_SLEIGH_SOURCES} ${GHIDRA_CORE_SOURCES} ${GHIDRA_LIBSLA_NAMES})
-add_library(idaplugin64 SHARED ${IDAPLUGIN_SOURCES} ${GHIDRA_SLEIGH_SOURCES} ${GHIDRA_CORE_SOURCES} ${GHIDRA_LIBSLA_NAMES})
+set(GHIDRADEC_PLUGIN_TARGETS)
 
-target_compile_definitions(idaplugin64 PUBLIC __EA64__)
+function(ghidradec_add_idaplugin TARGET_NAME EA_MODE IDA_LIBRARY OUTPUT_NAME)
+	add_library(${TARGET_NAME} SHARED ${IDAPLUGIN_SOURCES} ${GHIDRA_SLEIGH_SOURCES} ${GHIDRA_CORE_SOURCES} ${GHIDRA_LIBSLA_NAMES} ${GHIDRA_ZLIB_SOURCES})
+	target_compile_options(${TARGET_NAME} PRIVATE
+		$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-include>
+		$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:cstdint>
+	)
+	if(UNIX AND NOT APPLE)
+		target_compile_options(${TARGET_NAME} PRIVATE
+			$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wno-error>
+			$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wno-sign-compare>
+			$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wno-unused-function>
+			$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wno-comment>
+		)
+		set_source_files_properties(src/decompiler.cpp src/sleighinterface.cpp PROPERTIES COMPILE_OPTIONS "-O1")
+	endif()
+	if(EA_MODE EQUAL 64)
+		target_compile_definitions(${TARGET_NAME} PUBLIC __EA64__)
+	endif()
 
-target_link_libraries(idaplugin32 retdec jsoncpp ${idasdk_ea32})
-target_link_libraries(idaplugin64 retdec jsoncpp ${idasdk_ea64})
+	target_link_libraries(${TARGET_NAME} retdec jsoncpp "${IDA_LIBRARY}")
+	if(WIN32)
+		# shlwapi.dll for PathRemoveFileSpec() used in utilsl/filesystem_path.h
+		target_link_libraries(${TARGET_NAME} shlwapi)
+	endif()
+	if(MSYS)
+		target_link_libraries(${TARGET_NAME} ws2_32)
+	endif()
 
-if(WIN32)
-	# shlwapi.dll for PathRemoveFileSpec() used in utilsl/filesystem_path.h
-	target_link_libraries(idaplugin32 shlwapi)
-	target_link_libraries(idaplugin64 shlwapi)
+	set_target_properties(${TARGET_NAME} PROPERTIES PREFIX "" OUTPUT_NAME "${OUTPUT_NAME}")
+	if(IDA_SDK_DIR32)
+		if(EA_MODE EQUAL 32)
+			set_target_properties(${TARGET_NAME} PROPERTIES SUFFIX ".plw")
+		else()
+			# ghidradec64 should be renamed after build to ghidradec, but lib and exp cannot conflict.
+			set_target_properties(${TARGET_NAME} PROPERTIES SUFFIX ".p64")
+		endif()
+	endif()
+
+	if(GHIDRADEC_AUTO_DEPLOY)
+		if(GHIDRADEC_DEPLOY_DIR)
+			add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
+				COMMAND "${CMAKE_COMMAND}"
+					"-DSOURCE=$<TARGET_FILE:${TARGET_NAME}>"
+					"-DDESTINATION=${GHIDRADEC_DEPLOY_DIR}"
+					-P "${CMAKE_CURRENT_LIST_DIR}/cmake/deploy_plugin.cmake"
+				COMMENT "Trying to deploy $<TARGET_FILE_NAME:${TARGET_NAME}> to ${GHIDRADEC_DEPLOY_DIR}"
+				VERBATIM
+			)
+		else()
+			message(WARNING "GHIDRADEC_AUTO_DEPLOY is ON but GHIDRADEC_DEPLOY_DIR is empty; skipping plugin deploy.")
+		endif()
+	endif()
+
+	set(GHIDRADEC_PLUGIN_TARGETS ${GHIDRADEC_PLUGIN_TARGETS} ${TARGET_NAME} PARENT_SCOPE)
+endfunction()
+
+if(idasdk_ea32)
+	message(STATUS "Building IDA EA32 plugin against ${idasdk_ea32}")
+	ghidradec_add_idaplugin(idaplugin32 32 "${idasdk_ea32}" "ghidradec")
+else()
+	message(STATUS "Skipping IDA EA32 plugin; no EA32 SDK library exists for ${CMAKE_SYSTEM_NAME}.")
 endif()
-if(MSYS)
-	target_link_libraries(idaplugin32 ws2_32)
-	target_link_libraries(idaplugin64 ws2_32)
-endif()
 
-set_target_properties(idaplugin32 PROPERTIES PREFIX "")
-set_target_properties(idaplugin64 PROPERTIES PREFIX "")
-set_target_properties(idaplugin32 PROPERTIES OUTPUT_NAME "ghidradec")
-set_target_properties(idaplugin64 PROPERTIES OUTPUT_NAME "ghidradec64")
-if(IDA_SDK_DIR32)
-set_target_properties(idaplugin32 PROPERTIES SUFFIX ".plw")
-#Note: ghidradec64 should be renamed after build to ghidradec - but lib and exp cannot conflict
-set_target_properties(idaplugin64 PROPERTIES SUFFIX ".p64")
+if(idasdk_ea64)
+	message(STATUS "Building IDA EA64 plugin against ${idasdk_ea64}")
+	ghidradec_add_idaplugin(idaplugin64 64 "${idasdk_ea64}" "ghidradec64")
+else()
+	message(STATUS "Skipping IDA EA64 plugin; no EA64 SDK library exists for ${CMAKE_SYSTEM_NAME}.")
 endif()
 
 # Installation.
 if(IDA_PATH)
-	install(TARGETS idaplugin32 idaplugin64
+	install(TARGETS ${GHIDRADEC_PLUGIN_TARGETS}
 		LIBRARY DESTINATION "${IDA_PATH}/plugins/"
 		RUNTIME DESTINATION "${IDA_PATH}/plugins/"
 	)
 endif()
+
+if(WIN32)
+	set(GHIDRADEC_PACKAGE_OS "windows")
+elseif(APPLE)
+	set(GHIDRADEC_PACKAGE_OS "macos")
+elseif(UNIX)
+	set(GHIDRADEC_PACKAGE_OS "linux")
+endif()
+
+function(ghidradec_package_arch_from_library OUT_VAR IDA_LIBRARY)
+	if(IDA_LIBRARY)
+		get_filename_component(_ida_library_dir "${IDA_LIBRARY}" DIRECTORY)
+		get_filename_component(_ida_library_dir_name "${_ida_library_dir}" NAME)
+		string(TOLOWER "${_ida_library_dir_name}" _ida_library_dir_name_lower)
+		if(_ida_library_dir_name_lower MATCHES "^(x64|x86|arm64|arm)_")
+			set(_arch "${CMAKE_MATCH_1}")
+		endif()
+	endif()
+
+	if(NOT _arch)
+		if(WIN32 AND CMAKE_GENERATOR_PLATFORM)
+			set(_arch "${CMAKE_GENERATOR_PLATFORM}")
+		else()
+			set(_arch "${CMAKE_SYSTEM_PROCESSOR}")
+		endif()
+		string(TOLOWER "${_arch}" _arch)
+		if(_arch STREQUAL "amd64" OR _arch STREQUAL "x86_64")
+			set(_arch "x64")
+		elseif(_arch STREQUAL "win32" OR _arch MATCHES "^(i[3-6]86)$")
+			set(_arch "x86")
+		elseif(_arch STREQUAL "aarch64")
+			set(_arch "arm64")
+		endif()
+	endif()
+
+	set(${OUT_VAR} "${_arch}" PARENT_SCOPE)
+endfunction()
+
+if(idasdk_ea64)
+	ghidradec_package_arch_from_library(GHIDRADEC_PACKAGE_ARCH "${idasdk_ea64}")
+else()
+	ghidradec_package_arch_from_library(GHIDRADEC_PACKAGE_ARCH "${idasdk_ea32}")
+endif()
+
+set(GHIDRADEC_PACKAGE_EA_MODES)
+if(idasdk_ea32)
+	list(APPEND GHIDRADEC_PACKAGE_EA_MODES "ea32")
+endif()
+if(idasdk_ea64)
+	list(APPEND GHIDRADEC_PACKAGE_EA_MODES "ea64")
+endif()
+list(JOIN GHIDRADEC_PACKAGE_EA_MODES "-" GHIDRADEC_PACKAGE_EA_SUFFIX)
+
+set(GHIDRADEC_PACKAGE_ROOT "${CMAKE_BINARY_DIR}/artifacts")
+set(GHIDRADEC_PACKAGE_NAME "ghidradec-ida${GHIDRADEC_IDA_VERSION}-${GHIDRADEC_PACKAGE_OS}-${GHIDRADEC_PACKAGE_ARCH}-${GHIDRADEC_PACKAGE_EA_SUFFIX}")
+set(GHIDRADEC_PACKAGE_DIR "${GHIDRADEC_PACKAGE_ROOT}/${GHIDRADEC_PACKAGE_NAME}")
+file(MAKE_DIRECTORY "${GHIDRADEC_PACKAGE_ROOT}")
+set(GHIDRADEC_PACKAGE_COPY_COMMANDS)
+foreach(_plugin_target IN LISTS GHIDRADEC_PLUGIN_TARGETS)
+	list(APPEND GHIDRADEC_PACKAGE_COPY_COMMANDS
+		COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:${_plugin_target}>" "${GHIDRADEC_PACKAGE_DIR}/plugins"
+	)
+endforeach()
+
+add_custom_target(package_plugins
+	DEPENDS ${GHIDRADEC_PLUGIN_TARGETS}
+	COMMAND ${CMAKE_COMMAND} -E rm -rf "${GHIDRADEC_PACKAGE_DIR}"
+	COMMAND ${CMAKE_COMMAND} -E make_directory "${GHIDRADEC_PACKAGE_DIR}/plugins"
+	COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/LICENSE" "${GHIDRADEC_PACKAGE_DIR}"
+	${GHIDRADEC_PACKAGE_COPY_COMMANDS}
+	COMMAND ${CMAKE_COMMAND} -E tar "cf" "${GHIDRADEC_PACKAGE_ROOT}/${GHIDRADEC_PACKAGE_NAME}.zip" --format=zip "${GHIDRADEC_PACKAGE_NAME}"
+	WORKING_DIRECTORY "${GHIDRADEC_PACKAGE_ROOT}"
+	COMMENT "Packaging ${GHIDRADEC_PACKAGE_NAME}.zip"
+)

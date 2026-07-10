@@ -1,0 +1,5158 @@
+/**
+ * @file idaplugin/decompiler.cpp
+ * @brief Module contains classes/methods dealing with program decompilation.
+ * @copyright (c) 2019 Gregory Morse, licensed under the MIT license
+ */
+
+//linux build test - need C++14 however
+//AWS: sudo yum -y groupinstall "Development Tools"
+//g++ -std=c++1y -m64 -I include -I . -D__IDP__ -D__PLUGIN__ -DNO_OBSOLETE_FUNCS -D__X64__ -D__LINUX__ -fpermissive GhidraDecIface.cpp
+//relative registers?
+//graph AST view - need to return the full XML info or some custom graph data structure?
+
+#define _CRT_SECURE_NO_WARNINGS
+#include <algorithm>
+#include <cctype>
+#include <cstdint>
+#include <cstring>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <set>
+#include <sstream>
+#include <stack>
+#include <memory>
+
+#include "retdec/utils/os.h"
+#include "code_viewer.h"
+#include "decompiler.h"
+#include "plugin_config.h"
+#include <fixup.hpp>
+#include <entry.hpp>
+#include <segment.hpp>
+#include "sleighinterface.h"
+#if !defined(OS_WINDOWS)
+//cpp -dM <<<'' | grep 'FLT_'
+#define FLT_DECIMAL_DIG __FLT_DECIMAL_DIG__
+#define DBL_DECIMAL_DIG __DBL_DECIMAL_DIG__
+#endif
+
+#define min(x, y) ((x <= y) ? (x) : (y))
+
+using namespace retdec;
+
+namespace idaplugin {
+	static constexpr char GHIDRADEC_COLOR_TYPE = COLOR_KEYWORD;
+	static constexpr char GHIDRADEC_COLOR_FUNCTION = COLOR_CNAME;
+	static constexpr char GHIDRADEC_COLOR_GLOBAL = COLOR_DNAME;
+	static constexpr char GHIDRADEC_COLOR_LOCAL = COLOR_LOCNAME;
+	static constexpr char GHIDRADEC_COLOR_PARAM = COLOR_REG;
+	static constexpr char GHIDRADEC_COLOR_STRING = COLOR_DSTR;
+	static constexpr char GHIDRADEC_COLOR_CHAR = COLOR_DCHAR;
+
+	static bool ghidradec_is_identifier(const std::string& str)
+	{
+		if (str.empty())
+			return false;
+		unsigned char first = static_cast<unsigned char>(str[0]);
+		if (!(std::isalpha(first) || str[0] == '_'))
+			return false;
+		for (size_t i = 1; i < str.size(); ++i)
+		{
+			unsigned char ch = static_cast<unsigned char>(str[i]);
+			if (!(std::isalnum(ch) || str[i] == '_'))
+				return false;
+		}
+		return true;
+	}
+
+	static bool ghidradec_is_c_keyword(const std::string& str)
+	{
+		static const std::set<std::string> keywords = {
+			"auto", "break", "case", "char", "const", "continue", "default",
+			"do", "double", "else", "enum", "extern", "float", "for", "goto",
+			"if", "inline", "int", "long", "register", "restrict", "return",
+			"short", "signed", "sizeof", "static", "struct", "switch",
+			"typedef", "union", "unsigned", "void", "volatile", "while",
+			"bool", "true", "false", "class", "namespace", "new", "delete",
+			"this", "operator"
+		};
+		return keywords.find(str) != keywords.end();
+	}
+
+	static bool ghidradec_is_builtin_type_name(const std::string& str)
+	{
+		static const std::set<std::string> types = {
+			"undefined", "undefined1", "undefined2", "undefined3",
+			"undefined4", "undefined5", "undefined6", "undefined7",
+			"undefined8", "byte", "sbyte", "word", "sword", "dword",
+			"sdword", "qword", "sqword", "uint", "int", "uint1", "uint2",
+			"uint3", "uint4", "uint5", "uint6", "uint7", "uint8",
+			"int1", "int2", "int3", "int4", "int5", "int6", "int7",
+			"int8", "ulong", "long", "ulonglong", "longlong", "float",
+			"double", "longdouble", "char", "wchar_t", "wchar16",
+			"wchar32", "bool", "code"
+		};
+		return types.find(str) != types.end();
+	}
+
+	static bool ghidradec_is_known_clang_color(const std::string& color)
+	{
+		static const std::set<std::string> colors = {
+			"keyword", "comment", "type", "funcname", "var",
+			"const", "param", "global"
+		};
+		return colors.find(color) != colors.end();
+	}
+
+	static void ghidradec_infer_token_color(
+		std::string& color,
+		const std::string& type,
+		const std::string& str,
+		RdGlobalInfo* di)
+	{
+		if (ghidradec_is_known_clang_color(color))
+			return;
+
+		color.clear();
+		if (type == "funcname")
+			color = "funcname";
+		else if (type == "variable")
+			color = "var";
+		else if (type == "type")
+			color = "type";
+		else if (type == "syntax" || type == "op")
+		{
+			if (ghidradec_is_c_keyword(str))
+				color = "keyword";
+			else if (ghidradec_is_builtin_type_name(str))
+				color = "type";
+			else if (di != nullptr && di->configDB.functions.hasFunction(str))
+				color = "funcname";
+			else if (di != nullptr && di->configDB.globals.getObjectByName(str) != nullptr)
+				color = "global";
+			else if (ghidradec_is_identifier(str))
+				color = "var";
+		}
+	}
+
+	//types depend on types - circular only through structure resolved by forward declarations
+	//function declarations depend on types
+	//data depends on types and other data or functions due to pointers - circular resolved by extern keyword
+	//function definitions depend on types and data - circular resolved by function declaration
+	//add core types 
+
+	//problems in following table with calculation of pointer sizes - default/near/far
+	;
+	/*const size_t sizeTable[] = { //-1 means unknown/not allowed/need to parse for more information
+-1,	0,  sizeof(__int8), sizeof(__int16), sizeof(__int32), sizeof(__int64), 16, inf.cc.size_i,
+inf.cc.size_b,          sizeof(float),                      ph.max_ptr_size() - ph.segreg_size, -1, -1, -1,            -1, -1,
+
+2,  1,  sizeof(__int8), sizeof(__int16), sizeof(__int32), sizeof(__int64), 16, inf.cc.size_i,
+1,                      sizeof(double),                     ph.max_ptr_size() - ph.segreg_size, -1, -1, -1,            -1, -1,
+
+8,  4,  sizeof(__int8), sizeof(__int16), sizeof(__int32), sizeof(__int64), 16, inf.cc.size_i,
+inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),                  -1, -1, inf.cc.size_e, -1, -1,
+
+-1, 16, sizeof(char),   -1,              -1,              -1,              -1, ph.segreg_size,
+4,                      ph.use_tbyte() ? ph.tbyte_size : 2, -1,                                 -1, -1, -1,            -1, -1 };*/
+	template <class T>
+	std::string to_string(T t, std::ios_base& (*f)(std::ios_base&))
+	{
+		std::ostringstream oss;
+		oss << f << t;
+		return oss.str();
+	}
+
+	bool startsWith(const std::string& value, const char* prefix)
+	{
+		const size_t len = std::strlen(prefix);
+		return value.size() >= len && value.compare(0, len, prefix) == 0;
+	}
+
+	void makeUnknownFunctionPrototype(FuncProtoInfo& func)
+	{
+		func = FuncProtoInfo{};
+		func.extraPop = -1;
+		func.model = "unknown";
+		func.retType.addr.size = 0;
+		func.retType.pi.ti.push_back(TypeInfo{ "void", 0, "void" });
+	}
+
+	bool isRuntimeOrLoaderFunctionName(const std::string& name)
+	{
+		if (name.empty()) return false;
+		std::string normalized = name;
+		if (!normalized.empty() && normalized[0] == '.')
+			normalized.erase(0, 1);
+		std::string helperName = normalized;
+		size_t suffixStart = helperName.find_last_of('_');
+		if (suffixStart != std::string::npos && suffixStart + 1 < helperName.size()) {
+			bool numericSuffix = true;
+			for (size_t i = suffixStart + 1; i < helperName.size(); i++) {
+				if (!std::isdigit(static_cast<unsigned char>(helperName[i]))) {
+					numericSuffix = false;
+					break;
+				}
+			}
+			if (numericSuffix)
+				helperName.erase(suffixStart);
+		}
+		if (normalized.find(".plt_call.") != std::string::npos || startsWith(normalized, "plt_call."))
+			return true;
+		static const char* const prefixes[] = {
+			"__libc_csu_",
+			"__do_global_",
+			"__x86.get_pc_thunk",
+			"__x86_",
+			"j_",
+			"nullsub_",
+		};
+		for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+			if (startsWith(normalized, prefixes[i]) || startsWith(helperName, prefixes[i])) return true;
+		}
+		static const char* const exact[] = {
+			"_start",
+			"_init",
+			"_fini",
+			"init_proc",
+			"term_proc",
+			"call_gmon_start",
+			"frame_dummy",
+			"deregister_tm_clones",
+			"register_tm_clones",
+			"__do_global_dtors_aux",
+			"__do_global_ctors_aux",
+			"__libc_start_main",
+			"__stack_chk_fail",
+		};
+		for (size_t i = 0; i < sizeof(exact) / sizeof(exact[0]); i++) {
+			if (normalized == exact[i] || helperName == exact[i]) return true;
+		}
+		return false;
+	}
+
+	bool shouldSkipAllDecompilationFunction(IdaCallback* cb, func_t* f, const std::string& name,
+		std::string& reason, bool skipRuntimeHelpers = true)
+	{
+		if (f == nullptr) {
+			reason = "missing function metadata";
+			return true;
+		}
+		if (cb->imports.find(f->start_ea) != cb->imports.end()) {
+			reason = "import";
+			return true;
+		}
+		if ((f->flags & FUNC_LIB) != 0) {
+			reason = "library function";
+			return true;
+		}
+		if ((f->flags & FUNC_THUNK) != 0) {
+			reason = "thunk";
+			return true;
+		}
+		if (f->end_ea <= f->start_ea) {
+			reason = "empty range";
+			return true;
+		}
+		if (skipRuntimeHelpers && isRuntimeOrLoaderFunctionName(name)) {
+			reason = "runtime or loader helper";
+			return true;
+		}
+		return false;
+	}
+
+	std::vector<RangeInfo> getFunctionRanges(func_t* f, const std::string& space);
+
+	void addAllDecompilationFunction(IdaCallback* cb, func_t* f, const std::string& name)
+	{
+		cb->allFuncs.push_back(f->start_ea);
+		cb->allFuncNames[f->start_ea] = name;
+		cb->allFuncRanges[f->start_ea] = getFunctionRanges(f, "ram");
+		cb->allFuncNoReturn[f->start_ea] = f != nullptr && !f->does_return();
+	}
+
+	std::vector<RangeInfo> getFunctionRanges(func_t* f, const std::string& space)
+	{
+		std::vector<RangeInfo> ranges;
+		if (f == nullptr) return ranges;
+		rangeset_t rangeset;
+		if (get_func_ranges(&rangeset, f) != BADADDR) {
+			for (rangeset_t::iterator it = rangeset.begin(); it != rangeset.end(); it++) {
+				if (it->end_ea > it->start_ea) {
+					ranges.push_back(RangeInfo{ space, it->start_ea, it->end_ea - 1 });
+				}
+			}
+		}
+		return ranges;
+	}
+
+	struct FrameMemberInfo
+	{
+		std::string name;
+		uval_t soff = 0;
+		asize_t size = 0;
+		tinfo_t type;
+		bool hasType = false;
+	};
+
+	bool getFrameMembers(func_t* f, std::vector<FrameMemberInfo>& out)
+	{
+		out.clear();
+		if (f == nullptr || f->frame == BADNODE) return false;
+#if IDA_SDK_VERSION >= 850
+		tinfo_t frame;
+		udt_type_data_t udt;
+		if (!get_func_frame(&frame, f) || !frame.get_udt_details(&udt)) return false;
+		out.reserve(udt.size());
+		for (const udm_t& member : udt) {
+			FrameMemberInfo info;
+			info.name = member.name.c_str();
+			info.soff = (uval_t)(member.offset / 8);
+			info.size = (asize_t)((member.size + 7) / 8);
+			info.type = member.type;
+			info.hasType = !member.type.empty();
+			if (info.size == 0 && info.hasType) info.size = (asize_t)member.type.get_size();
+			out.push_back(info);
+		}
+#else
+		struc_t* frame = get_frame(f);
+		if (frame == nullptr) return false;
+		out.reserve(frame->memqty);
+		for (uint32 i = 0; i < frame->memqty; i++) {
+			FrameMemberInfo info;
+			info.name = get_member_name(frame->members[i].id).c_str();
+			info.soff = frame->members[i].get_soff();
+			info.size = get_member_size(&frame->members[i]);
+			info.hasType = frame->members[i].has_ti() && get_tinfo(&info.type, frame->members[i].id);
+			out.push_back(info);
+		}
+#endif
+		return true;
+	}
+
+	asize_t getFrameArgsSize(func_t* f)
+	{
+		std::vector<FrameMemberInfo> members;
+		if (!getFrameMembers(f, members)) return 0;
+		const ea_t firstarg = frame_off_args(f);
+		asize_t end = 0;
+		for (const FrameMemberInfo& member : members) {
+			const asize_t memberEnd = (asize_t)(member.soff + member.size);
+			if (memberEnd > end) end = memberEnd;
+		}
+		return end > firstarg ? end - firstarg : 0;
+	}
+
+	unsigned long long addrToOffset(std::string space, unsigned long long offset)
+	{
+		if (space == "ram") return offset;
+		//else if (space == "stack")
+		//else if (space == "register")
+		//else if (space == "join")
+		else return 0;
+	}
+
+	std::string getMetaTypeInfo(const tinfo_t& ti)
+	{
+		if (ti.is_void()) return "void";
+		else if (ti.is_char() || is_type_int(ti.get_realtype()) && ti.is_signed()) return "int";
+		else if (is_type_int(ti.get_realtype())) return "uint"; //is_unsigned() || get_sign() == no_sign
+		else if (ti.is_floating()) return "float";
+		else if (ti.is_bool()) return "bool";
+		else if (ti.is_udt()) return "struct"; //ti.is_struct() || ti.is_union()
+		else if (ti.is_array()) return "array";
+		else if (ti.is_func() || ti.is_funcptr()) return "code";
+		else if (ti.is_ptr() /*|| ti.is_array() && ti.get_size() == 0*/) return "ptr";
+		else if (ti.is_enum()) return ti.is_signed() ? "int" : "uint"; //"int" if BTE_SDEC?
+		else return "unknown";
+	}
+	bool isX86()
+	{
+		std::string procName = inf_procname;
+		return procName == "8086" ||
+			procName == "8086r" ||
+			procName == "8086p" ||
+			procName == "k62" ||
+			procName == "athlon" ||
+			procName == "80386p"
+			|| procName == "80386r"
+			|| procName == "80486p"
+			|| procName == "80486r"
+			|| procName == "80586p"
+			|| procName == "80586r"
+			|| procName == "80686p"
+			|| procName == "p2"
+			|| procName == "p3"
+			|| procName == "p4"
+			|| procName == "metapc";
+	}
+	std::string ccToStr(cm_t c, int callMethod, bool bInit)
+	{
+		//if (!bInit && c == inf_cc_cm) return "default"; //&& ccToStr(inf_cc_cm, is_code_far(inf_cc_cm) ? FTI_FARCALL : FTI_NEARCALL, true) == modelDefault //if this default is not used its meaningless here
+		if (!inf_is_32bit() && !inf_is_64bit() && isX86() && ((c & CM_CC_MASK) == CM_CC_STDCALL || (c & CM_CC_MASK) == CM_CC_PASCAL || (c & CM_CC_MASK) == CM_CC_CDECL)) {//16-bit x86 code needs right model
+			std::string model;
+			if ((c & CM_CC_MASK) == CM_CC_STDCALL || (c & CM_CC_MASK) == CM_CC_PASCAL) model = "__stdcall";
+			else model = "__cdecl";
+			model += "16"; // && is_code_far(inf_cc_cm)
+			model += (callMethod == FTI_FARCALL || callMethod == FTI_DEFCALL && is_code_far(c)) ? "far" : "near"; //|| (c & (CM_MASK | CM_M_MASK)) == (CM_UNKNOWN | CM_M_NN)
+			return model;
+		}
+		if (!isX86()) {
+			switch (c & CM_CC_MASK) {
+			case CM_CC_UNKNOWN:
+				return "unknown";
+			default:
+				return "default";
+			}
+		}
+		//if (!bInit && (c & CM_CC_MASK) == (inf_cc_cm & CM_CC_MASK)) return "default";
+		switch (c & CM_CC_MASK) {
+		case CM_CC_FASTCALL: return !inf_is_32bit() && !inf_is_64bit() ? "__regcall" : "__fastcall"; //return "__vectorcall"; - extension to fastcall
+		case CM_CC_STDCALL: return "__stdcall";
+		case CM_CC_VOIDARG: return "__cdecl";
+		case CM_CC_CDECL: return "__cdecl";
+		case CM_CC_THISCALL: return "__thiscall";
+		case CM_CC_PASCAL: return "__stdcall"; // "__pascal";
+		case CM_CC_ELLIPSIS: return "__cdecl";
+		case CM_CC_SPECIAL: return "__cdecl";
+		case CM_CC_SPECIALE: return "__cdecl";
+		case CM_CC_SPECIALP: return "__stdcall";
+		case CM_CC_UNKNOWN: default: return "unknown";
+		}
+	}
+	bool getFuncByGuess(ea_t ea, tinfo_t& ti)
+	{
+		if (get_tinfo(&ti, ea) && ti.is_func()) return true;
+		tinfo_t tryti;
+		if (guess_tinfo(&tryti, ea) != GUESS_FUNC_OK) return false;
+		ti = tryti;
+		return true;
+	}
+	IdaCallback::~IdaCallback() {
+		if (decInt != nullptr) delete decInt;
+		if (sendfp != nullptr) qfclose(sendfp);
+		if (recvfp != nullptr) qfclose(recvfp);
+		if (recfp != nullptr) qfclose(recfp);
+	}
+	int IdaCallback::EnumImportNames(ea_t ea, const char* name, uval_t ord, void* param)
+	{
+		(*((ImportParam*)param)->pImports)[ea] = ImportInfo{ name == nullptr ? "" : name, ord, ((ImportParam*)param)->cur };
+		return 1;
+	}
+	int IdaCallback::regNameToIndexIda(std::string regstr) {
+		int res = decInt->regNameToIndex(regstr);
+		if (res == -1 && *regstr.begin() == '$') {
+			res = decInt->regNameToIndex(regstr.substr(1));
+		}
+		return res;
+	}
+	std::string IdaCallback::arglocToAddr(argloc_t al, unsigned long long* offset, std::vector<SizedAddrInfo>& joins, bool noResolveReg) {
+		if (al.is_ea()) {
+			*offset = al.get_ea();
+			return "ram";
+		} else if (al.is_stkoff()) {
+			*offset = al.stkoff();
+			return "stack";
+		} else if (al.is_scattered()) {
+			scattered_aloc_t scat;
+			for (size_t i = scat.size() - 1; i != -1; i--) { //these appear to be high to low, so need to reverse order here
+				unsigned long long offs;
+				std::vector<SizedAddrInfo> j; //can have a register reg1() as the is_mixed_scattered indicates
+				std::string spc = arglocToAddr(scat[i], &offs, j, false); //all "ram" - certainly join or reg2 would not make sense
+				joins.push_back(SizedAddrInfo{ {spc, scat[i].off}, scat[i].size });
+			}
+			return "join";
+		} else if (al.is_reg1()) {
+			//qstring qs;
+			//get_reg_name(&qs, al.reg1(), size);
+			//al.regoff() == 0; //how to handle register bit offset?
+			bitrange_t bits;
+			const char* regnm = get_reg_info(ph.reg_names[al.reg1()], &bits); //use default processor name
+			reg_info_t ri;
+			parse_reg_name(&ri, regnm == nullptr ? ph.reg_names[al.reg1()] : regnm);
+			qstring qs;
+			get_reg_name(&qs, al.reg1(), ri.size);
+			*offset = noResolveReg ? -1 : regNameToIndexIda(qs.c_str());
+			return "register";
+		} else if (al.is_reg2()) {
+			//qstring qs1, qs2;
+			//get_reg_name(&qs1, al.reg1(), size);
+			//get_reg_name(&qs2, al.reg2(), size);
+			//*offset = regNameToIndexIda(ph.reg_names[al.reg1()]);
+			bitrange_t bits1, bits2;
+			const char* regnm1 = get_reg_info(ph.reg_names[al.reg1()], &bits1),
+				* regnm2 = get_reg_info(ph.reg_names[al.reg2()], &bits2); //use default processor name
+			reg_info_t ri1, ri2;
+			parse_reg_name(&ri1, regnm1 == nullptr ? ph.reg_names[al.reg1()] : regnm1);
+			parse_reg_name(&ri2, regnm2 == nullptr ? ph.reg_names[al.reg2()] : regnm2);
+			qstring qs1, qs2;
+			get_reg_name(&qs1, al.reg1(), ri1.size);
+			get_reg_name(&qs2, al.reg2(), ri2.size);
+			//reg2 is the high value, as in dx for pair dx:ax, so it needs to be added to the join space first
+			joins.push_back(SizedAddrInfo{ {"register", noResolveReg ? -1 : (unsigned long long)regNameToIndexIda(qs2.c_str())}, (unsigned long long)ri2.size });
+			joins.push_back(SizedAddrInfo{ {"register", noResolveReg ? -1 : (unsigned long long)regNameToIndexIda(qs1.c_str())}, (unsigned long long)ri1.size });
+			return "join";
+		} else if (al.is_rrel()) {
+			*offset = al.get_rrel().off; //some type of spacebase
+			bitrange_t bits;
+			const char* regnm = get_reg_info(ph.reg_names[al.get_rrel().reg], &bits); //use default processor name
+			reg_info_t ri;
+			parse_reg_name(&ri, regnm == nullptr ? ph.reg_names[al.get_rrel().reg] : regnm);
+			qstring qs;
+			get_reg_name(&qs, al.get_rrel().reg, ri.size);
+			int regidx = regNameToIndexIda(ph.reg_names[al.get_rrel().reg]);			
+			return decInt->regToSpacebase(regidx);
+		}
+		//al.is_custom() || al.is_badloc();
+		*offset = 0;
+		return "ram";
+	}
+	void IdaCallback::launchDecompiler()
+	{
+		qstring protocolLogEnv;
+		const bool explicitProtocolLog = qgetenv("GHIDRADEC_PROTOCOL_LOG", &protocolLogEnv) && !protocolLogEnv.empty();
+		if (PRINT_DEBUG || di->skipParamIdentification || explicitProtocolLog) {
+			std::string protocolLog;
+			if (explicitProtocolLog) {
+				protocolLog = protocolLogEnv.c_str();
+			} else {
+				std::string traceDir = di->workDir;
+				if (!traceDir.empty() && traceDir.back() != '/' && traceDir.back() != '\\')
+					traceDir += "/";
+				protocolLog = traceDir + "ghidradec-protocol.log";
+			}
+			recfp = qfopen(protocolLog.c_str(), "wb");
+			if (PRINT_DEBUG) {
+				std::string traceDir = di->workDir;
+				if (!traceDir.empty() && traceDir.back() != '/' && traceDir.back() != '\\')
+					traceDir += "/";
+				sendfp = qfopen((traceDir + "ghidradec-written.bin").c_str(), "wb");
+				recvfp = qfopen((traceDir + "ghidradec-received.bin").c_str(), "wb");
+			}
+		}
+		runCommand(di->decCmd, "",
+			&di->decompPid, &di->hDecomp, &di->rdHandle, &di->wrHandle,
+			true);
+		qstring launchDelayEnv;
+		if (di->decompPid != 0 &&
+			qgetenv("GHIDRADEC_DECOMPILER_LAUNCH_DELAY_MS", &launchDelayEnv) &&
+			!launchDelayEnv.empty()) {
+			int delayMs = atoi(launchDelayEnv.c_str());
+			if (delayMs > 0) {
+				TRACE_MSG("delaying decompiler protocol for debugger attach, pid="
+					<< std::dec << di->decompPid << ", delayMs=" << delayMs << "\n");
+				qsleep(delayMs);
+			}
+		}
+	}
+	size_t IdaCallback::readDec(void* Buf, size_t MaxCharCount)
+	{		
+		int val = _read(di->rdHandle, Buf, (unsigned int)MaxCharCount);
+		if (val > 0 && recvfp != nullptr) qfwrite(recvfp, Buf, (size_t)val);
+		return val > 0 ? (size_t)val : 0;
+		//return qpipe_read(di->rdHandle, Buf, MaxCharCount);
+	}
+	size_t IdaCallback::writeDec(void const* Buf, size_t MaxCharCount)
+	{
+		int val = _write(di->wrHandle, Buf, (unsigned int)MaxCharCount);
+		if (val > 0 && sendfp != nullptr) qfwrite(sendfp, Buf, (size_t)val);
+		return val > 0 ? (size_t)val : 0;
+		//return qpipe_write(di->wrHandle, Buf, MaxCharCount);
+	}
+	void IdaCallback::protocolRecorder(std::string data, bool bWrite)
+	{
+		if (recfp != nullptr) {
+			std::string s = ((bWrite ? "Sent: " : "Received: ") + data + "\n");
+			qfwrite(recfp, s.c_str(), s.size());
+			qflush(recfp);
+		}
+	}
+	void IdaCallback::terminate()
+	{
+		if (sendfp != nullptr) { qfclose(sendfp); sendfp = nullptr; }
+		if (recvfp != nullptr) { qfclose(recvfp); recvfp = nullptr; }
+		if (recfp != nullptr) { qfclose(recfp); recfp = nullptr; }
+		stopDecompilation(di, false, false, true);
+	}
+	void IdaCallback::getInits(std::vector<InitStateItem>& inits)
+	{
+		//inf_start_ea == ea; inf.start_ss; inf.start_sp;
+		int gpReg = regNameToIndexIda("gp");
+		if (gpReg != -1) {
+			ea_t got = get_name_ea(BADADDR, "_GLOBAL_OFFSET_TABLE_");
+			if (got != BADADDR && inf_max_ea > inf_min_ea) {
+				unsigned long long gpValue = (unsigned long long)got + 0x7ff0ull;
+				unsigned long long gpSize = inf_is_64bit() ? 8ull : 4ull;
+				inits.push_back(InitStateItem{
+					{"ram", (unsigned long long)inf_min_ea},
+					{"ram", (unsigned long long)inf_max_ea},
+					{{"register", (unsigned long long)gpReg}, gpSize},
+					gpValue
+				});
+				TRACE_MSG("Seeded MIPS-style gp tracked register from GOT: gp="
+					<< std::hex << std::showbase << gpValue << std::dec << std::noshowbase << "\n");
+			}
+		}
+		if (isX86() && ph.has_segregs()) { //initialize segment registers for tracking - vital for x86-16
+			//code segment register although a pointless mapping helps track things for Ghidra
+			unsigned long long regtrans = (unsigned long long)regNameToIndexIda(ph.reg_names[ph.reg_code_sreg]);
+			for (int j = 0; j < get_segm_qty(); j++) {
+				segment_t* s = getnseg(j);
+				if (s != nullptr) {
+					qstring qs;
+					if (get_segm_class(&qs, s) != -1 && qs == "CODE") {
+						inits.push_back(InitStateItem{ {"ram", s->start_ea}, {"ram", s->end_ea}, {{"register", regtrans}, (unsigned long)ph.segreg_size}, (unsigned long long)s->sel });
+					}
+				}
+			}
+			for (int i = 0; i <= ph.reg_last_sreg - ph.reg_first_sreg; i++) {
+				regtrans = (unsigned long long)regNameToIndexIda(ph.reg_names[i + ph.reg_first_sreg]);
+				if (regtrans == -1) continue;
+				//this is a much more powerful analysis by the processor engine than the default segregs which now are not used
+				for (size_t k = 0; k < sregRanges[i].size(); k++) {
+					if (sregRanges[i][k].val == -1) continue;
+					//if (out.val == ((1 << (ph.segreg_size * 8)) - 1)) continue;
+					inits.push_back(InitStateItem{ {"ram", sregRanges[i][k].start_ea}, {"ram", sregRanges[i][k].end_ea}, {{"register", regtrans}, (unsigned long)ph.segreg_size}, (unsigned long long)sregRanges[i][k].val });
+				}
+				//if (s->defsr[i] != -1) {
+					//inits.push_back(InitStateItem{ "ram", s->start_ea, "ram", s->end_ea, "register", (unsigned long long)regNameToIndexIda(ph.reg_names[i + ph.reg_first_sreg]), (unsigned long)ph.segreg_size, (unsigned long long)s->defsr[i] });
+				//}
+			}
+		}
+	}
+	std::string IdaCallback::getPcodeInject(int type, std::string name, AddrInfo addr, std::string fixupbase, unsigned long long fixupoffset)
+	{
+		if (type == DecompInterface::CALLMECHANISM_TYPE) {
+			if ((name == "__stdcall16far@@inject_uponreturn" || name == "__cdecl16far@@inject_uponreturn") && addr.space == "ram") {
+				sel_t s;
+				executeOnMainThread([&s, addr]() { s = getseg((ea_t)addr.offset)->sel; }, "segment-selector");
+				return "CS = " + std::to_string(s) + ";";
+			} else return "";
+		} else return "";
+	}
+	void IdaCallback::getCPoolRef(const std::vector<unsigned long long>& refs, CPoolRecord& rec)
+	{
+	}
+#define CACHEPAGESIZE 4096ull
+#define CACHELIMIT 128
+#define CACHECLEANUPAFTER 256
+#define BATCH_SEGMENT_PRELOAD_LIMIT (64ull * 1024ull * 1024ull)
+	bool liveCallbackRegressionMode()
+	{
+		qstring liveCallbacksEnv;
+		return qgetenv("GHIDRADEC_TEST_LIVE_CALLBACKS", &liveCallbacksEnv) &&
+			std::string(liveCallbacksEnv.c_str()) == "1";
+	}
+	void preloadByteCachePage(IdaCallback* cb, ea_t page)
+	{
+		if (cb->byteCache.find(page) != cb->byteCache.end() &&
+			cb->byteCache[page].second.size() >= CACHEPAGESIZE)
+			return;
+		std::vector<unsigned short>& bytes = cb->byteCache[page].second;
+		bytes.clear();
+		bytes.reserve(CACHEPAGESIZE);
+		for (int i = 0; i < CACHEPAGESIZE; i++)
+			bytes.push_back(is_loaded(page + i) ? get_byte(page + i) : 256);
+		cb->byteCache[page].first = cb->cacheCount++;
+	}
+	void preloadByteCacheRange(IdaCallback* cb, ea_t begin, ea_t end)
+	{
+		if (end <= begin)
+			return;
+		ea_t page = begin & (~(CACHEPAGESIZE - 1));
+		ea_t lastPage = (end - 1) & (~(CACHEPAGESIZE - 1));
+		while (page <= lastPage) {
+			preloadByteCachePage(cb, page);
+			if (lastPage - page < CACHEPAGESIZE)
+				break;
+			page += CACHEPAGESIZE;
+		}
+	}
+	void preloadFunctionByteCache(IdaCallback* cb)
+	{
+		for (std::map<ea_t, std::vector<RangeInfo>>::iterator it = cb->allFuncRanges.begin();
+			it != cb->allFuncRanges.end(); ++it) {
+			for (std::vector<RangeInfo>::iterator range = it->second.begin();
+				range != it->second.end(); ++range) {
+				if (range->space == "ram")
+					preloadByteCacheRange(cb, (ea_t)range->beginoffset, (ea_t)(range->endoffset + 1));
+			}
+		}
+	}
+	size_t preloadMappedSegmentByteCache(IdaCallback* cb, unsigned long long maxBytes, bool* limited)
+	{
+		size_t pages = 0;
+		unsigned long long bytes = 0;
+		if (limited != nullptr)
+			*limited = false;
+		for (int i = 0; i < get_segm_qty(); i++) {
+			segment_t* seg = getnseg(i);
+			if (seg == nullptr || seg->end_ea <= seg->start_ea)
+				continue;
+			ea_t page = seg->start_ea & (~(CACHEPAGESIZE - 1));
+			ea_t lastPage = (seg->end_ea - 1) & (~(CACHEPAGESIZE - 1));
+			while (page <= lastPage) {
+				if (bytes + CACHEPAGESIZE > maxBytes) {
+					if (limited != nullptr)
+						*limited = true;
+					return pages;
+				}
+				preloadByteCachePage(cb, page);
+				pages++;
+				bytes += CACHEPAGESIZE;
+				if (lastPage - page < CACHEPAGESIZE)
+					break;
+				page += CACHEPAGESIZE;
+			}
+		}
+		return pages;
+	}
+	void writeBatchDoneMarker(RdGlobalInfo* di)
+	{
+		qstring donePathEnv;
+		if (!qgetenv("GHIDRADEC_BATCH_DONE", &donePathEnv) || donePathEnv.empty())
+			return;
+		std::string donePath = donePathEnv.c_str();
+		FILE* fp = qfopen(donePath.c_str(), "wb");
+		if (fp == nullptr)
+			return;
+		std::string text = std::string("success=") + (di->decompSuccess ? "1" : "0") + "\n";
+		qfwrite(fp, text.c_str(), text.size());
+		qfclose(fp);
+	}
+	int IdaCallback::getBytes(unsigned char* ptr, int size, AddrInfo addr)
+	{
+		int i = 0;
+		if (addr.space == "ram") {
+			qstring batchOutputEnv;
+			const bool batchOutput = !liveCallbackRegressionMode() &&
+				qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
+			if (!batchOutput && byteCache.size() > CACHECLEANUPAFTER) {
+				for (std::map<ea_t, std::pair<unsigned long long, std::vector<unsigned short>>>::iterator it = byteCache.begin(); it != byteCache.end();) {
+					if (it->second.first < cacheCount - CACHELIMIT) it = byteCache.erase(it);
+					else it++;
+				}
+			}
+			//paging strategy for easy lookup - just like the processor utilizes
+			bool bFetch = false;
+			unsigned long long page = addr.offset & (~(CACHEPAGESIZE - 1)),
+				firstPage = page,
+				pgoffs = addr.offset & (CACHEPAGESIZE - 1);
+			do {
+				if (byteCache.find((ea_t)page) == byteCache.end()) {
+					if (batchOutput) {
+						protocolRecorder("getBytes batchCacheMissNoFetch addr=\"ram:0x" +
+							to_string(addr.offset, std::hex) + "\" size=\"" +
+							std::to_string(size) + "\" page=\"0x" +
+							to_string(page, std::hex) + "\"", true);
+						break;
+					}
+					bFetch = true;
+					break;
+				}
+				page += CACHEPAGESIZE;
+			} while (page < addr.offset + size);
+			if (bFetch) executeOnMainThread([this, size, addr]() {
+					unsigned long long page = addr.offset & (~(CACHEPAGESIZE - 1));
+					do {
+						for (int i = 0; i < CACHEPAGESIZE; i++) { //i = offset & (CACHEPAGESIZE - 1);
+							byteCache[(ea_t)page].second.push_back(is_loaded((ea_t)page + i) ? get_byte((ea_t)page + i) : 256);
+						}
+						page += CACHEPAGESIZE;
+					} while (page < addr.offset + size);
+				}, "byte-cache-fetch");
+			page = addr.offset & (~(CACHEPAGESIZE - 1));
+			pgoffs = addr.offset & (CACHEPAGESIZE - 1);
+			std::map<ea_t, std::pair<unsigned long long, std::vector<unsigned short>>>::iterator cacheIt =
+				byteCache.find((ea_t)page);
+			if (cacheIt == byteCache.end() || cacheIt->second.second.size() < CACHEPAGESIZE) {
+				protocolRecorder("getBytes cacheMissAfterFetch addr=\"ram:0x" +
+					to_string(addr.offset, std::hex) + "\" size=\"" +
+					std::to_string(size) + "\"", true);
+				memset(ptr, 0, size);
+				return 0;
+			}
+			cacheIt->second.first = cacheCount++;
+			for (i = 0; i < size; i++) {
+				if (pgoffs == CACHEPAGESIZE) {
+					page += CACHEPAGESIZE;
+					pgoffs = 0;
+					cacheIt = byteCache.find((ea_t)page);
+					if (cacheIt == byteCache.end() || cacheIt->second.second.size() < CACHEPAGESIZE)
+						break;
+					cacheIt->second.first = cacheCount++;
+				}
+				if ((cacheIt->second.second[(size_t)pgoffs] & 256) == 0) ptr[i] = (unsigned char)cacheIt->second.second[(size_t)pgoffs];
+				else break; //could do something like 0x90 for NOP on x86 - but could be data request
+				pgoffs++;
+			}
+		}
+		if (i != size) memset(ptr + i, 0, size - i);
+		//msg("%0X%0X%0X%0X %0X%0X%0X%0X\n", ptr[0], ptr[1], ptr[2], ptr[3], ptr[4], ptr[5], ptr[6], ptr[7]);
+		return i;
+	}
+	std::string sanitizeIdaSymbolName(std::string str)
+	{
+		while (!str.empty() && str[0] == '.')
+			str.erase(str.begin());
+		std::replace(str.begin(), str.end(), '.', '_');
+		std::replace(str.begin(), str.end(), '@', '_');
+		return str;
+	}
+	bool isKnownNoReturnFunctionName(std::string name)
+	{
+		name = sanitizeIdaSymbolName(name.substr(0, name.find("(", 0)));
+		return name == "exit" || name == "_exit" || name == "_Exit" ||
+			name == "abort" || name == "__stack_chk_fail" ||
+			name == "__assert_fail" || name == "__assert_perror_fail" ||
+			name == "__fortify_fail" || name == "__chk_fail" ||
+			name == "__libc_fatal" || name == "__libc_message" ||
+			name == "__malloc_assert" || name == "_dl_signal_error";
+	}
+	void markCodeTypeNoReturn(std::vector<TypeInfo>& typeChain)
+	{
+		for (std::vector<TypeInfo>::iterator it = typeChain.begin(); it != typeChain.end(); ++it) {
+			if (it->metaType == "code")
+				it->funcInfo.isNoReturn = true;
+		}
+	}
+	bool applyKnownNoReturnPointerType(const std::string& dataName, unsigned long long ptrSize,
+		std::vector<TypeInfo>& typeChain)
+	{
+		const std::string suffix = "_ptr";
+		std::string targetName = dataName;
+		if (!isKnownNoReturnFunctionName(targetName)) {
+			if (dataName.size() <= suffix.size() ||
+				dataName.compare(dataName.size() - suffix.size(), suffix.size(), suffix) != 0)
+				return false;
+			targetName = dataName.substr(0, dataName.size() - suffix.size());
+		}
+		if (!isKnownNoReturnFunctionName(targetName))
+			return false;
+		FuncProtoInfo func;
+		makeUnknownFunctionPrototype(func);
+		func.isNoReturn = true;
+		typeChain.clear();
+		typeChain.push_back(TypeInfo{ "", ptrSize, "ptr", false, false, false });
+		typeChain.push_back(TypeInfo{ "code", 1, "code", false, false, false, 0, {}, {}, func });
+		return true;
+	}
+	std::string makeFallbackSymbolName(const std::string& prefix, unsigned long long offset)
+	{
+		return prefix + "_" + to_string(offset, std::hex);
+	}
+	std::string getSymbolName(unsigned long long offset, const std::string& fallbackPrefix = "DAT")
+	{
+		std::string str = sanitizeIdaSymbolName(get_name((ea_t)offset).c_str());
+		if (str.size() == 0) {
+			str = makeFallbackSymbolName(fallbackPrefix, offset);
+		}
+		return str;
+	}
+	bool isGenericCodeLabelName(const std::string& name)
+	{
+		return startsWith(name, "loc_") || startsWith(name, "sub_");
+	}
+	bool isCallableOrphanCodeLabel(ea_t ea, flags_t fl)
+	{
+		if (!is_code(fl) || get_func(ea) != nullptr)
+			return false;
+		std::string name = sanitizeIdaSymbolName(get_name(ea).c_str());
+		return !name.empty() && !isGenericCodeLabelName(name);
+	}
+	void makeUnknownFunctionMappedSymbol(MappedSymbolInfo& msi, ea_t ea, const std::string& name, bool noReturn)
+	{
+		msi.kind = KIND_FUNCTION;
+		msi.entryPoint = ea;
+		msi.size = 1;
+		msi.readonly = true;
+		msi.volatil = false;
+		msi.name = name;
+		makeUnknownFunctionPrototype(msi.func);
+		msi.func.isNoReturn = noReturn;
+	}
+	void getMemoryInfo(unsigned long long offset, bool* readonly, bool* volatil)
+	{
+		*volatil = !is_mapped((ea_t)offset);
+		segment_t* s = getseg((ea_t)offset);
+		//(s->type & SEG_DATA) != 0;
+		*readonly = s != nullptr && (s->perm & SEGPERM_WRITE) == 0 && (s->perm & SEGPERM_MAXVAL) != 0;
+		xrefblk_t xr;
+		if (xr.first_to((ea_t)offset, XREF_ALL)) {
+			do {
+				if ((xr.type & XREF_MASK) == dr_W) {
+					*readonly = false;
+				}
+			} while (xr.next_to());
+		}
+	}
+	void IdaCallback::getFuncInfo(AddrInfo addr, func_t* f, std::string& name, FuncProtoInfo& func)
+	{
+		//get_ea_name(&qs, offset, GN_VISIBLE | GN_DEMANGLED | GN_SHORT);
+		if (imports.find((ea_t)addr.offset) != imports.end() && imports[(ea_t)addr.offset].name != "") {
+			name = demangle_name(imports[(ea_t)addr.offset].name.c_str(), MNG_SHORT_FORM).c_str();
+			if (name.size() == 0) name = imports[(ea_t)addr.offset].name;
+		}
+		if (name.size() == 0) name = get_short_name((ea_t)addr.offset, GN_STRICT).c_str();
+		if (name.size() != 0) name = sanitizeIdaSymbolName(name.substr(0, name.find("(", 0)));
+		else name = getSymbolName(addr.offset, "sub");
+		func.isInline = false;
+		bool bFuncTinfo = getFuncTypeInfoByAddr(f != nullptr ? f->start_ea : (ea_t)addr.offset, func);
+		func.isNoReturn = (f != nullptr) ? !f->does_return() : (bFuncTinfo ? func.isNoReturn : false);// f->flags& FUNC_NORET ? true : false;
+		if (!func.isNoReturn && isKnownNoReturnFunctionName(name))
+			func.isNoReturn = true;
+		//(f->flags & FUNC_USERFAR) != 0
+		//(f->flags & FUNC_LIB) != 0
+		//(f->flags & FUNC_STATICDEF) != 0
+		size_t curArgs = func.syminfo.size();
+		if (f != nullptr) {
+			if (func.model == "unknown") {
+				if (f->argsize == 0) { //|| !f->does_return()
+					func.model = ccToStr((f->flags & FUNC_PURGED_OK) != 0 ? CM_CC_CDECL : CM_CC_UNKNOWN, f->is_far() || (f->flags & FUNC_USERFAR) != 0 ? FTI_FARCALL : FTI_NEARCALL, false);
+				} else { //CM_CC_UNKNOWN is likely better...
+					func.model = ccToStr(isX86() ? CM_CC_STDCALL : CM_CC_UNKNOWN, f->is_far() || (f->flags & FUNC_USERFAR) != 0 ? FTI_FARCALL : FTI_NEARCALL, false);
+				}
+			}
+			if (func.extraPop == -1 && (f->flags & FUNC_PURGED_OK) != 0) func.extraPop = (unsigned long long)f->argsize; //type unknown but have frame so now can calculate
+			if (f->regargs == nullptr) read_regargs(f); //populates regargs, similar to how get_spd or the like with f specified populate stkpts
+			//callregs_t cr;
+			//cr.init_regs(inf_cc_cm);
+			for (int i = 0; i < f->regargqty; i++) { //name can be a nullptr!
+				std::string nm = f->regargs[i].name == nullptr ? "" : f->regargs[i].name;
+				unsigned long long offset;
+				std::vector<TypeInfo> typeChain;
+				unsigned long long size;
+				//func_type_data_t ftd;
+				//if (ti.is_func() && ti.get_func_details(&ftd)) {
+				//callregs_t cr;
+				//ph.get_cc_regs(&cr, get_cc(ftd.get_cc()));
+				if (f->regargs[i].type != nullptr) {
+					tinfo_t ti; //The type information is internally kept as an array of bytes terminated by 0.
+					qtype typeForDeser;
+					typeForDeser.append(f->regargs[i].type);
+					ti.deserialize(get_idati(), &typeForDeser); //will free buffer passed!
+					getType(ti, typeChain, false);
+					size = ti.get_size();
+					qstring qs;
+					if (get_reg_name(&qs, f->regargs[i].reg, (size_t)size) == -1) offset = -1;  //for example 1 byte of DS register will fail
+					else offset = regNameToIndexIda(qs.c_str());
+					if (offset == -1) {
+						bitrange_t bits;
+						const char* regnm = nullptr;
+						regnm = get_reg_info(ph.reg_names[f->regargs[i].reg], &bits); //use default processor name
+						offset = regNameToIndexIda(regnm == nullptr ? ph.reg_names[f->regargs[i].reg] : regnm);
+					}
+				} else {
+					bitrange_t bits;
+					const char* regnm = nullptr;
+					regnm = get_reg_info(ph.reg_names[f->regargs[i].reg], &bits); //use default processor name
+					reg_info_t ri;
+					parse_reg_name(&ri, regnm == nullptr ? ph.reg_names[f->regargs[i].reg] : regnm);
+					size = ri.size;
+					qstring qs;
+					get_reg_name(&qs, f->regargs[i].reg, ri.size);
+					offset = regNameToIndexIda(qs.c_str());
+				}
+				if (offset == -1) {
+					offset = regNameToIndexIda(ph.reg_names[f->regargs[i].reg]); //last try if nothing else works
+					if (offset == -1) continue;
+				}
+				std::vector<SymInfo>::iterator it = nm.empty() ? func.syminfo.end() : std::find_if(func.syminfo.begin(), func.syminfo.end(), [&nm](SymInfo it) { return it.pi.name == nm; });
+				if (it == func.syminfo.end()) {
+					it = std::find_if(func.syminfo.begin(), func.syminfo.end(), [offset](SymInfo it) { return it.pi.name == "" && it.addr.addr.space == "register" && it.addr.addr.offset == offset; });
+				}
+				if (it != func.syminfo.end()) {
+					if (it->pi.name == "") it->pi.name = nm;
+					it->addr.addr.space = "register";
+					it->addr.addr.offset = offset;
+					continue;
+				}
+				if (f->regargs[i].type == nullptr) {
+					std::string metaType = "unknown";
+					int typ = DecompInterface::coreTypeLookup((int)size, metaType);
+					if (typ == -1 && size != 1) {
+						typeChain.push_back(TypeInfo{ "", (unsigned long long)size, "array", false, false, false, (unsigned long long)size });
+						typeChain.push_back(TypeInfo{ "undefined", 1, metaType });
+					} else {
+						typeChain.push_back(TypeInfo{ typ == -1 ? "undefined" : defaultCoreTypes[typ].name, (unsigned long long)size, metaType });
+					}
+					coreTypeUsed[typ == -1 ? 1 : typ] = true;
+				}
+				func.syminfo.push_back(SymInfo{ { nm, typeChain }, {{"register", offset}, size}, (int)curArgs++ });
+			}
+		}
+		if (f != nullptr && f->frame != BADNODE) { //f->analyzed_sp()
+			std::vector<FrameMemberInfo> frameMembers;
+			func.extraPop += get_frame_retsize(f);
+			ea_t firstarg = frame_off_args(f);
+			//generalized for any arguments not found in the frame
+			for (size_t i = 0; i < func.syminfo.size(); i++) {
+				if (func.syminfo[i].addr.addr.space == "stack") {
+					func.syminfo[i].addr.addr.offset += firstarg - frame_off_retaddr(f);
+				}
+			}
+			getFrameMembers(f, frameMembers);
+			for (const FrameMemberInfo& member : frameMembers) {
+				//if (frame->members[i].get_soff() >= f->frsize && bFuncTinfo) break; //args already read for type info but offsets not adjusted
+				//" r" for return address and " s" for saved registers is a convention that seems to be used in IDA
+				if (!(is_funcarg_off(f, member.soff) || lvar_off(f, member.soff))) continue;
+				std::string nm = member.name;
+				if (frame_off_retaddr(f) == member.soff) continue;
+				/*if (nm == " r") {
+					retSize = get_member_size(&frame->members[i]);
+					continue;
+				}*/
+				if (frame_off_savregs(f) == member.soff) continue;
+				//if (nm == " s") continue;
+				std::vector<SymInfo>::iterator it = nm.empty() ? func.syminfo.end() : std::find_if(func.syminfo.begin(), func.syminfo.end(), [&nm](SymInfo it) { return it.pi.name == nm; });
+				unsigned long long offset = member.soff - frame_off_retaddr(f);// - firstarg;
+				if (it == func.syminfo.end()) {
+					//if no name, offset is from 0, so use arg offset
+					//msg("Offset: %llX\n", offset);
+					it = std::find_if(func.syminfo.begin(), func.syminfo.end(), [offset](SymInfo it) { return it.pi.name == "" && it.addr.addr.space == "stack" && it.addr.addr.offset == offset; });
+				}
+				//unsigned long long reloffs = frame->members[i].get_soff() - frame_off_retaddr(f); // - f->frsize - f->frregs; //frame seems to always be relative to return address
+				if (it != func.syminfo.end()) {
+					if (it->pi.name == "") it->pi.name = nm;
+					it->addr.addr.space = "stack";
+					it->addr.addr.offset = offset;
+					continue;
+				}
+				//if (frame->members[i].get_soff() >= f->frsize && frame->members[i].get_soff() < f->frsize + 1 + f->frregs) continue; //return address size is computed how - get_member_size() for " r"?
+				tinfo_t ti;
+				std::vector<TypeInfo> typeChain;
+				if (member.hasType) {
+					//int typ = coreTypeLookup((int)ti.get_size(), getMetaTypeInfo(ti));
+					//msg("has struct member type info");
+					getType(member.type, typeChain, false);
+				} else {
+					std::string metaType = "unknown";
+					int typ = DecompInterface::coreTypeLookup((int)member.size, metaType);
+					if (typ == -1 && member.size != 1) {
+						typeChain.push_back(TypeInfo{ "", member.size, "array", false, false, false, member.size });
+						typeChain.push_back(TypeInfo{ "undefined", 1, metaType });
+					} else {
+						typeChain.push_back(TypeInfo{ typ == -1 ? "undefined" : defaultCoreTypes[typ].name,  member.size, metaType });
+					}
+					coreTypeUsed[typ == -1 ? 1 : typ] = true;
+				}
+				func.syminfo.push_back(SymInfo{ {nm, typeChain}, {{"stack", member.soff - frame_off_retaddr(f)}, member.size},
+					is_funcarg_off(f, member.soff) ? (int)curArgs++ : -1 }); //frame->members[i].get_soff() >= firstarg or f->frsize - f->frregs
+			}
+		} else {
+			unsigned long long retSize = 0;
+			if (f != nullptr && (f->is_far() || (f->flags & FUNC_USERFAR) != 0)) retSize += ph.segreg_size;
+			else if (f == nullptr && bFuncTinfo) {
+				tinfo_t ti;
+				func_type_data_t ftd;
+				getFuncByGuess((ea_t)addr.offset, ti);
+				ti.get_func_details(&ftd);
+				if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf_cc_cm)) retSize += ph.segreg_size;
+			}
+			//bitrange_t bits;
+			//const char* regnm = get_reg_info(ash.a_curip, &bits); //use default processor name
+			//reg_info_t ri;
+			//parse_reg_name(&ri, regnm == nullptr ? ash.a_curip : regnm);
+			//retSize += ri.size;
+			retSize += f == nullptr ? inf_is_64bit() ? 8 : (inf_is_32bit() ? 4 : 2) : get_func_bytes(f); //per documentation of get_func_bitness
+			//type arguments need stack adjustment but there is no frame?
+			for (size_t i = 0; i < func.syminfo.size(); i++) {
+				if (func.syminfo[i].addr.addr.space == "stack") {
+					func.syminfo[i].addr.addr.offset += retSize;
+				}
+			}
+			//only need to figure out return address size and adjust extraPop which depending on type info or not may affect the model
+			//it would be really nice to have context for which cref was used!
+			if (func.extraPop == -1) {
+				std::map<sval_t, int> histogram;
+				for (ea_t ea = get_first_cref_to((ea_t)addr.offset); ea != BADADDR;) {
+					//if points is nullptr, IDA wont retrieve and fill it unless get_spd or the like is called with non-null pointer func_t first
+					func_t* ft = get_func(ea); //IDA will not retrieve spd information except for function head as per decompiling ida64.dll where after it uses ea2node, netnode_qgetblob and then unpack_dq to retrieve it
+					//get_spd(f, f->start_ea); //passing null unlike API documentation will not yield useful results if not already populated
+					/*if (f != nullptr && f->points != nullptr) {
+						for (int i = 0; i < f->pntqty; i++) {
+							if (f->points[i].ea == get_item_end(ea)) {
+								sval_t s = f->points[i].spd - (i == 0 ? 0 : f->points[i - 1].spd);
+							}
+						}
+					}*/
+					histogram[get_spd(ft, get_item_end(ea)) - get_spd(ft, ea)]++;
+					ea = get_next_cref_to((ea_t)addr.offset, ea);
+				}
+				std::map<sval_t, int>::iterator max =
+					std::max_element(histogram.begin(), histogram.end(), [](std::pair<sval_t, int> p1, std::pair<sval_t, int> p2) { return p1.second < p2.second; });
+				if (max != histogram.end()) func.extraPop = max->first;
+			}
+			func.extraPop = func.extraPop == -1 ? retSize : func.extraPop + retSize;
+			/*for (ea_t ea = get_first_cref_to(f->start_ea); ea != BADADDR; ea = get_next_cref_to(f->start_ea, ea)) {
+				func_t* fp = get_func(ea);
+				if (fp != nullptr) {
+					get_spd(fp, fp->start_ea);
+					if (definedFuncs.find(fp->start_ea) == definedFuncs.end()) continue;
+					if (fp->points != nullptr) {
+						for (int i = 0; i < fp->pntqty; i++) { //can build a histogram and take the winner
+							if (fp->points[i].ea == get_item_end(ea)) {
+								//*extraPop = fp->points[i].spd - (i == 0 ? 0 : fp->points[i - 1].spd);
+								//if ((*extraPop & (1ull << 63)) != 0)* extraPop = 2; //make it cdecl
+							}
+						}
+					}
+				}
+			}*/
+			//if (bFuncTinfo) {//adjust arguments
+			//} else {
+			//}
+			//return address size based on model
+			//x86-64 bit far/interupt calling aligns everything like flags, error codes, stack pointer and stack register to 64 bits each
+			//if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf_cc_cm)) {
+			//if (f->is_far() || (f->flags & FUNC_USERFAR) != 0 || imports.find(offset) != imports.end()) {
+				//ph.max_ptr_size(); - for some reason is 48 bits on 64-bit systems?
+				//ph.get_stkarg_offset();
+				//ph.segreg_size
+				//syminfo[i].offset += ph.segreg_size + (inf_is_64bit() ? 8 : inf_is_32bit() == 1 ? 4 : 2);
+				//} else if (ftd.get_call_method() == FTI_NEARCALL || ftd.get_call_method() == FTI_DEFCALL && !is_code_far(inf_cc_cm)) {
+			//} else {
+				//syminfo[i].offset += (inf_is_64bit() ? 8 : inf_is_32bit() == 1 ? 4 : 2);
+				//} else if (ftd.get_call_method() == FTI_INTCALL) {
+				//syminfo[i].offset += ph.segreg_size + (inf_is_64bit() ? 8 : inf_is_32bit() == 1 ? 4 : 2); //far pointer to old stack, e/rflags, error code
+			//}
+		}
+		if (f != nullptr) {
+			/*for (int i = 0; i < ph.regs_num; i++) {
+				bitrange_t bits;
+				const char* regnm = nullptr;
+				regvar_t* rv = find_regvar(f, BADADDR, ph.reg_names[i]); //all general registers
+				regnm = get_reg_info(ph.reg_names[i], &bits); //use default processor name
+				if (regnm != nullptr && strcmp(regnm, ph.reg_names[i]) != 0) rv = find_regvar(f, BADADDR, regnm); //all general registers
+				if (rv != nullptr) {}
+			}*/
+			if (f->regvars == nullptr) find_regvar(f, f->start_ea, nullptr); //convience function to always load regvars since canon can be null and the load already occurred from the database
+			if (f->regvarqty != -1 && f->regvars != nullptr) {
+				for (int i = 0; i < f->regvarqty; i++) {
+					//f->regvars[i].cmt; //can be nullptr
+					reg_info_t ri;
+					parse_reg_name(&ri, f->regvars[i].canon); //does it need to be translated to default via get_reg_info?
+					std::vector<TypeInfo> typeChain;
+					std::string metaType = "unknown";
+					int typ = DecompInterface::coreTypeLookup((int)ri.size, metaType);
+					if (typ == -1 && ri.size != 1) {
+						typeChain.push_back(TypeInfo{ "", (unsigned long long)ri.size, "array", false, false, false, (unsigned long long)ri.size });
+						typeChain.push_back(TypeInfo{ "undefined", 1, metaType });
+					} else {
+						typeChain.push_back(TypeInfo{ typ == -1 ? "undefined" : defaultCoreTypes[typ].name,  (unsigned long long)ri.size, metaType });
+					}
+					coreTypeUsed[typ == -1 ? 1 : typ] = true; //name base is p for pointer, a for array, other wise first char of type name
+					func.syminfo.push_back(SymInfo{ {f->regvars[i].user == nullptr || f->regvars[i].user[0] == 0 ? std::string(1, typ == -1 ? 'u' : defaultCoreTypes[typ].name[0]) + "Var_" + std::string(f->regvars[i].canon) : f->regvars[i].user,typeChain },
+						{{"register", (unsigned long long)regNameToIndexIda(f->regvars[i].canon)}, (unsigned long long)ri.size}, -1, RangeInfo{ addr.space, f->regvars[i].start_ea, f->regvars[i].end_ea } });
+				}
+			}
+			/*syminfo.erase(std::remove_if(syminfo.begin(), syminfo.end(), [](SymInfo it) { return it.name == ""; }), syminfo.end()); //or should give names - but often not used or necessary - dont mark in argument category at least
+			//need to remove argument indexes however if deleting arguments
+			curArgs = 0;
+			for (int i = 0; i < syminfo.size(); i++) {
+				if (syminfo[i].argIndex == -1) continue;
+				if (syminfo[i].argIndex == curArgs) curArgs++;
+				else syminfo[i].argIndex = curArgs++;
+			}*/
+		}
+	}
+	void IdaCallback::getMappedSymbol(AddrInfo addr, MappedSymbolInfo& msi)
+	{
+		msi.kind = KIND_HOLE;
+		msi.ranges.clear();
+		if (addr.space != "ram")
+			return;
+		for (std::map<ea_t, std::vector<RangeInfo>>::iterator it = allFuncRanges.begin();
+			it != allFuncRanges.end(); ++it) {
+			for (std::vector<RangeInfo>::iterator range = it->second.begin();
+				range != it->second.end(); ++range) {
+				if (range->space == addr.space &&
+					addr.offset >= range->beginoffset &&
+					addr.offset <= range->endoffset) {
+					msi.kind = KIND_FUNCTION;
+					msi.entryPoint = it->first;
+					msi.ranges = it->second;
+					msi.size = range->endoffset - range->beginoffset + 1;
+					std::map<ea_t, std::string>::iterator knownName = allFuncNames.find(it->first);
+					if (knownName != allFuncNames.end())
+						msi.name = knownName->second;
+					else
+						msi.name = "sub_" + to_string((unsigned long long)it->first, std::hex);
+					std::map<ea_t, bool>::iterator knownNoReturn = allFuncNoReturn.find(it->first);
+					if (knownNoReturn != allFuncNoReturn.end() && knownNoReturn->second) {
+						makeUnknownFunctionPrototype(msi.func);
+						msi.func.isNoReturn = true;
+					}
+					std::map<ea_t, MappedSymbolInfo>::iterator cached = batchMappedSymbols.find(it->first);
+					if (cached != batchMappedSymbols.end() && cached->second.func.isNoReturn)
+						msi.func = cached->second.func;
+					if (msi.entryPoint == addr.offset && isKnownNoReturnFunctionName(msi.name)) {
+						makeUnknownFunctionPrototype(msi.func);
+						msi.func.isNoReturn = true;
+					}
+					return;
+				}
+			}
+		}
+		std::map<ea_t, std::string>::iterator knownEntry = allFuncNames.find((ea_t)addr.offset);
+		if (knownEntry != allFuncNames.end()) {
+			msi.kind = KIND_FUNCTION;
+			msi.entryPoint = (ea_t)addr.offset;
+			msi.name = knownEntry->second;
+			std::map<ea_t, std::vector<RangeInfo>>::iterator ranges = allFuncRanges.find((ea_t)addr.offset);
+			if (ranges != allFuncRanges.end())
+				msi.ranges = ranges->second;
+			msi.size = msi.ranges.empty() ? 1 :
+				msi.ranges.begin()->endoffset - msi.ranges.begin()->beginoffset + 1;
+			std::map<ea_t, bool>::iterator knownNoReturn = allFuncNoReturn.find((ea_t)addr.offset);
+			if (knownNoReturn != allFuncNoReturn.end() && knownNoReturn->second) {
+				makeUnknownFunctionPrototype(msi.func);
+				msi.func.isNoReturn = true;
+			}
+			std::map<ea_t, MappedSymbolInfo>::iterator cached = batchMappedSymbols.find((ea_t)addr.offset);
+			if (cached != batchMappedSymbols.end() && cached->second.func.isNoReturn)
+				msi.func = cached->second.func;
+			if (isKnownNoReturnFunctionName(msi.name)) {
+				makeUnknownFunctionPrototype(msi.func);
+				msi.func.isNoReturn = true;
+			}
+			return;
+		}
+		qstring batchOutputEnv;
+		const bool batchOutput = !liveCallbackRegressionMode() &&
+			qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
+		if (!batchMappedSymbols.empty()) {
+			std::map<ea_t, MappedSymbolInfo>::iterator cached = batchMappedSymbols.find((ea_t)addr.offset);
+			if (cached != batchMappedSymbols.end()) {
+				msi = cached->second;
+				if (msi.kind == KIND_FUNCTION && msi.entryPoint == addr.offset &&
+					!msi.func.isNoReturn && isKnownNoReturnFunctionName(msi.name)) {
+					makeUnknownFunctionPrototype(msi.func);
+					msi.func.isNoReturn = true;
+					cached->second.func = msi.func;
+				}
+				if (msi.kind == KIND_DATA) {
+					usedData[(ea_t)addr.offset] = msi.typeChain;
+				} else if (msi.kind == KIND_EXTERNALREFERENCE) {
+					usedImports[(ea_t)addr.offset] = true;
+				} else if (msi.kind == KIND_FUNCTION &&
+					msi.entryPoint == addr.offset &&
+					definedFuncs.find((ea_t)addr.offset) == definedFuncs.end() &&
+					imports.find((ea_t)addr.offset) == imports.end()) {
+					usedFuncs[(ea_t)addr.offset] = true;
+				}
+				return;
+			}
+			if (batchOutput) {
+				msi.kind = KIND_HOLE;
+				msi.readonly = false;
+				msi.volatil = false;
+				return;
+			} else {
+				TRACE_MSG("mapped-symbol cache miss, falling back to IDA callback for ram:0x"
+					<< std::hex << addr.offset << "\n");
+			}
+		}
+		executeOnMainThread([this, &msi, addr]() {
+			msi.kind = KIND_HOLE;
+			msi.ranges.clear();
+			if (addr.space == "register") {} else if (addr.space == "ram") {
+				const ea_t ea = (ea_t)addr.offset;
+				const bool knownFunctionEntry =
+					definedFuncs.find(ea) != definedFuncs.end() ||
+					allFuncNames.find(ea) != allFuncNames.end();
+				if (imports.find((ea_t)addr.offset) != imports.end()) {
+					usedImports[(ea_t)addr.offset] = true;
+					//Ghidra currently has 2 bugs one with restoring CS register if not simulating same segment fixups and the other calling back for external ref function info
+						//16-bit apps have functions defined for imports also...
+					if (isX86() && !inf_is_32bit() && !inf_is_64bit() && get_func((ea_t)addr.offset) != nullptr) msi.kind = KIND_FUNCTION;
+					else
+						msi.kind = KIND_EXTERNALREFERENCE;
+				} else {
+					if (knownFunctionEntry || get_func((ea_t)addr.offset) != nullptr) {
+						msi.kind = KIND_FUNCTION;
+					} else {
+						auto fl = get_flags((ea_t)addr.offset);
+						//if (is_func(fl)) msi.kind = KIND_FUNCTION; //function start only
+						//if (exists_fixup(offset)) msi.kind = KIND_EXTERNALREFERENCE; //fixups is not really a determining criterion in exported functions
+						if (isCallableOrphanCodeLabel(ea, fl)) msi.kind = KIND_FUNCTION;
+						else if (is_code(fl) && isKnownNoReturnFunctionName(getSymbolName(addr.offset, "loc"))) msi.kind = KIND_FUNCTION;
+						else if (is_data(fl) || is_unknown(fl) && is_mapped((ea_t)addr.offset)) msi.kind = KIND_DATA;
+						else if (has_name(fl) || has_dummy_name(fl)) msi.kind = KIND_LABEL; //dummy name/label for code only is_code(fl)...
+						//if (is_unknown(fl) && !is_mapped(offset))
+					}
+				}
+			} else if (addr.space == "stack") {}
+			if (msi.kind == KIND_HOLE) {
+				//flags_t f = get_flags(offset);
+				//no information about a segment should still assume writable
+				//volatile for unmapped memory should be based on the life of the system
+				//volatile for mapped memory should be based on the life of the program
+				//volatile for stack and registers should be based on the life of a function
+				//const and unique would not be volatile ever, though a join space could be comprised of members who are volatile
+				if (addr.space == "ram") {
+					//prev_addr(offset); prev_head(offset, inf_min_ea); prev_that(offset, inf_max_ea, [](flags_t f, void* ud) { return true; });
+					//next_addr(offset); next_head(offset, inf_max_ea); next_that(offset, inf_max_ea, [](flags_t f, void* ud) { return true; });
+					getMemoryInfo(addr.offset, &msi.readonly, &msi.volatil);
+					msi.size = is_mapped((ea_t)addr.offset) ? 1 : 0;
+				} else {//if (base == "register" || base == "stack") {
+					msi.readonly = false;
+					msi.volatil = addr.space != "register"; //far more conservative to assume not volatile until figure out how to determine this - perhaps pspec must explicitly define
+					msi.size = 1;
+				}
+			} else if (msi.kind == KIND_LABEL) {
+				if (addr.space == "ram") {
+					getMemoryInfo(addr.offset, &msi.readonly, &msi.volatil);
+					msi.name = getSymbolName(addr.offset, "loc");
+				} else {
+					msi.readonly = false;
+					msi.volatil = addr.space != "register";
+				}
+			} else if (msi.kind == KIND_DATA) {
+				if (addr.space == "ram") {
+					msi.name = lookupDataInfo(addr.offset, &msi.readonly, &msi.volatil, msi.typeChain);
+					msi.size = !msi.typeChain.empty() && msi.typeChain.front().size != 0 ?
+						msi.typeChain.front().size : 1;
+				} else {
+					msi.readonly = false;
+					msi.volatil = addr.space != "register";
+					msi.size = 1;
+				}
+			} else if (msi.kind == KIND_EXTERNALREFERENCE) {
+				if (addr.space == "ram") {
+					if (imports.find((ea_t)addr.offset) != imports.end() && imports[(ea_t)addr.offset].name != "") {
+						msi.name = demangle_name(imports[(ea_t)addr.offset].name.c_str(), MNG_SHORT_FORM).c_str();
+						if (msi.name.size() == 0) msi.name = imports[(ea_t)addr.offset].name;
+					}
+					if (msi.name.size() == 0) msi.name = get_short_name((ea_t)addr.offset, GN_STRICT).c_str();
+					if (msi.name.size() != 0) msi.name = sanitizeIdaSymbolName(msi.name.substr(0, msi.name.find("(", 0)));
+					else msi.name = getSymbolName(addr.offset, "EXT");
+				}
+				/*fixup_data_t fd;
+				get_fixup(&fd, offset);
+				qstring buf;
+				get_fixup_desc(&buf, offset, fd);
+				buf.c_str();*/
+			} else if (msi.kind == KIND_FUNCTION) {
+				//get_func_name(&name, f->start_ea);
+				func_t* f = get_func((ea_t)addr.offset);
+				msi.entryPoint = (f != nullptr) ? f->start_ea : addr.offset;
+				if (f != nullptr) {
+					msi.ranges = getFunctionRanges(f, addr.space);
+				} else {
+					std::map<ea_t, std::vector<RangeInfo>>::iterator ranges = allFuncRanges.find((ea_t)msi.entryPoint);
+					if (ranges != allFuncRanges.end())
+						msi.ranges = ranges->second;
+					if (msi.ranges.empty() && is_code(get_flags((ea_t)addr.offset))) {
+						asize_t itemSize = get_item_size((ea_t)addr.offset);
+						if (itemSize == 0 || itemSize == BADSIZE)
+							itemSize = 1;
+						msi.ranges.push_back(RangeInfo{ addr.space, addr.offset, addr.offset + itemSize - 1 });
+					}
+				}
+				if (msi.entryPoint == addr.offset) {
+					if (f != nullptr) {
+						if (addr.offset == f->start_ea && definedFuncs.find((ea_t)addr.offset) == definedFuncs.end() && imports.find((ea_t)addr.offset) == imports.end()) usedFuncs[(ea_t)addr.offset] = true;
+						//find_func_bounds(f, FIND_FUNC_NORMAL); //size minimally 1 or maximally must be contiguous block from entry point
+						//but func_t already contiguous and the tails account for the rest so end_ea and size are a valid way dont need to find this or first from func ranges should do
+						//*size = f->size();
+						msi.size = msi.ranges.empty() ? f->size() :
+							msi.ranges.begin()->endoffset - msi.ranges.begin()->beginoffset + 1;
+					} else {
+						msi.size = msi.ranges.empty() ? 1 :
+							msi.ranges.begin()->endoffset - msi.ranges.begin()->beginoffset + 1;
+					}
+					if (funcProtoInfos.find((ea_t)msi.entryPoint) != funcProtoInfos.end()) {
+						msi.name = funcProtoInfos[(ea_t)msi.entryPoint].name;
+						msi.func = funcProtoInfos[(ea_t)msi.entryPoint].fpi;
+					} else {
+						std::map<ea_t, std::string>::iterator knownName = allFuncNames.find((ea_t)msi.entryPoint);
+						if (knownName != allFuncNames.end())
+							msi.name = knownName->second;
+						else
+							msi.name = getSymbolName(msi.entryPoint, "sub");
+						if (f == nullptr && isCallableOrphanCodeLabel((ea_t)addr.offset, get_flags((ea_t)addr.offset))) {
+							makeUnknownFunctionPrototype(msi.func);
+							msi.func.isNoReturn = isKnownNoReturnFunctionName(msi.name);
+						} else {
+							getFuncInfo(addr, f, msi.name, msi.func);
+						}
+						funcProtoInfos[(ea_t)msi.entryPoint] = FuncInfo{ msi.name.c_str(), false, msi.func };
+					}
+				}
+			}
+		}, "mapped-symbol-query");
+		if (msi.kind == KIND_HOLE && addr.space == "ram") {
+			std::map<ea_t, std::string>::iterator knownName = allFuncNames.find((ea_t)addr.offset);
+			if (knownName != allFuncNames.end()) {
+				msi.kind = KIND_FUNCTION;
+				msi.entryPoint = addr.offset;
+				msi.name = knownName->second;
+				std::map<ea_t, std::vector<RangeInfo>>::iterator ranges = allFuncRanges.find((ea_t)addr.offset);
+				if (ranges != allFuncRanges.end())
+					msi.ranges = ranges->second;
+				msi.size = msi.ranges.empty() ? 1 :
+					msi.ranges.begin()->endoffset - msi.ranges.begin()->beginoffset + 1;
+			}
+		}
+		if (addr.space == "ram" && addr.offset >= 0x400000 && addr.offset < 0x401000) {
+			std::string keys;
+			for (std::map<ea_t, std::string>::iterator it = allFuncNames.begin();
+				it != allFuncNames.end(); ++it) {
+				if (!keys.empty()) keys += ",";
+				keys += "0x" + to_string((unsigned long long)it->first, std::hex);
+			}
+			protocolRecorder("mappedSymbolState addr=\"ram:0x" + to_string(addr.offset, std::hex) +
+				"\" kind=\"" + std::to_string(msi.kind) +
+				"\" definedFuncs=\"" + std::to_string(definedFuncs.size()) +
+				"\" allFuncNames=\"" + std::to_string(allFuncNames.size()) +
+				"\" keys=\"" + keys + "\"", true);
+		}
+	}
+	void IdaCallback::getFuncTypeInfo(const tinfo_t & ti, bool paramOnly, FuncProtoInfo& func)
+	{
+		asize_t retSize = 0;
+		func_type_data_t ftd;
+		if (ti.is_func() && ti.get_func_details(&ftd)) { //GTD_NO_ARGLOCS
+			//(ftd.flags & FTI_SPOILED) != 0
+			for (size_t i = 0; i < ftd.spoiled.size(); i++) {
+				qstring qs;
+				get_reg_name(&qs, ftd.spoiled[i].reg, ftd.spoiled[i].size);
+				unsigned long long offset = regNameToIndexIda(qs.empty() ? ph.reg_names[ftd.spoiled[i].reg] : qs.c_str());
+				func.killedByCall.push_back(SizedAddrInfo{ {"register", offset}, (unsigned long long)ftd.spoiled[i].size });
+			}
+			func.dotdotdot = ftd.is_vararg_cc();
+			func.hasThis = (ftd.get_cc() & CM_CC_MASK) == CM_CC_THISCALL;
+			func.isNoReturn = (ftd.flags & FTI_NORET) != 0;
+			func.customStorage = is_user_cc(ftd.get_cc());
+			//switch (get_cc(inf_cc_cm)) {
+			//switch (get_cc(guess_func_cc(fd, ti.calc_purged_bytes(), CC_CDECL_OK | CC_ALLOW_ARGPERM | CC_ALLOW_REGHOLES | CC_HAS_ELLIPSIS))) {
+			func.model = ccToStr(GHIDRADEC_FTD_CC(ftd), ftd.get_call_method());
+			for (size_t i = 0; i < ftd.size(); i++) {
+				unsigned long long offs;
+				//int typ = coreTypeLookup((int)ftd[i].type.get_size(), getMetaTypeInfo(ftd[i].type));
+				std::vector<SizedAddrInfo> joins;
+				std::string space = arglocToAddr(ftd[i].argloc, &offs, joins, paramOnly);
+				//argloc offset is relative to the frame and not properly adjusted for the stack
+				//need to at least adjust for return address size or problems will occur in 16-bit exports!
+				//if (qs.size() == 0) ftd[i].type.print(&qs, NULL, PRTYPE_1LINE);
+				//core types must be resolved here since the printing will not be queryable later such as for multi token values like "unsigned int"
+				//need to include a fixed core type typedef - it could be reduced only by scanning the file decompiled output
+				std::vector<TypeInfo> typeChain;
+				getType(ftd[i].type, typeChain, false);
+				qstring qs;
+				if (ftd[i].name.size() == 0 && space == "register") get_reg_name(&qs, ftd[i].argloc.reg1(), ftd[i].type.get_size());
+				func.syminfo.push_back(SymInfo{ {ftd[i].name.size() == 0 && space == "register" ? "in_" + std::string(qs.c_str()) : ftd[i].name.c_str(), typeChain },
+					{{space, offs, joins}, ftd[i].type.get_size()}, (int)i, {} });
+			}
+			func.retType.addr.addr.space = arglocToAddr(ftd.retloc, &func.retType.addr.addr.offset, func.retType.addr.addr.joins, paramOnly);
+			func.retType.addr.size = ftd.rettype.get_size();
+			if (func.retType.addr.size == BADSIZE) func.retType.addr.size = 0; //0 is void
+			//qstring qs;
+			//ftd.rettype.get_type_name(&qs);
+			getType(ftd.rettype, func.retType.pi.ti, false);
+			func.extraPop = ti.calc_purged_bytes();
+			//ti.is_vararg_cc();
+			//local variables still need to be processed
+		} else {
+			func.extraPop = -1; //need size of return address which is also popped
+			argloc_t al;
+			const tinfo_t t(inf_is_64bit() ? BT_INT64 : (inf_is_32bit() ? BT_INT32 : BT_INT16)); //or use BT_INT8 - 1 byte like Ghidra?
+#ifdef __X64__
+#if IDA_SDK_VERSION >= 920
+			if (calc_retloc(&al, t, inf_cc_cm))
+#elif IDA_SDK_VERSION >= 750
+			if (get_ph()->calc_retloc(&al, t, inf_cc_cm))
+#else
+			if (ph.calc_retloc(&al, t, inf_cc_cm))
+#endif
+#else
+			if (ph.notify(ph.calc_retloc3, &t, inf_cc_cm, &al) == 2)
+#endif
+				func.retType.addr.addr.space = arglocToAddr(al, &func.retType.addr.addr.offset, func.retType.addr.addr.joins, false);
+			else {
+				func.retType.addr.addr.space = "register"; // "ram";
+				qstring qs;
+				get_reg_name(&qs, 0, t.get_size());
+				func.retType.addr.addr.offset = regNameToIndexIda(qs.empty() ? ph.reg_names[0] : qs.c_str());
+				func.retType.addr.size = t.get_size();
+			}
+			std::string metaType = "unknown"; //still unknown really
+			int typ = DecompInterface::coreTypeLookup((size_t)func.retType.addr.size, metaType);
+			func.retType.pi.ti.push_back(TypeInfo{ typ == -1 ? "undefined" : defaultCoreTypes[typ].name.c_str(), func.retType.addr.size, metaType });
+			coreTypeUsed[typ == -1 ? 1 : typ] = true;
+			func.model = "unknown";
+		}
+	}
+	bool IdaCallback::getFuncTypeInfoByAddr(ea_t ea, FuncProtoInfo& func)
+	{
+		tinfo_t ti;
+		bool bFuncTinfo = getFuncByGuess(ea, ti);
+		getFuncTypeInfo(ti, false, func);
+		return bFuncTinfo;
+	}
+	bool IdaCallback::checkPointer(unsigned long long offset, std::vector<TypeInfo>& typeChain, std::vector<ea_t> & deps)
+	{
+		//ea_t ea = offset;
+		//deref_ptr2(get_idati(), &ea, nullptr);
+		tinfo_t ti;
+		if (exists_fixup((ea_t)offset)) {//need to detect pointers
+			fixup_data_t fd;
+			get_fixup(&fd, (ea_t)offset);
+			//uval_t u = get_fixup_value(offset, fd.get_type()); //terminate circular types with pointer chain situation
+#ifdef __X64__
+			//if (!fd.is_extdef()) return false;
+			uval_t u = fd.get_base(); //get_fixup_extdef_ea
+#else
+			//if ((fd.type & FIXUP_EXTDEF) != 0) return false;
+			uval_t u = get_fixup_base((ea_t)offset, &fd); // (fd.type & FIXUP_REL) != 0 ? 0 : (fd.sel != BADSEL ? sel2ea(fd.sel) : 0); //get_fixup_extdef_ea
+#endif
+			u += fd.off;
+			if (is_mapped(u) && has_any_name(get_flags(u))) deps.push_back(u);
+			if (usedData.find(u) != usedData.end()) return false;
+			typeChain.push_back(TypeInfo{ "", (unsigned long long)calc_fixup_size(fd.get_type()), "ptr", false, false, false });
+			if (is_mapped(u) && has_any_name(get_flags(u))) {
+				std::vector<TypeInfo> nextType;
+				if (is_func(get_flags(u))) {
+					usedFuncs[u] = true;
+					bool bFuncTinfo = getFuncByGuess(u, ti);
+					getType(ti, nextType, false);
+					if (funcProtoInfos.find(u) == funcProtoInfos.end()) {
+						FuncProtoInfo innerFunc;
+						getFuncTypeInfo(ti, false, innerFunc);
+						qstring name;
+						//get_func_name(&name, f->start_ea);
+						name = get_short_name((ea_t)offset, GN_STRICT);
+						if (name.size() != 0) name = sanitizeIdaSymbolName(name.substr(0, name.find("(", 0)).c_str()).c_str();
+						else name = getSymbolName(offset).c_str();
+						std::map<ea_t, ImportInfo>::iterator imp = imports.find((ea_t)u);
+						std::string targetName = imp != imports.end() && !imp->second.name.empty() ?
+							imp->second.name : std::string(get_short_name((ea_t)u, GN_STRICT).c_str());
+						if (!innerFunc.isNoReturn && isKnownNoReturnFunctionName(targetName)) {
+							innerFunc.isNoReturn = true;
+							markCodeTypeNoReturn(nextType);
+						}
+						funcProtoInfos[u] = FuncInfo{ name.c_str(), false, innerFunc };
+					}
+				} else {
+					bool rdonly, volat;
+					lookupDataInfo(u, &rdonly, &volat, nextType);
+				}
+				typeChain.insert(typeChain.end(), nextType.begin(), nextType.end());
+			} else {
+				typeChain.push_back(TypeInfo{ "void", 0, "void" });
+			}
+			return true;
+		} else {
+			unsigned long long size = get_item_size((ea_t)offset);
+			//if (is_unknown(offset)) size = next_head(offset, BADADDR) - offset;
+			bool foundPtr = false;
+			if ((inf_cc_cm & CM_MASK) == CM_N32_F48 && size == 4) {
+				uval_t u;
+				if (!get_data_value(&u, (ea_t)offset, (asize_t)size)) return false;
+				if (is_mapped(u) && has_any_name(get_flags(u))) deps.push_back(u);
+				if (usedData.find(u) != usedData.end()) return false;
+				if (is_mapped(u) && has_any_name(get_flags(u))) {
+					typeChain.push_back(TypeInfo{ "", size, "ptr", false, false, false });
+					std::vector<TypeInfo> nextType;
+					if (is_func(get_flags(u))) {
+						usedFuncs[u] = true;
+						bool bFuncTinfo = getFuncByGuess(u, ti);
+						getType(ti, nextType, false);
+						if (funcProtoInfos.find(u) == funcProtoInfos.end()) {
+							FuncProtoInfo innerFunc;
+							getFuncTypeInfo(ti, false, innerFunc);
+							qstring name;
+							//get_func_name(&name, f->start_ea);
+							name = get_short_name((ea_t)offset, GN_STRICT);
+							if (name.size() != 0) name = sanitizeIdaSymbolName(name.substr(0, name.find("(", 0)).c_str()).c_str();
+							else name = getSymbolName(offset).c_str();
+							std::map<ea_t, ImportInfo>::iterator imp = imports.find((ea_t)u);
+							std::string targetName = imp != imports.end() && !imp->second.name.empty() ?
+								imp->second.name : std::string(get_short_name((ea_t)u, GN_STRICT).c_str());
+							if (!innerFunc.isNoReturn && isKnownNoReturnFunctionName(targetName)) {
+								innerFunc.isNoReturn = true;
+								markCodeTypeNoReturn(nextType);
+							}
+							funcProtoInfos[u] = FuncInfo{ name.c_str(), false, innerFunc };
+						}
+					} else {
+						bool rdonly, volat;
+						lookupDataInfo(u, &rdonly, &volat, nextType);
+					}
+					typeChain.insert(typeChain.end(), nextType.begin(), nextType.end());
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+	void IdaCallback::consumeTypeInfo(int idx, std::vector<TypeInfo>& tc, unsigned long long ea, std::vector<ea_t> & deps)
+	{
+		if (tc[idx].size == -1) {
+			std::vector<TypeInfo> nextChain;
+			tinfo_t ti;
+			ti.get_named_type(get_idati(), tc[idx].typeName.c_str());
+			qstring qs;
+			ti.get_final_type_name(&qs);
+			getType(ti, nextChain);
+			size_t sz = nextChain.size();
+			consumeTypeInfo(0, nextChain, ea, deps); //but if addition occurs from is_strlit... then its lost
+			if (nextChain.size() != sz) tc.insert(tc.begin(), *nextChain.begin());
+		} else if (tc[idx].metaType == "ptr") {
+			std::vector<TypeInfo> nextChain;
+			checkPointer(ea, nextChain, deps); //end recursion since pointer is only recursed through new data type if not already traced
+		} else if (tc[idx].metaType == "array") { //unions and bitfields consumed in this way
+			unsigned long long elSize = tc[idx + 1].size;
+			if (elSize == -1) {
+				tinfo_t ti;
+				if (ti.get_named_type(get_idati(), tc[idx + 1].typeName.c_str())) {
+					elSize = ti.get_size();
+				}
+			}
+			if (tc[idx].size == 0) { //0 length array can only be alone or very last member of structure which recursively chains up to a top structure
+				tc[idx].size = get_item_size((ea_t)ea);
+				tc[idx].arraySize = tc[idx].size / elSize;
+			} else {
+				//could be an array of structures, arrays, or pointers
+				if (!is_strlit(get_flags((ea_t)ea)) || (elSize != sizeof(char) && elSize != sizeof(wchar16_t) && elSize != sizeof(wchar32_t))) { //must prevent auto detection here
+					for (int i = 0; i < tc[idx].arraySize; i++) {
+						consumeTypeInfo(idx + 1, tc, ea + elSize * i, deps);
+					}
+				}
+			}
+		} else if (tc[idx].metaType == "struct") {
+			for (size_t i = 0; i < tc[idx].structMembers.size(); i++) {
+				consumeTypeInfo(0, tc[idx].structMembers[i].ti, ea + tc[idx].structMembers[i].offset, deps);
+			}
+		} else if (is_strlit(get_flags((ea_t)ea)) && tc[idx].metaType != "array" && (tc[idx].size == sizeof(char) || tc[idx].size == sizeof(wchar16_t) || tc[idx].size == sizeof(wchar32_t)) &&
+			get_item_size((ea_t)ea) % tc[idx].size == 0) {
+			//probably need more heuristics than just to verify the type is char, wchar_t or wchar16/32
+			tc.insert(tc.begin() + idx, TypeInfo{ "", get_item_size((ea_t)ea), "array", false, false, false, get_item_size((ea_t)ea) / tc[idx].size });
+			//msg("wrong string is not array\n");
+		}
+	}
+	std::string IdaCallback::lookupDataInfo(unsigned long long offset, bool* readonly, bool* volatil, std::vector<TypeInfo>& typeChain)
+	{
+		unsigned long long size = (is_unknown(get_flags((ea_t)offset))) ? calc_max_item_end((ea_t)offset) - offset : get_item_size((ea_t)offset);
+		tinfo_t ti;
+		std::vector<ea_t> deps;
+		//is_strlit(get_flags(offset))
+		if (!is_unknown(get_flags((ea_t)offset)) && get_tinfo(&ti, (ea_t)offset)) {
+			getType(ti, typeChain, false);
+			//recursive pointer scan and also 0 length array fix, string identification fix
+			consumeTypeInfo(0, typeChain, offset, deps);
+			//0 length arrays cause a problem but only one should occur but could be at the end of a structure
+			/*if (typeChain.begin()->metaType == "array" && typeChain.begin()->size == 0) {
+				typeChain.begin()->size = size;
+				unsigned long long elSize = (typeChain.begin() + 1)->size;
+				if (elSize == -1) {
+					tinfo_t ti;
+					if (ti.get_named_type(get_idati(), (typeChain.begin() + 1)->typeName.c_str())) {
+						elSize = ti.get_size();
+					}
+				}
+				typeChain.begin()->arraySize = size / elSize;
+			}*/
+		} else if (!checkPointer(offset, typeChain, deps)) { //need to detect pointers
+			std::string metaType = "unknown";
+			int typ = DecompInterface::coreTypeLookup((size_t)size, metaType);
+			if (typ == -1 && size != 1) {
+				typeChain.push_back(TypeInfo{ "", size, "array", false, false, false, size });
+				typeChain.push_back(TypeInfo{ "undefined", 1, metaType });
+			} else {
+				typeChain.push_back(TypeInfo{ typ == -1 ? "undefined" : defaultCoreTypes[typ].name, size, metaType });
+			}
+			coreTypeUsed[typ == -1 ? 1 : typ] = true;
+		}
+		//*size = ti.get_size();
+		//qstring qs;
+		//print_type(&qs, offset, PRTYPE_MULTI);
+		//msg((qs + "\n").c_str());
+		std::string name = getSymbolName(offset);
+		applyKnownNoReturnPointerType(name, inf_is_64bit() ? 8 : (inf_is_32bit() ? 4 : 2), typeChain);
+		typeChain.begin()->isReadOnly = readonly;
+		usedData[(ea_t)offset] = typeChain;
+		dependentData[(ea_t)offset] = deps;
+		getMemoryInfo(offset, readonly, volatil);
+		return name;
+	}
+
+	void IdaCallback::getExternInfo(AddrInfo addr, std::string& callName, std::string& modName, FuncProtoInfo& func)
+	{
+		if (addr.space != "ram") return;
+		ea_t target = (ea_t)addr.offset;
+		std::map<ea_t, ImportInfo>::iterator imp = imports.find(target);
+		if (imp != imports.end() && imp->second.idx >= 0 && imp->second.idx < (int)modNames.size())
+			modName = modNames[imp->second.idx];
+		if (funcProtoInfos.find(target) != funcProtoInfos.end()) {
+			callName = funcProtoInfos[target].name;
+			func = funcProtoInfos[target].fpi;
+		} else if (di->skipParamIdentification && !di->outputFile.empty()) {
+			if (imp != imports.end() && !imp->second.name.empty()) {
+				callName = sanitizeIdaSymbolName(imp->second.name.substr(0, imp->second.name.find("(", 0)));
+			} else {
+				std::map<ea_t, std::string>::iterator knownName = allFuncNames.find(target);
+				callName = knownName != allFuncNames.end() ?
+					knownName->second : ("sub_" + to_string((unsigned long long)target, std::hex));
+			}
+			makeUnknownFunctionPrototype(func);
+			func.isNoReturn = isKnownNoReturnFunctionName(callName);
+			funcProtoInfos[target] = FuncInfo{ callName.c_str(), false, func };
+		} else {
+			executeOnMainThread([this, target, &callName, &func]() {
+				//ids folder contains some basic information for common imports and its in comments in the disassembly but how to properly access the info?
+				AddrInfo targetAddr{ "ram", (unsigned long long)target };
+				func_t* f = get_func(target);
+				getFuncInfo(targetAddr, f, callName, func);
+				}, "call-target-info");
+			funcProtoInfos[target] = FuncInfo{ callName.c_str(), false, func };
+		}
+	}
+	unsigned long long IdaCallback::getTypeSize(const tinfo_t & ti)
+	{
+		qstring typeName;
+		ti.get_type_name(&typeName);
+		int minSize = 0;
+		if (typeToAddress.find(typeName.c_str()) != typeToAddress.end()) {
+			const std::vector<ea_t>& vec = typeToAddress[typeName.c_str()];
+			for (size_t i = 0; i < vec.size(); i++) {
+				asize_t sz = get_item_size(vec[i]);
+				if (minSize == 0) minSize = (int)sz;
+				else minSize = min(minSize, (int)sz);
+			}
+		}
+		return minSize;
+	}
+	void IdaCallback::getType(const tinfo_t & ti, std::vector<TypeInfo>& typeChain, bool bOuterMost)
+	{
+		TypeInfo typeinf;
+		typeinf.isReadOnly = ti.is_const();
+		if (!bOuterMost) { //need to terminate the chain as soon as possible if not outermost
+			qstring qs;
+			ti.get_type_name(&qs);
+			if (qs.size() != 0) {
+				typeinf.typeName = qs.c_str();
+				typeinf.size = -1;
+				typeChain.push_back(typeinf);
+				return;
+			}
+		}
+		if (ti.is_typeref()) {
+			qstring qs;
+			ti.get_next_type_name(&qs);
+			if (qs.size() != 0) { //things like function pointers are typeref but dont have names and should return the code type
+				typeinf.typeName = qs.c_str();
+				typeinf.size = -1;
+				typeChain.push_back(typeinf);
+				return;
+			} //if size is BADSZIE and realtype is unknown then IDA prints these as dummy structures mostly for structures/classes it does not have type info for
+		} 
+		typeinf.metaType = getMetaTypeInfo(ti);
+		typeinf.size = ti.is_func() || ti.is_funcptr() ? 1 : ti.get_size();
+		if (typeinf.size == BADSIZE) typeinf.size = ti.get_realtype() == BT_UNK ? getTypeSize(ti) : 0; //0 is void
+		typeinf.isEnum = ti.is_enum();
+
+		//get_str_type() != -1 && (get_str_type() & STRWIDTH_2B);
+		typeinf.isUtf = false;
+		typeinf.isChar = ti.is_char();
+		qstring qs;
+		//if (!is_anonymous_udt(ti) || !ti.is_union() && !(ti.is_struct() && hasBitFields)) { //type name needed for later lookup as anonymous type could end up being a union/bitfield structure which is converted to data type/array which will not have a name
+			ti.get_type_name(&qs);
+			typeinf.typeName = qs.c_str();
+		//}
+		//msg(typeinf.typeName + " " + typeinf.metaType + " " << typeChain.size());
+		if (typeinf.metaType == "ptr") {
+			ptr_type_data_t pt;
+			ti.get_ptr_details(&pt);
+			typeChain.push_back(typeinf);
+			getType(pt.obj_type, typeChain, false);
+		} else if (typeinf.metaType == "struct") {
+			//ti.is_udt(); //struct or union
+			udt_type_data_t udt; //structures with bitfields and unions are to be dealt with by using a character array
+			ti.get_udt_details(&udt);
+			bool bHasBitField = false;
+			for (size_t i = 0; i < udt.size(); i++) {
+				if (udt[i].type.is_bitfield() || (udt[i].offset & 7) != 0) {
+					bHasBitField = true; break; //mark but scan for better decompiled type prolog
+				}
+				std::vector<TypeInfo> memberType;
+				getType(udt[i].type, memberType, is_anonymous_udt(udt[i].type));
+				typeinf.structMembers.push_back(StructMemberInfo{ udt[i].name.c_str(), udt[i].offset / 8, memberType }); //if not byte multiple bits, round down to nearest byte, what to do as Ghidra uses bytes?
+			}
+			if (udt.is_union || bHasBitField) {
+				typeinf.structMembers.clear();
+				if (udt.total_size <= 8) {
+					typeinf.metaType = "unknown";
+				} else {
+					typeinf.metaType = "array";
+					typeinf.arraySize = udt.total_size;
+				}
+			}
+			typeChain.push_back(typeinf);
+			if ((udt.is_union || bHasBitField) && udt.total_size > 8) typeChain.push_back(TypeInfo{ "byte", 1, "uint" });
+		} else if (typeinf.metaType == "array") {
+			array_type_data_t ai;
+			ti.get_array_details(&ai);
+			typeinf.arraySize = ai.nelems;
+			typeChain.push_back(typeinf);
+			getType(ai.elem_type, typeChain, false);
+		} else if (typeinf.metaType == "code") {
+			asize_t retSize = 0;
+			func_type_data_t ftd;
+			ptr_type_data_t pt;
+			if (ti.is_funcptr()) {
+				ti.get_ptr_details(&pt);
+				pt.obj_type.get_func_details(&ftd);
+			} else ti.get_func_details(&ftd);
+			typeinf.size = (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf_cc_cm)) ? ph.segreg_size : 0;
+			typeinf.size += inf_is_64bit() ? 8 : (inf_is_32bit() ? 4 : 2);
+			getFuncTypeInfo(ti.is_funcptr() ? pt.obj_type : ti, true, typeinf.funcInfo);
+			typeChain.push_back(typeinf);
+		} else { //size greater than 16 needs to be converted to array, really should be 8 as no core types exist
+			int typ = DecompInterface::coreTypeLookup((size_t)typeinf.size, typeinf.metaType);
+			if (typ == -1 && typeinf.size == 0) { //is_decl_* where there is a forward declaration but not any actual type yields this
+				typeChain.push_back(TypeInfo{ "void", 0, "void" });
+			} if (typ == -1 && typeinf.size != 1) {
+				typeinf.metaType = "array";
+				typeinf.arraySize = typeinf.size;
+				typeChain.push_back(typeinf);
+				typeChain.push_back(TypeInfo{ "undefined", 1, "unknown" });
+			} else {
+				if (typeinf.typeName.size() == 0) { //dont give type name if already have one
+					qs = typ == -1 ? "undefined" : defaultCoreTypes[typ].name.c_str();
+					typeinf.typeName = typeinf.isEnum ? "enum" : (typeinf.isChar ? "char" : qs.c_str());
+				}
+				if (typeinf.isEnum) {
+					enum_type_data_t etd;
+					ti.get_enum_details(&etd);
+					for (size_t i = 0; i < etd.size(); i++) {
+						typeinf.enumMembers.push_back(std::pair<std::string, unsigned long long>(etd[i].name.c_str(), etd[i].value));
+					}
+				}
+				typeChain.push_back(typeinf);
+			}
+			coreTypeUsed[typ == -1 ? (typeinf.size == 0 ? 0 : 1) : typ] = true;
+		}
+	}
+	void IdaCallback::getMetaType(std::string typeName, std::vector<TypeInfo>& typeChain)
+	{
+		if (typeDatabase.find(typeName) == typeDatabase.end()) {
+			executeOnMainThread([this, &typeChain, typeName]() {
+				tinfo_t ti;
+				if (ti.get_named_type(get_idati(), typeName.c_str())) {
+					usedTypes[typeName] = true;
+					getType(ti, typeChain);
+				} else {
+					//msg("Voiding erroneous type: %s\n", typeName.c_str());
+					typeChain.push_back(TypeInfo{ "void", 0, "void" });
+					coreTypeUsed[0] = true;
+				}
+			}, "meta-type-query");
+			typeDatabase[typeName] = typeChain;
+		} else {
+			usedTypes[typeName] = true;
+			typeChain.insert(typeChain.begin(), typeDatabase[typeName].begin(), typeDatabase[typeName].end());
+		}
+	}
+	//colors are Clang-based: "keyword", "comment", "type", "funcname", "var", "const", "param" and "global"
+	std::string IdaCallback::emit(std::string type, std::string color, std::string str)
+	{
+		ghidradec_infer_token_color(color, type, str, di);
+
+		//type == "variable" && color == "var" || color == "param"
+		if (type == "type" && color == "type") {
+			finalTypes[str] = true;
+		} else if (type == "funcname" && color == "funcname") {
+			finalFuncs[str] = true;
+		} else if (type == "variable" && color == "global") {
+			finalData[str] = true;
+		}
+		// else if (type == "variable" && color == "var") { //dont track locals
+		//} else if (type == "variable" && color == "param") { //dont track arguments
+		//}
+		if (color == "comment") return std::string({ COLOR_ON, COLOR_AUTOCMT }) + str + std::string({ COLOR_OFF, COLOR_AUTOCMT });
+		else if (color == "param") return std::string({ COLOR_ON, GHIDRADEC_COLOR_PARAM }) + str + std::string({ COLOR_OFF, GHIDRADEC_COLOR_PARAM });
+		else if (color == "var") return std::string({ COLOR_ON, GHIDRADEC_COLOR_LOCAL }) + str + std::string({ COLOR_OFF, GHIDRADEC_COLOR_LOCAL });
+		else if (color == "global") return std::string({ COLOR_ON, GHIDRADEC_COLOR_GLOBAL }) + str + std::string({ COLOR_OFF, GHIDRADEC_COLOR_GLOBAL });
+		else if (color == "const") {
+			const char constColor =
+				str.find('"') != std::string::npos ? GHIDRADEC_COLOR_STRING :
+				str.find('\'') != std::string::npos ? GHIDRADEC_COLOR_CHAR :
+				COLOR_NUMBER;
+			return std::string({ COLOR_ON, constColor }) + str + std::string({ COLOR_OFF, constColor });
+		}
+		else if (color.empty() && type == "label") {
+			return std::string({ COLOR_ON, COLOR_CODNAME }) + str + std::string({ COLOR_OFF, COLOR_CODNAME });
+		}
+		else if (color.empty() && type == "field") {
+			return std::string({ COLOR_ON, COLOR_DNAME }) + str + std::string({ COLOR_OFF, COLOR_DNAME });
+		}
+		if (color == "funcname") {
+			if (importNames.find(str) != importNames.end()) {
+				return std::string({ COLOR_ON, COLOR_IMPNAME }) + str + std::string({ COLOR_OFF, COLOR_IMPNAME });
+			} else {
+				return std::string({ COLOR_ON, GHIDRADEC_COLOR_FUNCTION }) + str + std::string({ COLOR_OFF, GHIDRADEC_COLOR_FUNCTION });
+			}
+		} else if (color == "type") return std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + str + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE });
+		else if (color == "keyword") return std::string({ COLOR_ON, COLOR_KEYWORD }) + str + std::string({ COLOR_OFF, COLOR_KEYWORD });
+		else return str;
+		//COLOR_DREF
+		//else return str;
+	}
+	void IdaCallback::getComments(AddrInfo addr, std::vector<CommentInfo>& comments)
+	{
+		if (addr.space != "ram") return;
+		qstring batchOutputEnv;
+		if (qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty())
+			return;
+		executeOnMainThread([&comments, addr]() {
+			//default options only allow warning, warningheader and user2
+			func_t* f = get_func((ea_t)addr.offset);
+			if (f != nullptr) {
+				qstring qs;
+				if (get_func_cmt(&qs, f, false) != -1)
+					comments.push_back(CommentInfo{ addr, "warningheader", qs.c_str() });
+				if (get_func_cmt(&qs, f, true) != -1)
+					comments.push_back(CommentInfo{ addr, "warningheader", qs.c_str() });
+			}
+			rangeset_t rangeset;
+			get_func_ranges(&rangeset, f);
+			for (rangeset_t::iterator it = rangeset.begin(); it != rangeset.end(); it++) { //there should be a better way to do this besides going through individual instructions?
+				for (ea_t offs = it->start_ea; offs < it->end_ea;) { //is_code(offs) should always be true
+					//color_t clr; //get_any_indented_cmt is missing from library
+					qstring qs;
+					if (get_cmt(&qs, offs, false) != -1)
+						comments.push_back(CommentInfo{ AddrInfo{addr.space, offs}, "user1", qs.c_str() });
+					if (get_cmt(&qs, offs, true) != -1)
+						comments.push_back(CommentInfo{ AddrInfo{addr.space, offs}, "user1", qs.c_str() });
+					asize_t itemSize = get_item_size(offs);
+					if (itemSize == 0)
+						break;
+					offs += itemSize;
+				}
+			}
+		}, "comments-query");
+	}
+	std::string IdaCallback::getSymbol(AddrInfo addr)
+	{
+		std::string name;
+		if (addr.space == "ram") {
+			qstring batchOutputEnv;
+			if (qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty()) {
+				std::map<ea_t, std::string>::iterator knownName = allFuncNames.find((ea_t)addr.offset);
+				if (knownName != allFuncNames.end())
+					return knownName->second;
+				return getSymbolName(addr.offset, "loc");
+			}
+			executeOnMainThread([&name, addr]() {
+				name = getSymbolName(addr.offset, "loc");
+			}, "symbol-query");
+		}
+		return name;
+	}
+	std::vector<uchar> IdaCallback::getStringData(AddrInfo addr)
+	{
+		std::vector<uchar> res;
+		if (addr.space == "ram") {
+			executeOnMainThread([&res, addr]() {
+				qstring qs;
+				if (is_strlit(get_flags((ea_t)addr.offset))) {
+					get_strlit_contents(&qs, (ea_t)addr.offset, -1, get_str_type((ea_t)addr.offset), nullptr, 0);
+					res.insert(res.begin(), qs.begin(), qs.end());
+				}
+				}, "string-data-query");
+		}
+		return res;
+	}
+
+
+	void checkForwardDecl(const tinfo_t & ti, const std::map<std::string, bool>& alreadyDefined, std::map<std::string, bool>& needDecl)
+	{
+		std::stack<tinfo_t> s;
+		s.push(ti);
+		while (!s.empty()) {
+			tinfo_t t = s.top();
+			s.pop();
+			udt_type_data_t utd;
+			t.get_udt_details(&utd);
+			//prevent infinite recursion
+			qstring qs;
+			t.get_type_name(&qs);
+			if (ti == t) {}
+			else if (alreadyDefined.find(qs.c_str()) != alreadyDefined.end()) continue;
+			else needDecl[qs.c_str()] = true;
+			for (size_t i = 0; i < utd.size(); i++) {
+				if (!utd[i].type.get_type_name(&qs) || qs.size() == 0) {
+					if (utd[i].type.is_typeref()) {
+						utd[i].type.get_next_type_name(&qs);
+						if (qs.size() != 0) continue;
+					}
+					if (utd[i].type.is_ptr()) {
+						ptr_type_data_t ptd;
+						utd[i].type.get_ptr_details(&ptd);
+						s.push(ptd.obj_type);
+					} else if (utd[i].type.is_array()) {
+						array_type_data_t atd;
+						utd[i].type.get_array_details(&atd);
+						s.push(atd.elem_type);
+					} else if (utd[i].type.is_udt()) {
+						s.push(utd[i].type);
+					} else if (utd[i].type.is_func()) { //funcptr would be handled from is_ptr
+						func_type_data_t ftd;
+						utd[i].type.get_func_details(&ftd);
+						for (size_t j = 0; j < ftd.size(); j++) {
+							s.push(ftd[j].type);
+						}
+							s.push(ftd.rettype);
+						}
+					} else if (alreadyDefined.find(qs.c_str()) == alreadyDefined.end())
+						needDecl[qs.c_str()] = true;
+				}
+			}
+		}
+
+	void buildDependents(std::string str, std::map<std::string, bool>& usedT, std::map<std::string, bool>& isDependee)
+	{
+		std::stack<std::string> s;
+		s.push(str);
+		while (!s.empty()) {
+			std::string st = s.top();
+			s.pop();
+			if (usedT.find(st) == usedT.end()) usedT[st] = true;
+			if (!usedT[st]) continue;
+			usedT[st] = false;
+			tinfo_t tinf;
+			tinf.get_named_type(get_idati(), st.c_str());
+			std::stack<tinfo_t> t;
+			t.push(tinf);
+			while (!t.empty()) {
+				tinfo_t ti = t.top();
+				t.pop();
+				qstring qs;
+				ti.get_type_name(&qs);
+				if (qs.size() != 0 && usedT.find(qs.c_str()) != usedT.end() && !usedT[qs.c_str()] && ti != tinf) continue;
+				else if (/*!is_anonymous_udt(ti) &&*/ qs.size() != 0) buildDependents(qs.c_str(), usedT, isDependee);
+				if (ti.is_typeref()) {
+					qs.clear();
+					ti.get_next_type_name(&qs);
+					if (qs.size() != 0) {
+						isDependee[qs.c_str()] = true;
+						buildDependents(qs.c_str(), usedT, isDependee);
+						continue;
+					}
+				}
+				if (ti.is_ptr()) {
+					ptr_type_data_t ptd;
+					ti.get_ptr_details(&ptd);
+					t.push(ptd.obj_type);
+				} else if (ti.is_array()) {
+					array_type_data_t atd;
+					ti.get_array_details(&atd);
+					t.push(atd.elem_type);
+				} else if (ti.is_udt()) {
+					udt_type_data_t utd;
+					ti.get_udt_details(&utd);
+					for (size_t i = 0; i < utd.size(); i++) {
+						//utd[i].is_anonymous_udm();
+						t.push(utd[i].type);
+					}
+				} else if (ti.is_func()) { //funcptr would be handled from is_ptr
+					func_type_data_t ftd;
+					ti.get_func_details(&ftd);
+					for (size_t j = 0; j < ftd.size(); j++)
+						t.push(ftd[j].type);
+					t.push(ftd.rettype);
+				}
+			}
+		}
+	}
+
+	void refTypes(const std::vector<TypeInfo>& types/*const tinfo_t & ti*/, std::map<std::string, bool>& usedT)
+	{
+		std::stack<int> s;
+		s.push(0);
+		while (!s.empty()) {
+			int idx = s.top();
+			s.pop();
+			const TypeInfo& ti = types.at(idx);
+			//if (typeInfo == terminate) return ""; //termination happens at appropriate place implicitly
+			if (ti.size == -1) {
+				usedT[ti.typeName] = true;
+				continue;
+			}
+			if (ti.metaType == "ptr") {
+				if (ti.typeName.size() != 0) usedT[ti.typeName] = true;
+				s.push(idx + 1);
+			} else if (ti.metaType == "struct") {
+				std::string strct;
+				for (size_t i = 0; i < ti.structMembers.size(); i++) { //core types are not type referenced though
+					refTypes(ti.structMembers[i].ti, usedT);
+				}
+				if (ti.typeName.size() != 0) usedT[ti.typeName] = true;
+			} else if (ti.metaType == "array") {
+				if (ti.typeName.size() != 0) usedT[ti.typeName] = true;
+				s.push(idx + 1);
+			} else if (ti.metaType == "code") {
+				std::string symbols;
+				for (std::vector<SymInfo>::const_iterator it = ti.funcInfo.syminfo.begin(); it != ti.funcInfo.syminfo.end(); it++) {
+					refTypes(it->pi.ti, usedT);
+				}
+				if (ti.typeName.size() != 0) usedT[ti.typeName] = true;
+				refTypes(ti.funcInfo.retType.pi.ti, usedT);
+			} else if (ti.metaType == "void") {
+			} else {
+				if (ti.typeName.size() != 0) usedT[ti.typeName] = true;
+			}
+			//metaType == "uint" && callback->isEnum();
+			//metaType == "code"...
+		}
+	}
+
+	//void IdaCallback::dfsVisitType(const tinfo_t & ti, std::vector<std::string>& sortedTypes, bool firstScan)
+	//{
+	//	qstring qs;
+	//	ti.get_type_name(&qs);
+	//	if (qs.size() != 0 && !usedTypes[qs.c_str()] && !firstScan) return;
+	//	else if (/*!is_anonymous_udt(ti) &&*/ qs.size() != 0) dfsVisit(qs.c_str(), sortedTypes);
+	//	if (ti.is_typeref()) {
+	//		qs.clear();
+	//		ti.get_next_type_name(&qs);
+	//		if (qs.size() != 0) {
+	//			dfsVisit(qs.c_str(), sortedTypes);
+	//			return;
+	//		}
+	//	}
+	//	if (ti.is_ptr()) {
+	//		ptr_type_data_t ptd;
+	//		ti.get_ptr_details(&ptd);
+	//		dfsVisitType(ptd.obj_type, sortedTypes, false);
+	//	} else if (ti.is_array()) {
+	//		array_type_data_t atd;
+	//		ti.get_array_details(&atd);
+	//		dfsVisitType(atd.elem_type, sortedTypes, false);
+	//	} else if (ti.is_udt()) {
+	//		udt_type_data_t utd;
+	//		ti.get_udt_details(&utd);
+	//		for (size_t i = 0; i < utd.size(); i++)
+	//			dfsVisitType(utd[i].type, sortedTypes, false);
+	//	} else if (ti.is_func()) { //funcptr would be handled from is_ptr
+	//		func_type_data_t ftd;
+	//		ti.get_func_details(&ftd);
+	//		for (size_t j = 0; j < ftd.size(); j++)
+	//			dfsVisitType(ftd[j].type, sortedTypes, false);
+	//		dfsVisitType(ftd.rettype, sortedTypes, false);
+	//	}
+	//}
+
+	//note post order only!
+	//this only works properly in all cases if you start with types which have no dependents
+	//first must compute these and place them at the top of the list, the SCC not found as part of this would come after
+	/*void IdaCallback::dfsVisit(std::string str, std::vector<std::string>& sortedTypes)
+	{
+		if (!usedTypes[str]) return;
+		usedTypes[str] = false;
+		tinfo_t ti;
+		ti.get_named_type(get_idati(), str.c_str());
+		dfsVisitType(ti, sortedTypes, true);
+		sortedTypes.push_back(str);
+	}*/
+	void dfsTypeVisit(std::string str, std::map<std::string, bool>& unvisited, std::vector<std::string>& sortedTypes)
+	{
+		std::stack<std::string> s; //should switch to stack based
+		//std::map<std::string, bool> tempMarkers;
+		//std::copy(unvisited.begin(), unvisited.end(), std::inserter(tempMarkers, tempMarkers.end()));
+		//tempMarkers.insert(unvisited.begin(), unvisited.end());
+		//post order traversal can be considered to have 3 states - discovered, undiscovered and visited
+		if (!unvisited[str]) return;
+		s.push(str);
+		//unvisited[str] = false;
+		std::map<std::string, bool> unresolved = unvisited; //prevent infinite recursion
+		while (s.size() != 0) {
+			std::string v = s.top();
+			tinfo_t ti;
+			ti.get_named_type(get_idati(), v.c_str());
+			std::stack<tinfo_t> t;
+			t.push(ti);
+			std::stack<std::string> rev;
+			while (t.size() != 0) { //this also requires a post order traversal or the order will be wrong
+				qstring qs, nm;
+				const tinfo_t & inti = t.top();
+				inti.get_type_name(&nm);
+				unresolved[nm.c_str()] = false;
+				if (!unvisited[nm.c_str()]) { t.pop(); continue; }
+				bool bInnerUnvstChdrn = false;
+				if (inti.is_ptr()) {
+					ptr_type_data_t ptd;
+					inti.get_ptr_details(&ptd);
+					ptd.obj_type.get_type_name(&qs);
+					if (qs.size() != 0 && unresolved[qs.c_str()]) { t.push(ptd.obj_type); bInnerUnvstChdrn = true; }
+				} else if (inti.is_array()) {
+					array_type_data_t atd;
+					inti.get_array_details(&atd);
+					atd.elem_type.get_type_name(&qs);
+					if (qs.size() != 0 && unresolved[qs.c_str()]) { t.push(atd.elem_type); bInnerUnvstChdrn = true; }
+				} else if (inti.is_udt()) {
+					udt_type_data_t utd;
+					inti.get_udt_details(&utd);
+					for (size_t i = 0; i < utd.size(); i++) {
+						utd[i].type.get_type_name(&qs);
+						if (/*!is_anonymous_udt(inti) &&*/ qs.size() != 0 && unresolved[qs.c_str()]) { t.push(utd[i].type); bInnerUnvstChdrn = true; }
+					}
+				} else if (inti.is_func()) { //funcptr would be handled from is_ptr
+					func_type_data_t ftd;
+					ti.get_func_details(&ftd);
+					for (size_t j = 0; j < ftd.size(); j++) {
+						ftd[j].type.get_type_name(&qs);
+						if (qs.size() != 0 && unresolved[qs.c_str()]) { t.push(ftd[j].type); bInnerUnvstChdrn = true; }
+					}
+					t.push(ftd.rettype);
+					ftd.rettype.get_type_name(&qs);
+					if (qs.size() != 0 && unresolved[qs.c_str()]) { t.push(ftd.rettype); bInnerUnvstChdrn = true; }
+				}
+				if (!bInnerUnvstChdrn) {
+					if (inti.is_typeref()) {
+						qs.clear();
+						inti.get_next_type_name(&qs);
+						if (qs.size() != 0) {
+							if (unvisited[qs.c_str()]) {
+								unvisited[qs.c_str()] = false; rev.push(qs.c_str());
+							}
+						}
+					}
+					unvisited[nm.c_str()] = false;
+					if (inti != ti) rev.push(nm.c_str());
+					t.pop();
+				}
+			}
+			if (!rev.empty()) {
+				while (!rev.empty()) {
+					s.push(rev.top());
+					rev.pop();
+				}
+			} else {
+				s.pop();
+				sortedTypes.push_back(v);
+			}
+		}
+	}
+	/*void IdaCallback::addAllDataRefs(ea_t ea, std::map<ea_t, bool>& refs, std::map<ea_t, bool>& isDependee, std::map<ea_t, bool>& frefs)
+	{
+		if (refs.find(ea) != refs.end() || frefs.find(ea) != frefs.end()) return;
+		if (usedData.find(ea) == usedData.end()) frefs[ea] = true;
+		else {
+			refs[ea] = true;
+		}
+		for (size_t i = 0; i < dependentData[ea].size(); i++) {
+			if (usedData.find(dependentData[ea][i]) != usedData.end()) isDependee[dependentData[ea][i]] = true;
+			addAllDataRefs(dependentData[ea][i], refs, isDependee, frefs);
+		}
+	}*/
+
+	void addAllDataRefs(ea_t ea, const std::map<ea_t, std::vector<ea_t>>& depData,
+		std::map<ea_t, std::vector<TypeInfo>>& usdData,
+		std::map<ea_t, bool>& refs, std::map<ea_t, bool>& isDependee, std::map<ea_t, bool>& frefs)
+	{
+		std::stack<ea_t> s;
+		s.push(ea);
+		while (s.size() != 0) {
+			ea_t e = s.top();
+			s.pop();
+			if (refs.find(e) != refs.end() || frefs.find(e) != frefs.end()) continue;
+			if (usdData.find(e) == usdData.end()) frefs[e] = true;
+			else {
+				refs[e] = true;
+				auto depIt = depData.find(e);
+				if (depIt == depData.end())
+					continue;
+				const std::vector<ea_t>& vec = depIt->second;
+				for (size_t i = 0; i < vec.size(); i++) {
+					if (usdData.find(vec[i]) != usdData.end()) isDependee[vec[i]] = true;
+					s.push(vec[i]);
+				}
+			}
+		}
+	}
+
+	//this only works properly in all cases if you start with types which have no dependents
+	//first must compute these and place them at the top of the list, the SCC not found as part of this would come after
+	/*void IdaCallback::dfsVisitData(ea_t ea, std::vector<ea_t>& sortedData, std::map<ea_t, bool>& visited)
+	{
+		if (visited.find(ea) == visited.end()) visited[ea] = true;
+		if (!visited[ea]) return;
+		visited[ea] = false;
+		for (int i = 0; i < dependentData[ea].size(); i++) {
+			if (usedData.find(dependentData[ea][i]) != usedData.end()) dfsVisitData(dependentData[ea][i], sortedData, visited);
+		}
+		sortedData.push_back(ea);
+	}*/
+
+	void dfsVisitData(ea_t ea, const std::map<ea_t, std::vector<ea_t>>& depData,
+		std::map<ea_t, std::vector<TypeInfo>>& usdData,
+		std::vector<ea_t>& sortedData, std::map<ea_t, bool>& unvisited)
+	{
+		std::stack<ea_t> s; //should switch to stack based
+		if (unvisited.find(ea) != unvisited.end() && !unvisited[ea]) return;
+		s.push(ea);
+		unvisited[ea] = false;
+		while (s.size() != 0) {
+			ea_t e = s.top();
+			bool hasUnvisitChdrn = false;
+			auto depIt = depData.find(e);
+			if (depIt != depData.end()) {
+				const std::vector<ea_t>& vec = depIt->second;
+				for (size_t i = 0; i < vec.size(); i++) {
+					if (usdData.find(vec[i]) != usdData.end()) {
+						if (unvisited.find(vec[i]) == unvisited.end() || unvisited[vec[i]]) {
+							unvisited[vec[i]] = false; s.push(vec[i]); hasUnvisitChdrn = true;
+						}
+					}
+				}
+			}
+			if (!hasUnvisitChdrn) {
+				s.pop();
+				sortedData.push_back(e);
+			}
+		}
+	}
+
+	/*void IdaCallback::checkFwdData(ea_t ea, const std::map<ea_t, bool>& alreadyDefined, std::map<ea_t, bool>& needDecl)
+	{
+		if (alreadyDefined.find(ea) != alreadyDefined.end()) return;
+		else needDecl[ea] = true;
+		for (size_t i = 0; i < dependentData[ea].size(); i++) {
+			checkFwdData(dependentData[ea][i], alreadyDefined, needDecl);
+		}
+	}*/
+
+	void checkFwdData(ea_t ea, const std::map<ea_t, std::vector<ea_t>>& depData,
+		const std::map<ea_t, bool>& alreadyDefined, std::map<ea_t, bool>& needDecl)
+	{
+		std::stack<ea_t> s;
+		std::map<ea_t, bool> seen;
+		s.push(ea);
+		while (s.size() != 0) {
+			ea_t e = s.top();
+			s.pop();
+			if (seen.find(e) != seen.end())
+				continue;
+			seen[e] = true;
+			if (ea == e) {}
+			else if (depData.find(e) == depData.end()) continue; //function pointers not in here
+			else if (alreadyDefined.find(e) != alreadyDefined.end()) continue;
+			else needDecl[e] = true;
+			auto depIt = depData.find(e);
+			if (depIt == depData.end())
+				continue;
+			const std::vector<ea_t>& vec = depIt->second;
+			for (size_t i = 0; i < vec.size(); i++) {
+				s.push(vec[i]);
+			}
+		}
+	}
+
+	std::string IdaCallback::dumpIdaInfo()
+	{
+		std::string str = "IDA SDK selected decompilation useful reported information dump follows:\n\n";
+		str = "Processor: " + inf_procname +
+			" Is 32-bit: " + std::string(inf_is_32bit() ? "yes" : "no") +
+			" Is 64-bit: " + std::string(inf_is_64bit() ? "yes" : "no") +
+			" Is big-endian: " + std::string(inf_is_be() ? "yes" : "no") +
+			" MaxPtrSize: " + std::to_string(ph.max_ptr_size()) +
+			" SegRegSize: " + std::to_string(ph.segreg_size) +
+			" SegmBitness: " + std::to_string(inf_get_app_bitness()) +
+			" StkArgOffs: " + std::to_string(get_stkarg_offset()) +
+			" Use64: " + std::to_string(ph.use64()) +
+			" Use32: " + std::to_string(ph.use32()) +
+			" DefCCModl: 0x" + to_string((uint)inf_cc_cm, std::hex) +
+			"\n\n";
+		const til_t* idati = get_idati();
+		str += "Number of registers: " + std::to_string(ph.regs_num) + "\n";
+		for (int i = 0; i < ph.regs_num; i++) {
+			reg_info_t ri, mnri;
+			bitrange_t bits, mnbits;
+			//get_reg_info(ph.reg_names[i], &bits);
+			const char* regnm = nullptr;
+			qstring qs;
+			regnm = get_reg_info(ph.reg_names[i], &bits);
+			parse_reg_name(&ri, ph.reg_names[i]);
+			bool bSame = regnm == nullptr || strcmp(regnm, ph.reg_names[i]) == 0;
+			if (!bSame) {
+				get_reg_info(regnm, &mnbits);
+				parse_reg_name(&mnri, regnm);
+				get_reg_name(&qs, i, mnri.size);
+			}
+			str += "Idx: " + std::to_string(i) + " Reg: " + ph.reg_names[i] + " Size: " + std::to_string(ri.size) +
+				" BitOffs: " + std::to_string(bits.bitoff()) + " Bits: " + std::to_string(bits.bitsize()) +
+				(!bSame ? +" MainNm: " + std::string(regnm) + " Size: " + std::to_string(mnri.size) +
+					" BitOffs: " + std::to_string(mnbits.bitoff()) + " Bits: " + std::to_string(mnbits.bitsize()) + " SzName: " + std::string(qs.c_str()) : "") +
+				"\n";
+		}
+		//ph.reg_first_sreg, ph.reg_last_sreg, ph.segreg_size
+		str += "\n";
+		size_t num = 0;
+		ea_t ea = get_first_fixup_ea();
+		while (ea != BADADDR) {
+			fixup_data_t fd;
+			get_fixup(&fd, ea);
+			qstring qs;
+			get_fixup_desc(&qs, ea, fd);
+			//fd.get_desc(&qs, ea); //has color info
+			tag_remove(&qs);
+			str += "Fixup: " + std::string(qs.c_str()) + " Addr: 0x" + to_string(ea, std::hex) +
+				" Size: 0x" + to_string(calc_fixup_size(fd.get_type()), std::hex) + " Type: 0x" + to_string(fd.get_type(), std::hex) + "\n";
+			num++;
+			ea = get_next_fixup_ea(ea);
+		}
+		str += "Total fixups: " + std::to_string(num) + "\n\n";
+		num = get_selector_qty();
+		str += "Number of selectors: " + std::to_string(num) + "\n";
+		for (size_t i = 0; i < num; i++) {
+			sel_t base;
+			getn_selector(&base, &ea, (int)i);
+			segment_t* seg = get_segm_by_sel(base);
+			qstring qs;
+			get_segm_name(&qs, seg);
+			str += "Selector Base: 0x" + to_string(base, std::hex) + " Addr: 0x" + to_string(ea, std::hex) + " Seg: " + std::string(qs.c_str()) + "\n";
+		}
+		if (num != 0) str += "\n";
+		num = get_segm_qty();
+		str += "Number of segments: " + std::to_string(num) + "\n";
+		for (size_t i = 0; i < num; i++) {
+			segment_t* seg = getnseg((int)i);
+			qstring qs, qc, qcr, qcls;
+			get_segm_name(&qs, seg);
+			get_segment_cmt(&qc, seg, false);
+			get_segment_cmt(&qcr, seg, false);
+			get_segm_class(&qcls, seg);
+			str += "Segment: " + std::string(qs.c_str()) + " Cmt: " + std::string(qc.c_str()) + " CmtRpt: " + std::string(qcr.c_str()) + " Class: " + std::string(qcls.c_str()) +
+				" Sel: 0x" + to_string(seg->sel, std::hex) + " Align: 0x" + to_string((uint)seg->align, std::hex) + " Bitness: 0x" + to_string((uint)seg->bitness, std::hex) +
+				" Comb: 0x" + to_string((uint)seg->comb, std::hex) + " Perm: 0x" + to_string((uint)seg->perm, std::hex) + " Flags: 0x" + to_string(seg->flags, std::hex) +
+				" Type: 0x" + to_string((uint)seg->type, std::hex) + " StartEA: 0x" + to_string(seg->start_ea, std::hex) + " EndEA: 0x" + to_string(seg->end_ea, std::hex) + "\n";
+		}
+		if (num != 0) str += "\n";
+		str += "til name: " + std::string(idati->name) + " Description: " + std::string(idati->desc) + " Bases: " + std::to_string(idati->nbases) + "\n";
+		for (int i = 0; i < idati->nbases; i++) {
+			str += "Base til name: " + std::string(idati->base[i]->name) + " Description: " + std::string(idati->base[i]->desc) + "\n";
+		}
+		//idati->types;
+		num = get_idasgn_qty();
+		str += "Number of signatures: " + std::to_string(num) + "\n";
+		for (size_t i = 0; i < num; i++) {
+			qstring signame, optlibs, longname;
+			get_idasgn_desc(&signame, &optlibs, (int)i);
+			//idasgn_t* is = get_idasgn_header_by_short_name(signame.c_str());
+			get_idasgn_title(&longname, signame.c_str());
+			str += "Signature short form name: " + std::string(signame.c_str()) + " Optional Libraries: " + std::string(optlibs.c_str()) + " Long form name: " + std::string(longname.c_str()) + "\n";
+		}
+		str += "\nNumber of imported modules: " + std::to_string(modNames.size()) + "\n";
+		for (std::map<ea_t, ImportInfo>::iterator it = imports.begin(); it != imports.end(); it++) {
+			qstring qs, qn, name;
+			get_long_name(&qs, it->first);
+			get_name(&qn, it->first);
+			name = get_short_name(it->first);
+			if (name.size() != 0) {
+				name = name.substr(0, name.find("(", 0));
+			}
+			str += "Long name: " + std::string(qs.c_str()) + " Name: " + std::string(qn.c_str()) + " Callable name: " + std::string(name.c_str());
+			tinfo_t tif;
+			if (getFuncByGuess(it->first, tif)) {
+				print_type(&qs, it->first, PRTYPE_1LINE);
+				func_type_data_t ftd;
+				tif.get_func_details(&ftd);
+				str += " Type: " + std::string(qs.c_str()) + " Args: 0x" + to_string(ftd.size(), std::hex) + " RetType: 0x" + to_string(ftd.retloc.atype(), std::hex) + " RetSize: 0x" + to_string(ftd.rettype.get_size(), std::hex) + "\n";
+			} else str += "\n";
+		}
+		num = get_entry_qty();
+		str += "\nNumber of entry points: " + std::to_string(num) + "\n";
+		for (size_t i = 0; i < num; i++) {
+			std::string disp;
+			ea_t ea = get_entry(get_entry_ordinal(i)); //qstring qs; get_entry_name(&qs, i);
+			str += "Entry point ordinal: " + std::to_string(i) + " Addr: 0x" + to_string(ea, std::hex) + "\n";
+		}
+		num = get_func_qty();
+		str += "\nNumber of functions: " + std::to_string(num) + "\n";
+		for (size_t i = 0; i < num; i++) {
+			func_t* f = getn_func(i);
+			if (f == nullptr) continue;
+			qstring qs, qt;
+			get_func_name(&qs, f->start_ea);
+			tinfo_t tif;
+			get_long_name(&qt, f->start_ea);
+			str += "Name: " + std::string(qs.c_str()) + " Long name: " + std::string(qt.c_str()) + " Addr: 0x" + to_string(f->start_ea, std::hex) + " LocVars: 0x" + to_string(f->frsize, std::hex) +
+				" SaveRegs: 0x" + to_string(f->frregs, std::hex) + " PopArgs: 0x" + to_string(f->argsize, std::hex) + " AFlags: 0x" + to_string(get_aflags(f->start_ea), std::hex) + " AFlags0: 0x" + to_string(get_aflags0(f->start_ea), std::hex) +
+				" RegArgs: 0x" + to_string(f->regargqty, std::hex) + " FrmPtrDelta: 0x" + to_string(f->fpd, std::hex) + " StkPts: 0x" + to_string(f->pntqty, std::hex) + "\n";
+			if (getFuncByGuess(f->start_ea, tif)) {
+				print_type(&qt, f->start_ea, PRTYPE_1LINE);
+				func_type_data_t ftd;
+				tif.get_func_details(&ftd);
+				ftd.dump(&qs);
+				qs.remove_last(1); //trailing new line
+				str += "Type: " + std::string(qt.c_str()) + " Args: 0x" + to_string(ftd.size(), std::hex) + " CallMthd: 0x" + to_string(ftd.get_call_method(), std::hex) + " CC: 0x" + to_string((uint)GHIDRADEC_FTD_CC(ftd), std::hex) + " Dump:\n" + qs.c_str() + "\n";
+				for (size_t i = 0; i < ftd.size(); i++) {
+					str += "ArgName: " + std::string(ftd[i].name.c_str()) + " ArgCmt: " + std::string(ftd[i].cmt.c_str()) + " ArgLoc: 0x" + to_string(ftd[i].argloc.is_stkoff() ? ftd[i].argloc.stkoff() : ftd[i].argloc.reg1(), std::hex) + "\n";
+				}
+			}
+			if (f->frame != BADNODE) {
+				std::vector<FrameMemberInfo> frameMembers;
+				getFrameMembers(f, frameMembers);
+				str += "Frame members: 0x" + to_string(frameMembers.size(), std::hex) + " Frame size: 0x" + to_string(get_frame_size(f), std::hex) + " LocOffs: 0x" + to_string(frame_off_lvars(f), std::hex) +
+					" SaveOffs: 0x" + to_string(frame_off_savregs(f), std::hex) + " RetOffs: 0x" + to_string(frame_off_retaddr(f), std::hex) + " RetSize: 0x" + to_string(get_frame_retsize(f), std::hex) + " ArgOffs: 0x" + to_string(frame_off_args(f), std::hex) + "\n";
+				for (const FrameMemberInfo& member : frameMembers) {
+					str += "Member name: " + member.name + " Offset: 0x" + to_string(member.soff, std::hex) + "\n";
+				}
+			}
+			//if (f->points == nullptr) get_spd(f, f->start_ea);
+			/*if (f->points != nullptr) {
+				for (int i = 0; i < f->pntqty; i++) {
+					sval_t s = f->points[i].spd;
+					str += "StackAdj: 0x" + to_string(s, std::hex) + " Offset: 0x" + to_string(f->points[i].ea, std::hex) + "\n";
+				}
+			}
+			for (ea_t i = get_first_cref_to(f->start_ea); i != BADADDR;)
+			{
+				func_t* fp = get_func(i);
+				if (fp->points == nullptr) get_spd(fp, fp->start_ea);
+				str += "CdXref: 0x" + to_string(i, std::hex) + " SpDelta: " + to_string(get_spd(fp, get_item_end(i)), std::hex) +
+					" SpEfctvDelta: " + to_string(get_effective_spd(fo, get_item_end(i)), std::hex) + " SpDelta: " + to_string(get_sp_delta(fp, get_item_end(i)), std::hex) + "\n";
+				i = get_next_cref_to(f->start_ea, i);
+				//str += (i == BADADDR) ? "\n" : " ";
+			}*/
+			if (f->regargs == nullptr) read_regargs(f);
+			for (int i = 0; i < f->regargqty; i++) { //name can be a nullptr!
+				qstring out, qs;
+				size_t size = 0;
+				//regargs are destroyed when the full function type is determined
+				//if (tif.is_func()) {
+					//qs = ph.reg_names[f->regargs[i].reg];
+				//} else 
+				if (f->regargs[i].type != nullptr) {
+					tinfo_t ti; //The type information is internally kept as an array of bytes terminated by 0.
+					qtype typeForDeser;
+					typeForDeser.append(f->regargs[i].type);
+					ti.deserialize(get_idati(), &typeForDeser); //will free buffer passed!
+					ti.get_type_name(&out);
+					size = ti.get_size();
+					get_reg_name(&qs, f->regargs[i].reg, size);
+					//qs = ph.reg_names[f->regargs[i].reg];
+				} else qs = ph.reg_names[f->regargs[i].reg];
+				str += "RegArgName: " + std::string(f->regargs[i].name == nullptr ? "" : f->regargs[i].name) +
+					" Reg: " + std::string(qs.c_str()) + " Idx: 0x" + to_string(f->regargs[i].reg, std::hex) +
+					" Size: 0x" + to_string(size, std::hex) +
+					" TDataLen: 0x" + to_string(strlen((const char*)f->regargs[i].type), std::hex) + " Type: " + std::string(out.c_str()) + "\n";
+			}
+			if (f->regvars == nullptr) find_regvar(f, f->start_ea, nullptr);
+			if (f->regvarqty != -1 && f->regvars != nullptr) {
+				for (int i = 0; i < f->regvarqty; i++) {
+					str += "RegVar: " + std::string(f->regvars[i].user != nullptr ? f->regvars[i].user : "") + " Reg: " + std::string(f->regvars[i].canon) + " Cmt: " + std::string(f->regvars[i].cmt == nullptr ? "" : f->regvars[i].cmt) + "\n";
+				}
+			}
+			str += "\n";
+		}
+		return str;
+	}
+
+	std::string colorize(std::string str, bool bColor, char clr)
+	{
+		return bColor ? std::string({ COLOR_ON, clr }) + str + std::string({ COLOR_OFF, clr }) : str;
+	}
+	std::string printTypeForCode(const tinfo_t & t, std::string name, bool bColor, char NameColor, bool bTop, size_t indnt) //unions, bitfields and typedefs to default built in types require this
+	{
+		std::string out;
+		std::stack<std::tuple<std::string, tinfo_t, bool>> s;
+		s.push(std::tuple<std::string, tinfo_t, bool>(name, t, false));
+		while (!s.empty()) {
+			std::tuple<std::string, tinfo_t, bool> item = s.top();
+			s.pop();
+			if (std::get<2>(item)) { //post order time where index is complement
+				const tinfo_t& ti = std::get<1>(item);
+				if (ti.is_ptr() || ti.is_array() && t != ti) {
+					out += std::string(std::get<0>(item).size() != 0 || ti.is_const() ? "* " : "*") + (ti.is_const() ? colorize("const", bColor, COLOR_KEYWORD) + (std::get<0>(item).size() != 0 ? " " : "") : "") + colorize(std::get<0>(item), bColor, NameColor);
+				} else if (ti.is_array()) {
+					array_type_data_t atd;
+					ti.get_array_details(&atd); //pointer to array should be treated as pointer to pointer
+					out += (std::get<0>(item).size() != 0 ? " " : "") + colorize(std::get<0>(item), bColor, NameColor) + "[" + std::to_string(atd.nelems) + "]";
+				}
+				continue;
+			}
+			const tinfo_t& ti = std::get<1>(item);
+			qstring qs;
+			ti.get_type_name(&qs);
+			if ((!bTop || t != ti) && qs.size() != 0) out += (ti.is_const() ? colorize("const", bColor, COLOR_KEYWORD) + " " : "") + colorize(qs.c_str(), bColor, GHIDRADEC_COLOR_TYPE) + (std::get<0>(item).size() != 0 ? " " : "") + colorize(std::get<0>(item), bColor, NameColor);
+			else if (ti.is_ptr() && !ti.is_funcptr()) {
+				ptr_type_data_t ptd;
+				ti.get_ptr_details(&ptd);
+				s.push(std::tuple<std::string, tinfo_t, bool>(std::get<0>(item), std::get<1>(item), true));
+				s.push(std::tuple<std::string, tinfo_t, bool>("", ptd.obj_type, false));
+			} else if (ti.is_array()) {
+				array_type_data_t atd;
+				ti.get_array_details(&atd);
+				s.push(std::tuple<std::string, tinfo_t, bool>(std::get<0>(item), std::get<1>(item), true));
+				s.push(std::tuple<std::string, tinfo_t, bool>("", atd.elem_type, false));
+			} else if (ti.is_funcptr()) {
+				func_type_data_t ftd;
+				ti.get_func_details(&ftd);
+				std::string str;
+				for (size_t i = 0; i < ftd.size(); i++) {
+					if (i != 0) str += ", ";
+					str += printTypeForCode(ftd[i].type, ftd[i].name.c_str(), bColor, NameColor, false, indnt);
+					if (ftd[i].cmt.size() != 0) str += colorize(" /*" + std::string(ftd[i].cmt.c_str()) + "*/", bColor, COLOR_AUTOCMT);
+				}
+				std::string model = ccToStr(GHIDRADEC_FTD_CC(ftd), ftd.get_call_method(), false);
+				out += printTypeForCode(ftd.rettype, "", bColor, NameColor, false, indnt) + " (" + (model != "default" && model != "unknown" ? colorize(model, bColor, COLOR_KEYWORD) + " " : "") + "*" + colorize(std::get<0>(item), bColor, NameColor) + ")(" + str + ")";
+			} else if (ti.is_udt()) {
+				udt_type_data_t utd;
+				ti.get_udt_details(&utd);
+				std::string str;
+				for (size_t i = 0; i < utd.size(); i++) {
+					if (utd[i].type.is_bitfield()) {
+						bitfield_type_data_t btd;
+						utd[i].type.get_bitfield_details(&btd);
+						str += std::string(indnt + 2, ' ') + colorize(std::string(utd[i].name.c_str()), bColor, NameColor) + ":" + std::to_string(btd.width);
+					} else str += std::string(indnt + 2, ' ') + printTypeForCode(utd[i].type, utd[i].name.c_str(), bColor, NameColor, is_anonymous_udt(utd[i].type), indnt + 2);
+					str += ";" + colorize(std::string(utd[i].cmt.size() != 0 ? " //" + std::string(utd[i].cmt.c_str()) : ""), bColor, COLOR_AUTOCMT) + "\n";
+				}
+				out += colorize(utd.is_union ? "union" : "struct", bColor, COLOR_KEYWORD) + " {\n" + str + std::string(indnt, ' ') + "}" + (std::get<0>(item).size() != 0 ? " " : "") + colorize(std::get<0>(item), bColor, NameColor);
+			} else if (ti.is_enum()) {
+				enum_type_data_t etd;
+				ti.get_enum_details(&etd);
+				out += colorize("enum", bColor, COLOR_KEYWORD) + " {\n";
+				for (size_t i = 0; i < etd.size(); i++) {
+					out += std::string(indnt + 2, ' ') + std::string(etd[i].name.c_str()) + " = " + std::to_string(etd[i].value) + (i != etd.size() - 1 ? "," : "") + colorize(std::string(etd[i].cmt.size() != 0 ? " //" + std::string(etd[i].cmt.c_str()) : ""), bColor, COLOR_AUTOCMT) + "\n";
+				}
+				out += "}" + std::string(std::get<0>(item).size() != 0 ? " " : "") + colorize(std::get<0>(item), bColor, NameColor);
+			} else if (is_type_int(ti.get_realtype()) || ti.is_uint() || ti.is_floating() || ti.is_void() || ti.is_bool() || ti.is_unknown()) {
+				qstring qs;
+				ti.print(&qs, nullptr, PRTYPE_DEF);
+				out += colorize(qs.c_str(), bColor, COLOR_KEYWORD) + (std::get<0>(item).size() != 0 ? " " + colorize(std::get<0>(item), bColor, NameColor) : "");
+			}
+		}
+		return out;
+	}
+	std::string printTypeForCode(const std::vector<TypeInfo>& types, std::string name, bool bColor, char NameColor, bool bTop, size_t indnt)
+	{
+		std::string out;
+		std::stack<std::pair<std::string, int>> s;
+		s.push(std::pair<std::string, int>(name, 0));
+		while (!s.empty()) {
+			std::pair<std::string, int> item = s.top();
+			s.pop();
+			if (item.second < 0) { //post order time where index is complement
+				const TypeInfo& ti = types.at(~item.second);
+				if (ti.metaType == "ptr" || ti.metaType == "array" && 0 != ~item.second) {
+					out += std::string(item.first.size() != 0 || ti.isReadOnly ? "* " : "*") + (ti.isReadOnly ? colorize("const", bColor, COLOR_KEYWORD) + (item.first.size() != 0 ? " " : "") : "") + colorize(item.first, bColor, NameColor);
+				} else if (ti.metaType == "array") { //pointer to array should be treated as pointer to pointer
+					out += (item.first.size() != 0 ? " " : "") + colorize(item.first, bColor, NameColor) + "[" + std::to_string(ti.arraySize) + "]";
+				}
+				continue;
+			}
+			const TypeInfo& ti = types.at(item.second);
+			tinfo_t tinf;
+			tinf.get_named_type(get_idati(), ti.typeName.c_str());
+			bool bHasBitFields = false;
+			if (tinf.is_struct()) {
+				udt_type_data_t utd;
+				tinf.get_udt_details(&utd);
+				for (size_t i = 0; i < utd.size(); i++) {
+					if (utd[i].type.is_bitfield()) {
+						bHasBitFields = true; break;
+					}
+				}
+			}
+			if ((!bTop || item.second != 0) && ti.typeName.size() != 0) out += (ti.isReadOnly ? colorize("const", bColor, COLOR_KEYWORD) + " " : "") + colorize(ti.typeName, bColor, GHIDRADEC_COLOR_TYPE) + (item.first.size() != 0 ? " " : "") + colorize(item.first, bColor, NameColor);
+			else if (bTop &&
+					(ti.metaType == "int" || ti.metaType == "uint" || ti.metaType == "void" ||
+						ti.metaType == "bool" || ti.metaType == "float" || ti.metaType == "unknown") ||
+						(tinf.is_union() || tinf.is_struct() && bHasBitFields) /*&& !ti.is_typeref()*/) { //&& has_bitfields
+				out += printTypeForCode(tinf, item.first, bColor, NameColor, bTop, indnt);
+			} else if (ti.metaType == "ptr") {
+				s.push(std::pair<std::string, int>(item.first, ~item.second));
+				s.push(std::pair<std::string, int>("", item.second + 1));
+			} else if (ti.metaType == "array") {
+				s.push(std::pair<std::string, int>(item.first, ~item.second));
+				s.push(std::pair<std::string, int>("", item.second + 1));
+			} else if (ti.metaType == "code") {
+				std::string str;
+				for (size_t i = 0; i < ti.funcInfo.syminfo.size(); i++) {
+					if (i != 0) str += ", ";
+					str += printTypeForCode(ti.funcInfo.syminfo[i].pi.ti, ti.funcInfo.syminfo[i].pi.name, bColor, NameColor, false, indnt);
+				}
+				out += printTypeForCode(ti.funcInfo.retType.pi.ti, "", bColor, NameColor, false, indnt) + " (" + (ti.funcInfo.model != "default" && ti.funcInfo.model != "unknown" ? colorize(ti.funcInfo.model, bColor, COLOR_KEYWORD) + " " : "") + "*" + colorize(item.first, bColor, NameColor) + ")(" + str + ")";
+			} else if (ti.metaType == "struct") { //note: bitfields and unions are not handled here except as byte arrays
+				std::string str;
+				for (size_t i = 0; i < ti.structMembers.size(); i++) {
+					str += std::string(indnt + 2, ' ') + printTypeForCode(ti.structMembers[i].ti, ti.structMembers[i].name, bColor, NameColor, ti.structMembers[i].name == "", indnt + 2) + ";\n";
+				}
+				out += colorize("struct", bColor, COLOR_KEYWORD) + " {\n" + str + std::string(indnt, ' ') + "}" + (item.first.size() != 0 ? " " : "") + colorize(item.first, bColor, NameColor);
+			} else if (ti.isEnum) {
+				out += colorize("enum", bColor, COLOR_KEYWORD) + " {\n";
+				for (size_t i = 0; i < ti.enumMembers.size(); i++) {
+					out += std::string(indnt + 2, ' ') + std::string(ti.enumMembers[i].first.c_str()) + " = " + std::to_string(ti.enumMembers[i].second) + (i != ti.enumMembers.size() - 1 ? "," : "") + "\n";
+				}
+				out += "}" + std::string(item.first.size() != 0 ? " " : "") + colorize(item.first, bColor, NameColor);
+			} else {}
+		}
+		return out;
+	}
+
+	std::string IdaCallback::initForType(const tinfo_t & t, ea_t addr, bool bColor) //unions/bitfields require this method
+	{
+		std::string out;
+		std::stack<std::tuple<ea_t, tinfo_t, int>> s;
+		s.push(std::tuple<ea_t, tinfo_t, int>(addr, t, 0));
+		while (!s.empty()) {
+			std::tuple<ea_t, tinfo_t, int> item = s.top();
+			s.pop();
+			if (std::get<2>(item) == -1) {
+				out += " }";
+				continue;
+			} else if (std::get<2>(item) == -2) {
+				out += ", ";
+				continue;
+			}
+			const tinfo_t& ti = std::get<1>(item);
+			std::string str;
+			if (ti.is_typeref()) {
+				qstring qs;
+				ti.get_next_type_name(&qs);
+				tinfo_t tinf;
+				tinf.get_named_type(get_idati(), qs.c_str());
+				str = initForType(tinf, std::get<0>(item), bColor);
+			}  else if (ti.is_udt()) {
+				udt_type_data_t utd;
+				ti.get_udt_details(&utd);
+				str = "{ ";
+				if (utd.is_union) { //how to choose member? size of each member could be matched with next data, pointers in union could be matched to pointers in data
+					if (utd.size() != 0) str += initForType(utd[0].type, std::get<0>(item), bColor);
+				} else {
+					for (size_t i = 0; i < utd.size(); i++) {
+						if (i != 0) str += ", ";
+						if (utd[i].type.is_bitfield()) {
+							bitfield_type_data_t btd;
+							utd[i].type.get_bitfield_details(&btd);
+							uint64 val = 0;
+							size_t totalSize = (size_t)((utd[i].offset + btd.width + 7) / 8 - utd[i].offset / 8);
+							std::vector<uchar> bts(totalSize);
+							get_bytes(bts.data(), totalSize, std::get<0>(item));
+							unsigned long long num, shiftbits = 8 - ((utd[i].offset + btd.width) % 8);
+							num |= (bts[0] >> shiftbits);
+							for (size_t j = 1; j < bts.size(); j++) {
+								num |= (((unsigned long long)bts[j]) << (j * 8 - shiftbits));
+							}
+							num &= ((~0ull) >> (8 - (btd.width % 8)));
+							str += colorize("0x" + to_string(num, std::hex), bColor, COLOR_NUMBER);
+						} else {
+							str += initForType(utd[i].type, (ea_t)(std::get<0>(item) + utd[i].offset / 8), bColor);
+						}
+					}
+				}
+				str += " }";
+			} else if (is_strlit(get_flags(std::get<0>(item)))) { //preempt integer and array handling
+				//asize_t len = get_item_size(std::get<0>(item));
+				//single byte formats: STRTYPE_TERMCHR, STRTYPE_C, STRTYPE_PASCAL, STRTYPE_LEN2, STRTYPE_LEN4
+				//double byte formats: STRTYPE_C_16, STRTYPE_PASCAL_16, STRTYPE_LEN4_16
+				//int len = get_max_strlit_length(addr, ti.get_size() == 1 ? STRTYPE_C : (ti.get_size() == 2 ? STRTYPE_C_16 : STRTYPE_C_32), ALOPT_IGNHEADS | ALOPT_IGNPRINT);
+				qstring qs;
+				get_strlit_contents(&qs, std::get<0>(item), -1, get_str_type(std::get<0>(item)), nullptr, STRCONV_ESCAPE); //u8 for UTF-8 with char and u for UTF-16 with char16_t
+				if (ti.is_array()) {
+					array_type_data_t atd;
+					ti.get_array_details(&atd);
+					str = std::string(atd.elem_type.get_size() == sizeof(wchar_t) ? "L" : (atd.elem_type.get_size() == sizeof(char32_t) ? "U" : "")) + "\"" + std::string(qs.c_str()) + "\"";
+				} else str = std::string(ti.get_size() == sizeof(wchar_t) ? "L" : (ti.get_size() == sizeof(char32_t) ? "U" : "")) + "\"" + std::string(qs.c_str()) + "\"";
+				str = colorize(str, bColor, GHIDRADEC_COLOR_STRING);
+			} else if (ti.is_array()) {
+				array_type_data_t atd;
+				ti.get_array_details(&atd);
+				str = "{ ";
+				s.push(std::tuple<ea_t, tinfo_t, int>(std::get<0>(item), ti, -1));
+				for (uint32 i = atd.nelems - 1; true; i--) {
+					s.push(std::tuple<ea_t, tinfo_t, int>((ea_t)(std::get<0>(item) + atd.elem_type.get_size() * i), atd.elem_type, 0));
+					if (i != 0) s.push(std::tuple<ea_t, tinfo_t, int>((ea_t)std::get<0>(item), ti, -2));
+					else break;
+				}
+			} else if (ti.is_char() || is_type_int(ti.get_realtype()) && ti.is_signed()) {
+				long long num = 0;
+				get_bytes(&num, ti.get_size(), std::get<0>(item));
+				//heuristics for printing hex vs decimal?
+				str = colorize("0x" + to_string(num, std::hex), bColor, COLOR_NUMBER);
+			} else if (is_type_int(ti.get_realtype())) {
+				unsigned long long num = 0;
+				get_bytes(&num, ti.get_size(), std::get<0>(item));
+				//heuristics for printing hex vs decimal?
+				str = colorize("0x" + to_string(num, std::hex), bColor, COLOR_NUMBER);
+			} else if (ti.is_bool()) {
+				str = colorize(get_byte(std::get<0>(item)) != 0 ? "true" : "false", bColor, COLOR_KEYWORD);
+			} else if (ti.is_floating()) {
+				if (ti.is_float()) {
+					float f;
+					get_bytes(&f, ti.get_size(), std::get<0>(item));
+					char buf[33];
+					qsnprintf(buf, sizeof(buf), "%.*g", FLT_DECIMAL_DIG, f);
+					str = colorize(buf, bColor, COLOR_NUMBER);
+				} else if (ti.is_double()) {
+					double f;
+					get_bytes(&f, ti.get_size(), std::get<0>(item));
+					char buf[33];
+					qsnprintf(buf, sizeof(buf), "%.*lg", DBL_DECIMAL_DIG, f);
+					str = colorize(buf, bColor, COLOR_NUMBER);
+				} /*else if (ti.is_ldouble()) {
+					long double f;
+					get_bytes(&f, sz, it->first);
+					char buf[33];
+					qsnprintf(buf, sizeof(buf), "%.*Lg", LDBL_DECIMAL_DIG, f); LDBL_DECIMAL_DIG = 21 for 80-bit/10-byte?
+				}*/ else {
+					//msg("%s %s\n", ti.typeName.c_str(), ti.metaType.c_str());
+				}
+			} else if (ti.is_ptr()) {
+				uval_t u;
+				get_data_value(&u, std::get<0>(item), (asize_t)ti.get_size());
+				//tinfo_t tif;
+				//get_tinfo(&tif, u);
+				qstring qs = get_name(u);
+				str = qs.size() == 0 ? "0x" + to_string(u, std::hex) : "&" + colorize(std::string(qs.c_str()), bColor, GHIDRADEC_COLOR_GLOBAL);//initForType(tif, addr);
+			}
+			out += str;
+		}
+		return out;
+	}
+	std::string IdaCallback::initForType(const std::vector<TypeInfo>& types, ea_t addr, bool bColor)
+	{
+		std::string out;
+		std::stack<std::pair<ea_t, int>> s;
+		s.push(std::pair<ea_t, int>(addr, 0));
+		while (!s.empty()) {
+			std::pair<ea_t, int> item = s.top();
+			s.pop();
+			if (item.second == -1) {
+				out += " }";
+				continue;
+			} else if (item.second == -2) {
+				out += ", ";
+				continue;
+			}
+			const TypeInfo& ti = types.at(item.second);
+			std::string str;
+			if (ti.size == -1) { //typeref
+				tinfo_t tinf;
+				tinf.get_named_type(get_idati(), ti.typeName.c_str());
+				std::vector<TypeInfo> nextChain;
+				getType(tinf, nextChain, true);
+				str = initForType(nextChain, item.first, bColor);
+				//msg("%s %s\n", ti.typeName.c_str(), ti.metaType.c_str());
+			} else if (ti.metaType == "struct") {
+				str = "{ ";
+				for (size_t i = 0; i < ti.structMembers.size(); i++) {
+					if (i != 0) str += ", ";
+					str += initForType(ti.structMembers[i].ti, item.first + (ea_t)ti.structMembers[i].offset, bColor);
+				}
+				str += " }";
+			} else if (is_strlit(get_flags(item.first))) { //preempt integer and array handling
+				//asize_t len = get_item_size(item.first);
+				//single byte formats: STRTYPE_TERMCHR, STRTYPE_C, STRTYPE_PASCAL, STRTYPE_LEN2, STRTYPE_LEN4
+				//double byte formats: STRTYPE_C_16, STRTYPE_PASCAL_16, STRTYPE_LEN4_16
+				//int len = get_max_strlit_length(item.first, ti.get_size() == 1 ? STRTYPE_C : (ti.get_size() == 2 ? STRTYPE_C_16 : STRTYPE_C_32), ALOPT_IGNHEADS | ALOPT_IGNPRINT);
+				qstring qs;
+				get_strlit_contents(&qs, item.first, -1, get_str_type(item.first), nullptr, STRCONV_ESCAPE); //u8 for UTF-8 with char and u for UTF-16 with char16_t
+				if (ti.metaType == "array") {
+					//if ((ti + 1)->size == -1) //in case a chain of type refs until the size needs to be consumed which would require recursion since its the typeref case above, just divide
+					str = std::string((ti.size / ti.arraySize) == sizeof(wchar_t) ? "L" : ((ti.size / ti.arraySize) == sizeof(char32_t) ? "U" : "")) + "\"" + std::string(qs.c_str()) + "\"";
+				} else str = std::string(ti.size == sizeof(wchar_t) ? "L" : (ti.size == sizeof(char32_t) ? "U" : "")) + "\"" + std::string(qs.c_str()) + "\"";
+				str = colorize(str, bColor, GHIDRADEC_COLOR_STRING);
+			} else if (ti.metaType == "array") {
+				str = "{ ";
+				s.push(std::pair<ea_t, int>(item.first, -1));
+				for (unsigned long long i = ti.arraySize - 1; true; i--) {
+					s.push(std::pair<ea_t, int>(item.first + (ea_t)types.at(item.second + 1).size * (ea_t)i, item.second + 1));
+					if (i != 0) s.push(std::pair<ea_t, int>(item.first, -2));
+					else break;
+				}
+			} else if (ti.metaType == "char" || ti.metaType == "int" || ti.metaType == "unknown") {
+				long long num = 0;
+				get_bytes(&num, (ssize_t)ti.size, item.first);
+				//heuristics for printing hex vs decimal?
+				str = colorize("0x" + to_string(num, std::hex), bColor, COLOR_NUMBER);
+			} else if (ti.metaType == "uint") {
+				unsigned long long num = 0;
+				get_bytes(&num, (ssize_t)ti.size, item.first);
+				//heuristics for printing hex vs decimal?
+				str = colorize("0x" + to_string(num, std::hex), bColor, COLOR_NUMBER);
+			} else if (ti.metaType == "bool") {
+				str = colorize(get_byte(item.first) != 0 ? "true" : "false", bColor, COLOR_KEYWORD);
+			} else if (ti.metaType == "float") {
+				if (ti.size == sizeof(float)) {
+					float f;
+					get_bytes(&f, (ssize_t)ti.size, item.first);
+					char buf[33];
+					qsnprintf(buf, sizeof(buf), "%.*g", FLT_DECIMAL_DIG, f);
+					str = colorize(buf, bColor, COLOR_NUMBER);
+				} else if (ti.size == sizeof(double)) {
+					double f;
+					get_bytes(&f, (ssize_t)ti.size, item.first);
+					char buf[33];
+					qsnprintf(buf, sizeof(buf), "%.*lg", DBL_DECIMAL_DIG, f);
+					str = colorize(buf, bColor, COLOR_NUMBER);
+				} /*else if (ti.is_ldouble()) {
+					long double f;
+					get_bytes(&f, sz, it->first);
+					char buf[33];
+					qsnprintf(buf, sizeof(buf), "%.*Lg", LDBL_DECIMAL_DIG, f); LDBL_DECIMAL_DIG = 21 for 80-bit/10-byte?
+				}*/ else {
+					//msg("%s %s\n", ti.typeName.c_str(), ti.metaType.c_str());
+				}
+			} else if (ti.metaType == "ptr") { //code would have to be a function pointer
+				//} else if (ti.is_ptr()) {
+				uval_t u;
+				get_data_value(&u, item.first, (asize_t)ti.size);
+				//tinfo_t tif;
+				//get_tinfo(&tif, u);
+				qstring qs = get_name(u);
+				str = qs.size() == 0 ? "0x" + to_string(u, std::hex) : "&" + colorize(std::string(qs.c_str()), bColor, GHIDRADEC_COLOR_GLOBAL);//initForType(tif, item.first, bColor);
+			}
+			out += str;
+		}
+		return out;
+	}
+
+	std::string IdaCallback::print_func(ea_t ea, std::string& forDisplay, char NameColor)
+	{
+		//does model go before or after return type - seems to be compiler specific what about C language spec?
+		std::string definitions = printTypeForCode(funcProtoInfos[ea].fpi.retType.pi.ti, "", false, GHIDRADEC_COLOR_FUNCTION, false, 0) + (funcProtoInfos[ea].fpi.model != "default" && funcProtoInfos[ea].fpi.model != "unknown" ? " " + funcProtoInfos[ea].fpi.model : "") + " " + funcProtoInfos[ea].name + "(";
+		forDisplay += printTypeForCode(funcProtoInfos[ea].fpi.retType.pi.ti, "", true, GHIDRADEC_COLOR_FUNCTION, false, 0) +
+			(funcProtoInfos[ea].fpi.model != "default" && funcProtoInfos[ea].fpi.model != "unknown" ? " " + std::string({ COLOR_ON, COLOR_KEYWORD }) + funcProtoInfos[ea].fpi.model + std::string({ COLOR_OFF, COLOR_KEYWORD }) : "") + " " +
+			std::string({ COLOR_ON, NameColor }) + funcProtoInfos[ea].name + std::string({ COLOR_OFF, NameColor }) + "(";
+		bool bFirst = true;
+		for (size_t i = 0; i < funcProtoInfos[ea].fpi.syminfo.size(); i++) {
+			if (funcProtoInfos[ea].fpi.syminfo[i].argIndex != -1) {
+				if (!bFirst) {
+					definitions += ", "; forDisplay += ", ";
+				}
+				bFirst = false;
+				definitions += printTypeForCode(funcProtoInfos[ea].fpi.syminfo[i].pi.ti, funcProtoInfos[ea].fpi.syminfo[i].pi.name, false, GHIDRADEC_COLOR_PARAM, false, 0);
+				forDisplay += printTypeForCode(funcProtoInfos[ea].fpi.syminfo[i].pi.ti, funcProtoInfos[ea].fpi.syminfo[i].pi.name, true, GHIDRADEC_COLOR_PARAM, false, 0);
+			}
+		}
+		definitions += ")";
+		forDisplay += ")";
+		return definitions;
+	}
+
+	std::string IdaCallback::getHeaderDefFromAnalysis(bool allImports, std::string & forDisplay)
+	{
+		TRACE_MSG("analysis header begin: imports=" << std::dec << imports.size()
+			<< ", usedImports=" << usedImports.size()
+			<< ", usedFuncs=" << usedFuncs.size()
+			<< ", usedData=" << usedData.size()
+			<< ", usedTypes=" << usedTypes.size() << "\n");
+		qstring qs;
+		std::string definitions;
+		std::vector<std::vector<ea_t>> impByMod;
+		impByMod.resize(modNames.size());
+		//all exported functions definitions
+		if (allImports) {
+			for (std::map<ea_t, ImportInfo>::iterator it = imports.begin(); it != imports.end(); it++) {
+				impByMod[it->second.idx].push_back(it->first);
+			}
+		} else {
+			//only used exported functions definitions
+			for (std::map<ea_t, bool>::iterator it = usedImports.begin(); it != usedImports.end(); it++) {
+				impByMod[imports[it->first].idx].push_back(it->first);
+			}
+		}
+		TRACE_MSG("analysis header imports grouped\n");
+
+		//get_c_header_path, get_c_macros
+
+		//there are no 3, 5, 6, 7 byte types so larger types are used instead
+		//there is not a __int128 in C currently so __int64 must be used, or better yet a structure should be defined and emitted
+		//10 and 16 byte floats are not existent on many platforms either so long double could potentially work but its a place holder, again a structure would be better
+		//so both large floats and integers are truncated currently
+		//other types are not guaranteed to be sizes specified so where nullptr occurs are C keyword types but perhaps the core type names should be redone from the defaults entirely
+
+		std::map<ea_t, bool> dataDependee;
+		std::map<ea_t, bool> usedRefData;
+		std::map<ea_t, bool> usedRefFuncs;
+		for (std::map<ea_t, std::vector<TypeInfo>>::iterator it = usedData.begin(); it != usedData.end(); it++) {
+			if (finalData.find(getSymbolName(it->first).c_str()) != finalData.end()) {
+				addAllDataRefs(it->first, dependentData, usedData, usedRefData, dataDependee, usedRefFuncs);
+			}
+		}
+		for (std::map<ea_t, bool>::iterator it = usedImports.begin(); it != usedImports.end(); it++) {
+			qs.clear();
+			if (imports.find(it->first) != imports.end() && imports[it->first].name != "") {
+				qs = demangle_name(imports[it->first].name.c_str(), MNG_SHORT_FORM);
+				if (qs.size() == 0) qs = imports[it->first].name.c_str();
+			}
+			if (qs.size() == 0) qs = get_short_name(it->first, GN_STRICT);
+			if (qs.size() != 0) qs = sanitizeIdaSymbolName(qs.substr(0, qs.find("(", 0)).c_str()).c_str();
+			else qs = getSymbolName(it->first, "EXT").c_str();
+			if (finalFuncs.find(qs.c_str()) != finalFuncs.end()) usedRefFuncs[it->first] = true;
+		}
+		for (std::map<ea_t, bool>::iterator it = usedFuncs.begin(); it != usedFuncs.end(); it++) {
+			qs = get_short_name(it->first, GN_STRICT);
+			if (qs.size() != 0) qs = sanitizeIdaSymbolName(qs.substr(0, qs.find("(", 0)).c_str()).c_str();
+			else qs = getSymbolName(it->first, "sub").c_str();
+			if (finalFuncs.find(qs.c_str()) != finalFuncs.end()) usedRefFuncs[it->first] = true;
+		}
+		//for any single function failed decompilation with no function prototype - make sure one is printed in comments
+		for (std::map<ea_t, bool>::iterator it = definedFuncs.begin(); it != definedFuncs.end(); it++) {
+			if (funcProtos.find(it->first) == funcProtos.end()) {
+				usedFuncs[it->first] = true;
+				usedRefFuncs[it->first] = true;
+			}
+		}
+		TRACE_MSG("analysis header refs: usedRefData=" << std::dec << usedRefData.size()
+			<< ", usedRefFuncs=" << usedRefFuncs.size()
+			<< ", dataDependee=" << dataDependee.size() << "\n");
+
+		std::map<std::string, bool> usedRefTypes;
+		//presumably this is already in reverse dependency order as the decompiler must query in this order
+		//need to add forward declarations to any structures/union with circular references via their members however
+		//functions are also needed only for forward declarations, including those queried 
+		for (int i = 0; i < numDefCoreTypes; i++) {
+			coreTypeUsed[i] = false; //reset as tracking as is done now to comment these is the most useless information as they were truly temporary
+			if (finalTypes.find(defaultCoreTypes[i].name) != finalTypes.end()) coreTypeUsed[i] = true;
+		}
+		//core types are added in refTypes!
+		for (std::map<ea_t, bool>::iterator it = usedRefFuncs.begin(); it != usedRefFuncs.end(); it++) {
+			if (funcProtos.find(it->first) != funcProtos.end()) continue; //if a working function prototype exists then its types have been included
+			if (funcProtoInfos.find(it->first) != funcProtoInfos.end()) {
+				refTypes(funcProtoInfos[it->first].fpi.retType.pi.ti, usedRefTypes);
+				for (size_t i = 0; i < funcProtoInfos[it->first].fpi.syminfo.size(); i++) {
+					refTypes(funcProtoInfos[it->first].fpi.syminfo[i].pi.ti, usedRefTypes);
+				}
+			} //this case no longer can occur
+			//get types of return and argument values and add ref to them
+		}
+		for (std::map<ea_t, bool>::iterator it = usedRefData.begin(); it != usedRefData.end(); it++) {
+			refTypes(usedData[it->first], usedRefTypes);
+		}
+		TRACE_MSG("analysis header ref types=" << std::dec << usedRefTypes.size() << "\n");
+
+		std::map<std::string, bool> isDependee;
+		std::for_each(usedTypes.begin(), usedTypes.end(), [&isDependee, &usedRefTypes, this](std::pair<std::string, bool> it) { buildDependents(it.first, usedRefTypes, isDependee); });
+		isDependee.clear(); //more usedTypes can be added here but it is not a problem as the real reference ones previously search and later filter applied
+		std::for_each(usedTypes.begin(), usedTypes.end(), [&isDependee, this](std::pair<std::string, bool> it) { buildDependents(it.first, usedTypes, isDependee); });
+		std::for_each(usedTypes.begin(), usedTypes.end(), [](std::pair<const std::string, bool>& it) { it.second = true; }); //transform cannot mutate map but second can change with reference and const first
+		std::map<std::string, bool> alreadyDefined; //for forward declarations
+		std::vector<std::string> sortedTypes; //in dependency order
+		//because it is cyclic must start with ones not depended upon dependents first to capture maximal dependencies
+		for (std::map<std::string, bool>::iterator it = usedTypes.begin(); it != usedTypes.end(); it++) {
+			//if (it->second.size() == 0)
+			if (isDependee.find(it->first) == isDependee.end())
+				dfsTypeVisit(it->first, usedTypes, sortedTypes);
+				//dfsVisit(it->first, sortedTypes);
+		}
+		//as for the cliques theoretically a minimal forward declaration analysis would reduce them
+		for (std::map<std::string, bool>::iterator it = usedTypes.begin(); it != usedTypes.end(); it++) {
+			//if (it->second.size() != 0)
+			if (isDependee.find(it->first) != isDependee.end())
+				dfsTypeVisit(it->first, usedTypes, sortedTypes);
+				//dfsVisit(it->first, sortedTypes);
+		}
+		TRACE_MSG("analysis header sorted types=" << std::dec << sortedTypes.size() << "\n");
+
+		//pointer initizations can lead to a dependency ordering here, otherwise address ordering is ideal perhaps
+		//functions can be pointed to as well making their declarations need to go prior to the data
+		std::vector<ea_t> sortedData; //in dependency order
+		std::map<ea_t, bool> alreadyDefData; //for forward declarations
+		//because it is cyclic must start with ones not depended upon dependents first to capture maximal dependencies
+		std::map<ea_t, bool> visited;
+		for (std::map<ea_t, std::vector<TypeInfo>>::iterator it = usedData.begin(); it != usedData.end(); it++) {
+			//if (it->second.size() == 0)
+			if (dataDependee.find(it->first) == dataDependee.end())
+				dfsVisitData(it->first, dependentData, usedData, sortedData, visited);
+		}
+		//as for the cliques theoretically a minimal forward declaration analysis would reduce them
+		for (std::map<ea_t, std::vector<TypeInfo>>::iterator it = usedData.begin(); it != usedData.end(); it++) {
+			//if (it->second.size() != 0)
+			if (dataDependee.find(it->first) != dataDependee.end())
+				dfsVisitData(it->first, dependentData, usedData, sortedData, visited);
+		}
+		TRACE_MSG("analysis header sorted data=" << std::dec << sortedData.size() << "\n");
+
+		std::string str = "//Default calling convention set to: " + (di->customCallStyle.empty() ? ccToStr(inf_cc_cm, is_code_far(inf_cc_cm) ? FTI_FARCALL : FTI_NEARCALL, true) : di->customCallStyle) + "\n\n";
+		definitions += str; //should really use callback interface to get cspec variant
+		forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + str + std::string({ COLOR_OFF, COLOR_AUTOCMT });
+		for (int i = 0; i < numDefCoreTypes; i++) {
+			if (usedRefTypes.find(defaultCoreTypes[i].name) != usedRefTypes.end()) {
+				coreTypeUsed[i] = true;
+				usedRefTypes.erase(defaultCoreTypes[i].name);
+			}
+			if (coreTypeUsed[i] && szCoreTypeDefs[i] != nullptr) {
+				definitions += "typedef " + std::string(szCoreTypeDefs[i]) + " " + defaultCoreTypes[i].name + ";\n";
+				forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + "typedef" + std::string({ COLOR_OFF, COLOR_KEYWORD }) + " " +
+					std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + std::string(szCoreTypeDefs[i]) + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) +
+					" " +
+					std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + defaultCoreTypes[i].name + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) +
+					";\n";
+			}
+		}
+		//print_decls(); //could print all suitable for header file
+		size_t emittedTypeCount = 0;
+		for (std::vector<std::string>::iterator it = sortedTypes.begin(); it != sortedTypes.end(); it++, emittedTypeCount++) {
+			if (emittedTypeCount != 0 && emittedTypeCount % 100 == 0)
+				TRACE_MSG("analysis header emitted types=" << std::dec << emittedTypeCount
+					<< "/" << sortedTypes.size() << "\n");
+			tinfo_t ti;
+			ti.get_named_type(get_idati(), it->c_str());
+			qstring qt = it->c_str();
+			//ti.get_type_name(&qt);
+			qstring qs;
+			alreadyDefined[*it] = true;
+			if (is_anonymous_udt(ti)) continue;
+			if (ti.is_udt()) {
+				std::map<std::string, bool> notDefined;
+				checkForwardDecl(ti, alreadyDefined, notDefined);
+				for (std::map<std::string, bool>::iterator iter = notDefined.begin(); iter != notDefined.end(); iter++) {
+					tinfo_t t;
+					t.get_named_type(get_idati(), iter->first.c_str());
+					//t.print(&qs, NULL, PRTYPE_1LINE | PRTYPE_TYPE);
+					if (usedRefTypes.find(*it) == usedRefTypes.end()) {
+						definitions += "//"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//";
+					}
+					definitions += std::string(t.is_union() ? "union " : "struct ") + iter->first + ";\n";
+					forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + std::string(t.is_union() ? "union" : "struct") + std::string({ COLOR_OFF, COLOR_KEYWORD }) +
+						" " + std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + iter->first + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) + ";\n";
+					if (usedRefTypes.find(*it) == usedRefTypes.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
+					alreadyDefined[iter->first] = true;
+				}
+			} else if (ti.is_func()) { //ti.is_funcptr()
+				//function definitions need the entire definition printed but should be tracked separately
+			}
+			if (ti.is_forward_decl()) {
+				if (usedRefTypes.find(*it) == usedRefTypes.end()) {
+					definitions += "//"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//";
+				}
+				definitions += std::string(ti.is_decl_union() ? "union " : "struct ") + " " + std::string(qt.c_str()) + ";\n";
+				forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + std::string(ti.is_decl_union() ? "union" : "struct") + std::string({ COLOR_OFF, COLOR_KEYWORD }) +
+					" " + std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + std::string(qt.c_str()) + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) + ";\n";
+				if (usedRefTypes.find(*it) == usedRefTypes.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
+			} else {
+				//ti.print(&qs, nullptr, (ti.is_udt() ? PRTYPE_MULTI : PRTYPE_1LINE) | PRTYPE_DEF | PRTYPE_TYPE | PRTYPE_RESTORE);				
+				if (usedRefTypes.find(*it) == usedRefTypes.end()) {
+					definitions += "/*"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "/*";
+				}
+				//definitions += std::string((ti.is_udt() ? qs.rtrim('\n') : qs).c_str()) + " " + std::string(qt.c_str()) + ";";
+				std::vector<TypeInfo> typeChain = typeDatabase[it->c_str()];
+				//wchar_t is special exception with no entries since its also a core type but nice to have the comment regarding its IDA detected C integral definition
+				if (typeChain.size() == 0) {
+					definitions += "typedef " + printTypeForCode(ti, "", false, GHIDRADEC_COLOR_TYPE, true, 0) + " " + std::string(qt.c_str()) + ";";
+					//str = std::string((ti.is_udt() ? qs.rtrim('\n') : qs).c_str()) + " " + std::string(qt.c_str()) + ";";
+					str = std::string({ COLOR_ON, COLOR_KEYWORD }) + "typedef" + std::string({ COLOR_OFF, COLOR_KEYWORD }) +
+						" " + printTypeForCode(ti, "", true, GHIDRADEC_COLOR_TYPE, true, 0) + " " +
+						std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + std::string(qt.c_str()) + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) + ";";
+				} else {
+					definitions += "typedef " + printTypeForCode(typeChain, "", false, GHIDRADEC_COLOR_TYPE, typeChain.begin()->typeName == qt.c_str(), 0) + " " + std::string(qt.c_str()) + ";";
+					//str = std::string((ti.is_udt() ? qs.rtrim('\n') : qs).c_str()) + " " + std::string(qt.c_str()) + ";";
+					str = std::string({ COLOR_ON, COLOR_KEYWORD }) + "typedef" + std::string({ COLOR_OFF, COLOR_KEYWORD }) +
+						" " + printTypeForCode(typeChain, "", true, GHIDRADEC_COLOR_TYPE, typeChain.begin()->typeName == qt.c_str(), 0) + " " +
+						std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + std::string(qt.c_str()) + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) + ";";
+				}
+				if (usedRefTypes.find(*it) == usedRefTypes.end()) {
+					std::string finalstr;
+					std::for_each(str.begin(), str.end(), [&finalstr](char c) { if (c == '\n') finalstr += std::string({ COLOR_OFF, COLOR_AUTOCMT }) + c + std::string({ COLOR_ON, COLOR_AUTOCMT }); else finalstr += c; });
+					forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + finalstr + std::string({ COLOR_OFF, COLOR_AUTOCMT });
+					definitions += "*/"; forDisplay += "*/" + std::string({ COLOR_OFF, COLOR_AUTOCMT });
+				} else forDisplay += str;
+				definitions += "\n";
+				forDisplay += "\n";
+			}
+			/*if (ti.is_struct()) {
+			} else if (ti.is_array()) {
+			//} else if (ti.is_enum()) {
+			} else if (ti.is_typeref()) {
+				qstring qs;
+				if (!ti.get_next_type_name(&qs)) {
+					int typ = coreTypeLookup(ti.get_size(), getMetaTypeInfo(ti));
+					qs = typ == -1 ? "undefined" : defaultCoreTypes[typ].name.c_str();
+				}
+				definitions += "typedef " + std::string(qs.c_str()) + " " + std::string(qt.c_str()) + ";\n";
+			}
+			else { //?
+			}*/
+		}
+		if (definitions.size() != 0) {
+			definitions += "\n"; forDisplay += "\n";
+		}
+		TRACE_MSG("analysis header types emitted\n");
+		//these are sorted by library and have a comment to remind that libraries are link time imported
+		for (size_t i = 0; i < modNames.size(); i++) {
+			if (impByMod[i].size() != 0) {
+				definitions += "//" + modNames[i] + '\n';
+				forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//" + modNames[i] + std::string({ COLOR_OFF, COLOR_AUTOCMT }) + '\n';
+			}
+			for (std::vector<ea_t>::iterator it = impByMod[i].begin(); it != impByMod[i].end(); it++) {
+				tinfo_t tif;
+				qstring qs;
+				if (usedRefFuncs.find(*it) == usedRefFuncs.end()) {
+					definitions += "//"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//";
+				}
+				definitions += "extern ";
+				forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + "extern" + std::string({ COLOR_OFF, COLOR_KEYWORD }) + " ";
+				if (getFuncByGuess(*it, tif) && funcProtoInfos.find(*it) != funcProtoInfos.end()) {
+					//print_type(&qs, *it, PRTYPE_1LINE);
+					//func_type_data_t ftd;
+					//tif.get_func_details(&ftd);
+					definitions += print_func(*it, forDisplay, COLOR_IMPNAME);
+				} else {
+					qs = demangle_name(imports[*it].name.c_str(), MNG_LONG_FORM).c_str();
+					if (qs.size() == 0) qs = imports[*it].name.c_str();
+					if (qs.size() == 0) get_long_name(&qs, *it, GN_STRICT);
+					if (qs.size() == 0) qs = getSymbolName(*it, "EXT").c_str();
+					//str = get_name(*it).c_str();
+					if (qs.find("(", 0) == qstring::npos) {
+						definitions += "void" " " + std::string(qs.c_str()) + "(" "void" ")";
+						forDisplay += std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + "void" + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) + " " +
+							std::string({ COLOR_ON, COLOR_IMPNAME }) + std::string(qs.c_str()) + std::string({ COLOR_OFF, COLOR_IMPNAME }) + "(" + std::string({ COLOR_ON, GHIDRADEC_COLOR_TYPE }) + "void" + std::string({ COLOR_OFF, GHIDRADEC_COLOR_TYPE }) + ")";
+					} else {
+						definitions += qs.c_str();
+						forDisplay += std::string({ COLOR_ON, COLOR_IMPNAME }) + qs.c_str() + std::string({ COLOR_OFF, COLOR_IMPNAME });
+					}
+					//most of the names are not mangled, and thus do not have the needed C declaration information attached
+				}
+				definitions += ";\n";
+				forDisplay += ";\n";
+				if (usedRefFuncs.find(*it) == usedRefFuncs.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
+			}
+			if (impByMod[i].size() != 0) {
+				definitions += '\n'; forDisplay += '\n';
+			}
+		}
+		for (std::map<ea_t, bool>::iterator it = usedFuncs.begin(); it != usedFuncs.end(); it++) {
+			if (imports.find(it->first) != imports.end()) continue;
+			if (usedRefFuncs.find(it->first) == usedRefFuncs.end()) {
+				definitions += "//"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//";
+			}
+			if (funcProtos.find(it->first) != funcProtos.end()) {
+				definitions += funcProtos[it->first];
+				forDisplay += funcColorProtos[it->first];
+			} else if (funcProtoInfos.find(it->first) != funcProtoInfos.end()) {
+				definitions += print_func(it->first, forDisplay, GHIDRADEC_COLOR_FUNCTION);
+			} else { //only function pointers currently but after fixed this case should never occur
+				tinfo_t tif;
+				qs.clear(); //first check decompiler prototypes, then type info, then demangler, then void <name>(void)
+				if (getFuncByGuess(it->first, tif)) print_type(&qs, it->first, PRTYPE_1LINE);
+				if (qs.size() == 0) get_long_name(&qs, it->first, GN_STRICT);
+				if (qs.size() == 0) qs = getSymbolName(it->first, "sub").c_str();
+				if (qs.find("(", 0) == qstring::npos) qs = qstring("void ") + qs + "(void)";
+				//most of the names are not mangled, and thus do not have the needed C declaration information attached
+				definitions += qs.c_str();
+				forDisplay += std::string({ COLOR_ON, GHIDRADEC_COLOR_FUNCTION }) + qs.c_str() + std::string({ COLOR_OFF, GHIDRADEC_COLOR_FUNCTION });
+			}
+			definitions += ";\n";
+			forDisplay += ";\n";
+			if (usedRefFuncs.find(it->first) == usedRefFuncs.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
+		}
+		if (usedFuncs.size() != 0) {
+			definitions += "\n"; forDisplay += "\n";
+		}
+		TRACE_MSG("analysis header funcs/imports emitted\n");
+		size_t emittedDataCount = 0;
+		for (std::vector<ea_t>::iterator it = sortedData.begin(); it != sortedData.end(); it++, emittedDataCount++) {
+			if (emittedDataCount != 0 && emittedDataCount % 100 == 0)
+				TRACE_MSG("analysis header emitted data=" << std::dec << emittedDataCount
+					<< "/" << sortedData.size() << "\n");
+			tinfo_t ti;
+			//segment_t* seg = getseg(*it);
+			//msg("EA: %llX Flags: %lX\n", *it, get_full_flags(*it));
+			bool bInitData = is_loaded(*it); //has_value(get_full_flags(*it)) && getseg(*it)->type != SEG_BSS; //seg->type == SEG_DATA; //not totally reliable
+			//getseg(*it)->type != SEG_BSS
+			//std::string dat;
+			alreadyDefData[*it] = true;
+			std::map<ea_t, bool> notDefined;
+			checkFwdData(*it, dependentData, alreadyDefData, notDefined);
+			for (std::map<ea_t, bool>::iterator iter = notDefined.begin(); iter != notDefined.end(); iter++) {
+				if (usedRefData.find(*it) == usedRefData.end()) {
+					definitions += "//"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//";
+				}
+				std::string name = getSymbolName(iter->first);
+				definitions += "extern " + printTypeForCode(usedData[iter->first], name, false, GHIDRADEC_COLOR_GLOBAL, false, 0) + ";\n";
+				forDisplay += std::string({ COLOR_ON, COLOR_KEYWORD }) + "extern" + std::string({ COLOR_OFF, COLOR_KEYWORD }) + " " + printTypeForCode(usedData[iter->first], name, true, GHIDRADEC_COLOR_GLOBAL, false, 0) + ";\n";
+				if (usedRefData.find(*it) == usedRefData.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
+				alreadyDefData[iter->first] = true;
+			}
+			if (usedRefData.find(*it) == usedRefData.end()) {
+				definitions += "//"; forDisplay += std::string({ COLOR_ON, COLOR_AUTOCMT }) + "//";
+			}
+			str = getSymbolName(*it);
+			definitions += printTypeForCode(usedData[*it], str.c_str(), false, GHIDRADEC_COLOR_GLOBAL, false, 0);
+			forDisplay += printTypeForCode(usedData[*it], str.c_str(), true, GHIDRADEC_COLOR_GLOBAL, false, 0);
+			//if (get_tinfo(&ti, *it)) {
+				/*qstring qt;
+				ti.get_type_name(&qt);
+				if (qt == "" && ti.is_array()) {
+					array_type_data_t atd;
+					ti.get_array_details(&atd);
+					atd.elem_type.get_type_name(&qt);
+				}
+				definitions += std::string(qt.c_str()) + " " + std::string(ti.is_ptr() ? "*" : "") + get_name(*it).c_str() + std::string(ti.is_array() ? "[]" : "");*/
+				//if (bInitData) dat = initForType(ti, *it);
+			//} else {
+				/*asize_t sz = get_item_size(*it);
+				int typ = coreTypeLookup(sz, "unknown");
+				if (typ == -1 && sz != 1) {
+					//definitions += "undefined " + std::string(get_name(*it).c_str()) + "[" + std::to_string(sz) + "]";
+					if (bInitData) {
+						if (is_strlit(get_flags(*it))) { //preempt array, undefined, unknown, char, etc
+							//asize_t len = get_item_size(*it);
+							//single byte formats: STRTYPE_TERMCHR, STRTYPE_C, STRTYPE_PASCAL, STRTYPE_LEN2, STRTYPE_LEN4
+							//double byte formats: STRTYPE_C_16, STRTYPE_PASCAL_16, STRTYPE_LEN4_16
+							//int len = get_max_strlit_length(addr, ti.get_size() == 1 ? STRTYPE_C : (ti.get_size() == 2 ? STRTYPE_C_16 : STRTYPE_C_32), ALOPT_IGNHEADS | ALOPT_IGNPRINT);
+							qstring qs;
+							get_strlit_contents(&qs, *it, -1, get_str_type(*it), nullptr, STRCONV_ESCAPE);
+							dat = "\"" + std::string(qs.c_str()) + "\"";
+						} else {
+							dat = "{ ";
+							std::vector<char> arr;
+							arr.resize(sz);
+							get_bytes(arr.data(), sz, *it);
+							for (int i = 0; i < sz; i++) {
+								if (i != 0) dat += ", ";
+								dat += "0x" + to_string(arr[i], std::hex);
+							}
+							dat += " }";
+						}
+					}
+				} else {
+					//definitions += std::string(typ == -1 || is_strlit(get_flags(*it)) ? "undefined" : defaultCoreTypes[typ].name) + " " + get_name(*it).c_str();
+					if (bInitData) {
+						if (is_strlit(get_flags(*it))) { //preempt array, undefined, unknown, char, etc
+							//asize_t len = get_item_size(*it);
+							//single byte formats: STRTYPE_TERMCHR, STRTYPE_C, STRTYPE_PASCAL, STRTYPE_LEN2, STRTYPE_LEN4
+							//double byte formats: STRTYPE_C_16, STRTYPE_PASCAL_16, STRTYPE_LEN4_16
+							//int len = get_max_strlit_length(addr, ti.get_size() == 1 ? STRTYPE_C : (ti.get_size() == 2 ? STRTYPE_C_16 : STRTYPE_C_32), ALOPT_IGNHEADS | ALOPT_IGNPRINT);
+							qstring qs;
+							get_strlit_contents(&qs, *it, -1, get_str_type(*it), nullptr, STRCONV_ESCAPE);
+							dat = "\"" + std::string(qs.c_str()) + "\"";
+						} else if (typ == -1 || defaultCoreTypes[typ].metaType == "int" || defaultCoreTypes[typ].metaType == "unknown") { //endianness matters here for 0 pad
+							long long num = 0;
+							get_bytes(&num, sz, *it);
+							//heuristics for printing hex vs decimal?
+							dat = "0x" + to_string(num, std::hex);
+						} else if (defaultCoreTypes[typ].metaType == "uint") { //endianness matters here for 0 pad
+							unsigned long long num = 0;
+							get_bytes(&num, sz, *it);
+							//heuristics for printing hex vs decimal?
+							dat = "0x" + to_string(num, std::hex);
+						}
+						else if (defaultCoreTypes[typ].metaType == "bool") {
+							dat = get_byte(*it) != 0 ? "true" : "false";
+						} else if (defaultCoreTypes[typ].metaType == "float") {
+							if (sz == sizeof(float)) {
+								float f;
+								get_bytes(&f, sz, *it);
+								char buf[33];
+								qsnprintf(buf, sizeof(buf), "%.*g", FLT_DECIMAL_DIG, f);
+							}
+							else if (sz == sizeof(double)) {
+								double f;
+								get_bytes(&f, sz, *it);
+								char buf[33];
+								qsnprintf(buf, sizeof(buf), "%.*lg", DBL_DECIMAL_DIG, f);
+							}*/ /*else if (sz == sizeof(long double)) {
+								long double f;
+								get_bytes(&f, sz, *it);
+								char buf[33];
+								qsnprintf(buf, sizeof(buf), "%.*Lg", LDBL_DECIMAL_DIG, f); LDBL_DECIMAL_DIG = 21 for 80-bit/10-byte?
+							}*/
+							/*}
+						}
+					}*/
+					//}
+			if (bInitData) {
+				definitions += " = " + initForType(usedData[*it], *it, false);
+				forDisplay += " = " + initForType(usedData[*it], *it, true);
+			}
+			definitions += ";\n";
+			forDisplay += ";\n";
+			if (usedRefData.find(*it) == usedRefData.end()) forDisplay += std::string({ COLOR_OFF, COLOR_AUTOCMT });
+		}
+		if (usedData.size() != 0) {
+			definitions += "\n";
+			forDisplay += "\n";
+		}
+
+		//definitions += '\n';
+		TRACE_MSG("analysis header complete, definitions bytes=" << std::dec
+			<< definitions.size() << ", display bytes=" << forDisplay.size() << "\n");
+		return definitions;
+	}
+	void IdaCallback::analysisDump(std::string& definitions, std::string& forDisplay, std::string& idaInfo)
+	{
+		executeOnMainThread([this, &definitions, &forDisplay, &idaInfo]() {
+			definitions = getHeaderDefFromAnalysis(di->decompiledFunction == nullptr, forDisplay);
+			if (PRINT_DEBUG) idaInfo = dumpIdaInfo();
+			}, "analysis-dump");
+	}
+	/// Execute code in the main thread - to be used with execute_sync().
+	struct execFunctor : public exec_request_t
+	{
+		std::function<void()> fun;
+		const char* label;
+		qsemaphore_t finishSem;
+		int* taskNo;
+		execFunctor(std::function<void()> f, const char* taskLabel, qsemaphore_t qs, int* tsk) :
+			fun(f), label(taskLabel), finishSem(qs), taskNo(tsk) {}
+		virtual ~execFunctor(void) override {}
+		/// Callback to be executed.
+		/// Never let plugin exceptions escape through IDA's UI dispatcher.
+		virtual GHIDRADEC_EXEC_RETURN idaapi execute(void)
+		{
+			try {
+				fun();
+			} catch (const std::exception& e) {
+				WARNING_MSG("Main-thread GhidraDec task failed (" << label << "): " << e.what() << "\n");
+			} catch (...) {
+				WARNING_MSG("Main-thread GhidraDec task failed (" << label << ") with an unknown exception\n");
+			}
+			*taskNo = -1;
+			qsem_post(finishSem);
+			return 0;
+		}
+	};
+	void IdaCallback::executeOnMainThread(std::function<void()> fun, const char* label)
+	{
+		if (is_main_thread() || liveCallbackRegressionMode())
+		{
+			try {
+				fun();
+			} catch (const std::exception& e) {
+				WARNING_MSG("Main-thread GhidraDec task failed (" << label << "): " << e.what() << "\n");
+			} catch (...) {
+				WARNING_MSG("Main-thread GhidraDec task failed (" << label << ") with an unknown exception\n");
+			}
+			return;
+		}
+		qsemaphore_t finishSem = qsem_create(nullptr, 0);
+		execFunctor* ef = new execFunctor(fun, label, finishSem, &di->uiExecutingTask);
+		//int id = execute_sync(a, MFF_READ);
+		{ //must be a locked unit otherwise race condition can occur
+			qmutex_locker_t lock(di->qm);
+			if (di->exiting) {
+				qsem_free(finishSem);
+				delete ef;
+				return;
+			}
+			di->uiExecutingTask = static_cast<int>(execute_sync(*ef, MFF_NOWAIT | MFF_READ));
+		}
+		while (!qsem_wait(finishSem, 50)) {
+			if (di->exiting) {
+				di->uiExecutingTask = -1;
+				qsem_free(finishSem);
+				delete ef;
+				return;
+			}
+		}
+		di->uiExecutingTask = -1;
+		qsem_free(finishSem);
+		delete ef;
+	}
+	void IdaCallback::preloadBatchMappedSymbols()
+	{
+		for (std::map<ea_t, ImportInfo>::iterator it = imports.begin(); it != imports.end(); ++it) {
+			MappedSymbolInfo msi = { KIND_EXTERNALREFERENCE };
+			msi.entryPoint = it->first;
+			msi.readonly = false;
+			msi.volatil = false;
+			msi.size = 1;
+			msi.name = it->second.name.empty() ?
+				("imp_" + to_string((unsigned long long)it->first, std::hex)) : it->second.name;
+			batchMappedSymbols[it->first] = msi;
+		}
+
+		for (size_t i = 0; i < get_func_qty(); ++i) {
+			func_t* f = getn_func((int)i);
+			if (f == nullptr || imports.find(f->start_ea) != imports.end())
+				continue;
+			MappedSymbolInfo msi = { KIND_FUNCTION };
+			msi.entryPoint = f->start_ea;
+			msi.ranges = getFunctionRanges(f, "ram");
+			msi.size = msi.ranges.empty() ? f->size() :
+				msi.ranges.begin()->endoffset - msi.ranges.begin()->beginoffset + 1;
+			msi.readonly = true;
+			msi.volatil = false;
+			msi.name = getSymbolName(f->start_ea, "sub");
+			if (!f->does_return() || isKnownNoReturnFunctionName(msi.name)) {
+				makeUnknownFunctionPrototype(msi.func);
+				msi.func.isNoReturn = true;
+			}
+			batchMappedSymbols[f->start_ea] = msi;
+		}
+
+		for (ea_t ea = inf_min_ea; ; ) {
+			ea = next_head(ea, inf_max_ea);
+			if (ea == BADADDR)
+				break;
+			if (imports.find(ea) != imports.end())
+				continue;
+			if (get_func(ea) != nullptr)
+				continue;
+
+			flags_t fl = get_flags(ea);
+			MappedSymbolInfo msi = { KIND_HOLE };
+			if (is_data(fl) || (is_unknown(fl) && is_mapped(ea))) {
+				msi.kind = KIND_DATA;
+				unsigned long long size = is_unknown(fl) ? 1 : get_item_size(ea);
+				if (size == 0 || size == BADSIZE)
+					size = 1;
+				msi.name = getSymbolName(ea, "loc");
+				bool pointerNamedData =
+					!is_unknown(fl) && size > 1 && msi.name.size() > 4 &&
+					msi.name.compare(msi.name.size() - 4, 4, "_ptr") == 0;
+				if (pointerNamedData) {
+					if (!applyKnownNoReturnPointerType(msi.name, size, msi.typeChain)) {
+						msi.typeChain.push_back(TypeInfo{ "", size, "ptr", false, false, false });
+						msi.typeChain.push_back(TypeInfo{ "void", 0, "void" });
+					}
+				} else {
+					std::string metaType = "unknown";
+					int typ = DecompInterface::coreTypeLookup((size_t)size, metaType);
+					if (typ == -1 && size != 1) {
+						msi.typeChain.push_back(TypeInfo{ "", size, "array", false, false, false, size });
+						msi.typeChain.push_back(TypeInfo{ "undefined", 1, metaType });
+					} else {
+						msi.typeChain.push_back(TypeInfo{ typ == -1 ? "undefined" : defaultCoreTypes[typ].name, size, metaType });
+					}
+				}
+				msi.size = size;
+				getMemoryInfo(ea, &msi.readonly, &msi.volatil);
+			} else if (isCallableOrphanCodeLabel(ea, fl) || (is_code(fl) && isKnownNoReturnFunctionName(getSymbolName(ea, "loc")))) {
+				std::string name = getSymbolName(ea, "sub");
+				makeUnknownFunctionMappedSymbol(msi, ea, name, isKnownNoReturnFunctionName(name));
+				asize_t itemSize = get_item_size(ea);
+				if (itemSize == 0 || itemSize == BADSIZE)
+					itemSize = 1;
+				msi.size = itemSize;
+				msi.ranges.push_back(RangeInfo{ "ram", ea, ea + itemSize - 1 });
+			} else if (has_name(fl) || has_dummy_name(fl)) {
+				msi.kind = KIND_LABEL;
+				msi.size = 1;
+				getMemoryInfo(ea, &msi.readonly, &msi.volatil);
+				msi.name = getSymbolName(ea, "loc");
+			}
+			if (msi.kind != KIND_HOLE)
+				batchMappedSymbols[ea] = msi;
+		}
+
+		TRACE_MSG("Preloaded batch mapped symbols: " << std::dec
+			<< batchMappedSymbols.size() << "\n");
+	}
+	void IdaCallback::init(std::string s, std::string p, std::string c)
+	{
+		sleighfilename = s;
+		pspec = p;
+		cspec = c;
+		cacheCount = 0;
+		byteCache.clear();
+		allFuncs.clear();
+		allFuncNames.clear();
+		allFuncRanges.clear();
+		allFuncNoReturn.clear();
+		batchMappedSymbols.clear();
+		sregRanges.clear();
+		typeDatabase.clear();
+		exportData.clear();
+		modNames.clear();
+		imports.clear();
+		importNames.clear();
+		typeToAddress.clear();
+		usedImports.clear();
+		usedTypes.clear();
+		usedData.clear();
+		definedFuncs.clear();
+		usedFuncs.clear();
+		funcProtos.clear();
+		funcColorProtos.clear();
+		funcProtoInfos.clear();
+		finalData.clear();
+		finalTypes.clear();
+		finalFuncs.clear();
+		dependentData.clear();
+		coreTypeUsed.clear();
+		coreTypeUsed.resize(numDefCoreTypes, false);
+		size_t num = get_import_module_qty();
+		qstring qs;
+		ImportParam imp;
+		imp.pImports = &imports;
+		//validate_idb_names2(true);
+		for (size_t i = 0; i < num; i++) {
+			get_import_module_name(&qs, (int)i);
+			modNames.push_back(qs.c_str());
+			imp.cur = (int)i;
+			//causing Ida Pro to error with internal error 835, 836 - because not in main thread
+			enum_import_names((int)i, &EnumImportNames, &imp);
+		}
+		for (std::map<ea_t, ImportInfo>::iterator it = imports.begin(); it != imports.end(); it++) {
+			if (it->second.name.size() == 0) {
+				std::string name = get_short_name(it->first, GN_STRICT).c_str();
+				if (name.size() != 0) name = sanitizeIdaSymbolName(name.substr(0, name.find("(", 0)));
+				else name = getSymbolName(it->first, "EXT");
+				importNames[name] = true;
+			} else importNames[sanitizeIdaSymbolName(it->second.name)] = true;
+		}
+		/*num = get_ordinal_qty(nullptr);
+		for (size_t i = 1; i <= num; i++) {
+			const type_t* t = nullptr;
+			const p_list* pf = nullptr, *pfc = nullptr;
+			const char* nm = get_numbered_type_name(nullptr, i);
+			sclass_t s;
+			msg("%s\n", nm);
+			get_numbered_type(nullptr, i, &t, &pf, nullptr, &pfc, &s);
+			qtype typeForDeser;
+			typeForDeser.append(t);
+			qtype pfForDeser;
+			pfForDeser.append(pf);
+			qtype pfcForDeser;
+			pfcForDeser.append(pfc);
+			tinfo_t ti;
+			ti.deserialize(nullptr, &typeForDeser, &pfForDeser, &pfcForDeser); //will free buffer passed!
+			qstring qs;
+			ti.get_numbered_type(nullptr, i, BTF_TYPEDEF, false);
+			ti.get_type_name(&qs);
+			ti.get_next_type_name(&qs);
+			ti.get_final_type_name(&qs);
+			ti.print(&qs);
+			//replace_ordinal_typerefs(nullptr, &ti);
+		}*/
+		ea_t ea = inf_min_ea;
+		do {
+			ea = next_head(ea, inf_max_ea);
+			if (ea == BADADDR) break;
+			tinfo_t ti;
+			if (get_tinfo(&ti, ea) && ti.get_type_name(&qs)) {
+				typeToAddress[qs.c_str()].push_back(ea);
+			}
+		} while (true);
+
+		const char* nm = first_named_type(nullptr, NTF_TYPE);
+		while (nm != nullptr) {
+			tinfo_t ti;
+			ti.get_named_type(nullptr, nm);
+			if (!is_anonymous_udt(ti)) getType(ti, typeDatabase[nm]);
+			nm = next_named_type(nullptr, nm, NTF_TYPE);
+		}
+		/*num = get_idati()->nbases;
+		for (int i = 0; i < num; i++) {
+			nm = first_named_type(get_idati()->base[i], NTF_TYPE);
+			while (nm != nullptr) {
+				tinfo_t ti;
+				ti.get_named_type(nullptr, nm);
+				if (ti.is_typeref()) { //function parameters are not in the database
+					getType(ti, typeDatabase[nm]);
+				}
+				nm = next_named_type(get_idati()->base[i], nm, NTF_TYPE);
+			}
+		}*/
+		if (isX86() && ph.has_segregs()) { //initialize segment registers for tracking - vital for x86-16
+			for (int i = 0; i <= ph.reg_last_sreg - ph.reg_first_sreg; i++) {
+				//this is a much more powerful analysis by the processor engine than the default segregs which now are not used
+				sregRanges.push_back(std::vector<sreg_range_t>());
+				for (size_t k = 0; k < get_sreg_ranges_qty(i + ph.reg_first_sreg); k++) {
+					sreg_range_t out;
+					getn_sreg_range(&out, i + ph.reg_first_sreg, (int)k);
+					sregRanges[i].push_back(out);
+				}
+			}
+		}
+		if (di->decompiledFunction == nullptr) {
+			std::map<ea_t, size_t> entries;
+			num = get_entry_qty();
+			int successes = 0, total = 0;
+			for (size_t i = 0; i < num; i++) {
+				std::string disp;
+				ea_t ea = get_entry(get_entry_ordinal(i)); //qstring qs; get_entry_name(&qs, i);
+				if (is_func(get_flags(ea))) {
+					entries[ea] = i;
+					qstring qs;
+					get_entry_name(&qs, get_entry_ordinal(i)); //get_func_name(&qs, ea);
+					func_t* f = get_func(ea);
+					std::string name = qs.c_str();
+					if (name.empty()) {
+						get_func_name(&qs, ea);
+						name = qs.c_str();
+					}
+					std::string reason;
+					if (shouldSkipAllDecompilationFunction(this, f, name, reason)) {
+						allFuncNames[ea] = name;
+						allFuncNoReturn[ea] = f != nullptr && !f->does_return();
+						TRACE_MSG("Skipping all-decompile entry function " << name.c_str() << " @ " << std::hex << ea << ": " << reason.c_str() << "\n");
+					} else {
+						addAllDecompilationFunction(this, f, name);
+					}
+				} else { //exported data
+					exportData[ea] = true;
+				}
+			}
+			num = get_func_qty();
+			for (size_t i = 0; i < num; i++) {
+				std::string disp;
+				func_t* f = getn_func(i);
+				if (entries.find(f->start_ea) != entries.end()) continue;
+				qstring qs;
+				get_func_name(&qs, f->start_ea);
+				std::string name = qs.c_str();
+				std::string reason;
+				if (shouldSkipAllDecompilationFunction(this, f, name, reason)) {
+					allFuncNames[f->start_ea] = name;
+					allFuncNoReturn[f->start_ea] = f != nullptr && !f->does_return();
+					TRACE_MSG("Skipping all-decompile function " << name.c_str() << " @ " << std::hex << f->start_ea << ": " << reason.c_str() << "\n");
+					continue;
+				}
+				addAllDecompilationFunction(this, f, name);
+			}
+			if (allFuncs.empty() && get_func_qty() != 0) {
+				TRACE_MSG("All decompile candidates were filtered; retrying with runtime/helper names enabled\n");
+				for (size_t i = 0; i < get_func_qty(); i++) {
+					func_t* f = getn_func((int)i);
+					qstring qs;
+					get_func_name(&qs, f->start_ea);
+					std::string name = qs.c_str();
+					std::string reason;
+					if (shouldSkipAllDecompilationFunction(this, f, name, reason, false)) {
+						TRACE_MSG("Skipping fallback all-decompile function " << name.c_str() << " @ " <<
+							std::hex << f->start_ea << ": " << reason.c_str() << "\n");
+						continue;
+					}
+					addAllDecompilationFunction(this, f, name);
+				}
+			}
+			const bool liveCallbacks = liveCallbackRegressionMode();
+			if (!liveCallbacks)
+				preloadFunctionByteCache(this);
+			qstring batchOutputEnv;
+			if (!liveCallbacks && (di->decompiledFunction != nullptr ||
+				(qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty()))) {
+				bool limited = false;
+				size_t pages = preloadMappedSegmentByteCache(this, BATCH_SEGMENT_PRELOAD_LIMIT, &limited);
+				TRACE_MSG("Preloaded byte cache for " << std::dec << pages
+					<< " mapped segment pages for batch decompilation"
+					<< (limited ? " (limit reached)" : "") << "\n");
+			}
+			TRACE_MSG((liveCallbacks ? "Prepared live-callback ranges for " : "Preloaded byte cache for ")
+				<< std::dec << allFuncRanges.size() << " all-decompile functions\n");
+		} else {
+			allFuncNames[di->decompiledFunction->start_ea] = getSymbolName(di->decompiledFunction->start_ea, "sub");
+			allFuncRanges[di->decompiledFunction->start_ea] = getFunctionRanges(di->decompiledFunction, "ram");
+			allFuncNoReturn[di->decompiledFunction->start_ea] = !di->decompiledFunction->does_return();
+			const bool liveCallbacks = liveCallbackRegressionMode();
+			if (!liveCallbacks)
+				preloadFunctionByteCache(this);
+			qstring batchOutputEnv;
+			if (!liveCallbacks && (di->decompiledFunction != nullptr ||
+				(qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty()))) {
+				bool limited = false;
+				size_t pages = preloadMappedSegmentByteCache(this, BATCH_SEGMENT_PRELOAD_LIMIT, &limited);
+				TRACE_MSG("Preloaded byte cache for " << std::dec << pages
+					<< " mapped segment pages for batch decompilation"
+					<< (limited ? " (limit reached)" : "") << "\n");
+			}
+		}
+		if (!liveCallbackRegressionMode())
+			preloadBatchMappedSymbols();
+		else
+			TRACE_MSG("Skipping batch byte/symbol preloads for live-callback regression mode\n");
+	}
+	void IdaCallback::addrToArgLoc(SizedAddrInfo addr, argloc_t & al)
+	{
+		if (addr.addr.space == "register") {
+			std::string reg = decInt->getRegisterFromIndex(addr.addr.offset, (int)addr.size);
+			reg_info_t ri;
+			parse_reg_name(&ri, reg.c_str());
+			al.set_reg1(ri.reg);
+		} else if (addr.addr.space == "ram") {
+			al.set_ea((ea_t)addr.addr.offset);
+		} else if (addr.addr.space == "stack") {
+			al.set_stkoff((sval_t)addr.addr.offset);
+		} else if (addr.addr.space == "join") {
+			if (addr.addr.joins.size() == 2 &&
+				addr.addr.joins[0].addr.space == "register" &&
+				addr.addr.joins[1].addr.space == "register") {
+				std::string reg1 = decInt->getRegisterFromIndex(addr.addr.joins[0].addr.offset, (int)addr.addr.joins[0].size);
+				std::string reg2 = decInt->getRegisterFromIndex(addr.addr.joins[1].addr.offset, (int)addr.addr.joins[1].size);
+				reg_info_t ri1, ri2;
+				parse_reg_name(&ri1, reg1.c_str());
+				parse_reg_name(&ri2, reg1.c_str());
+				al.set_reg2(ri2.reg, ri1.reg);
+			} else {
+				scattered_aloc_t sa;
+				for (size_t j = 0; j < addr.addr.joins.size(); j++) {
+					argpart_t ap;
+					if (addr.addr.joins[j].addr.space == "register") {
+						std::string reg = decInt->getRegisterFromIndex(addr.addr.joins[j].addr.offset, (int)addr.addr.joins[j].size);
+						reg_info_t ri;
+						parse_reg_name(&ri, reg.c_str());
+						ap.set_reg1(ri.reg);
+					} else if (addr.addr.joins[j].addr.space == "ram") {
+						ap.set_ea((ea_t)addr.addr.joins[j].addr.offset);
+					} else if (addr.addr.joins[j].addr.space == "stack") {
+						ap.set_stkoff((sval_t)addr.addr.joins[j].addr.offset);
+					}
+					sa.push_back(ap);
+				}
+				al.consume_scattered(&sa);
+			}
+		}
+	}
+	void getPtrSizes(tinfo_t& ti, std::vector<unsigned long long>& ptrSizes, std::vector<unsigned long long>& funcPtrSizes)
+	{
+		if (ti.is_typeref()) {
+			qstring qs;
+			ti.get_next_type_name(&qs);
+			if (qs.size() != 0) {
+				ti.get_named_type(get_idati(), qs.c_str());
+				getPtrSizes(ti, ptrSizes, funcPtrSizes);
+			}
+		} else if (ti.is_funcptr()) { //code pointer not data
+			funcPtrSizes.push_back(ti.get_size());
+		} else if (ti.is_ptr()) { //cannot trace into pointers without fixing infinite recursion due to structure members
+			ptrSizes.push_back(ti.get_size());
+		} else if (ti.is_struct()) {
+			udt_type_data_t utd;
+			ti.get_udt_details(&utd);
+			for (size_t i = 0; i < utd.size(); i++) {
+				getPtrSizes(utd[i].type, ptrSizes, funcPtrSizes);
+			}
+		} else if (ti.is_array()) {
+			array_type_data_t atd;
+			ti.get_array_details(&atd);
+			getPtrSizes(atd.elem_type, ptrSizes, funcPtrSizes);
+		}
+	}
+	void fixPtrSizes(tinfo_t& ti, unsigned long long nearsize, unsigned long long farsize,
+		bool isNear, bool isFar, bool isCodeNear, bool isCodeFar)
+	{
+		if (ti.is_typeref()) {
+			qstring qs;
+			ti.get_next_type_name(&qs);
+			if (qs.size() != 0) {
+				ti.get_named_type(get_idati(), qs.c_str());
+				fixPtrSizes(ti, nearsize, farsize, isNear, isFar, isCodeNear, isCodeFar);
+			}
+		} else if (ti.is_funcptr()) { //code pointer not data
+			//type_t bt2 = (ftd[i].type.is_const() ? BTM_CONST : 0) | (ftd[i].type.is_volatile() ? BTM_VOLATILE : 0);
+			ptr_type_data_t ptd;
+			ti.get_ptr_details(&ptd); //what to do about BTMT_CLOSURE?
+			if (ptd.based_ptr_size == farsize && isCodeNear) {
+				ptd.based_ptr_size -= ph.segreg_size;
+				tinfo_t newti;
+				newti.create_ptr(ptd, BT_PTR | BTMT_NEAR);
+				ti = newti;
+			} else if (ptd.based_ptr_size == nearsize && isCodeFar) {
+				ptd.based_ptr_size += ph.segreg_size;
+				tinfo_t newti;
+				newti.create_ptr(ptd, BT_PTR | BTMT_FAR);
+				ti = newti;
+			}
+		} else if (ti.is_ptr()) { //cannot trace into pointers without fixing infinite recursion due to structure members
+			ptr_type_data_t ptd;
+			ti.get_ptr_details(&ptd);
+			if (ptd.based_ptr_size == farsize && isNear) {
+				ptd.based_ptr_size -= ph.segreg_size;
+				tinfo_t newti;
+				newti.create_ptr(ptd, BT_PTR | BTMT_NEAR);
+				ti = newti;
+			} else if (ptd.based_ptr_size == nearsize && isFar) {
+				ptd.based_ptr_size += ph.segreg_size;
+				tinfo_t newti;
+				newti.create_ptr(ptd, BT_PTR | BTMT_FAR);
+				ti = newti;
+			}
+		} else if (ti.is_struct()) {
+			udt_type_data_t utd;
+			ti.get_udt_details(&utd);
+			for (size_t i = 0; i < utd.size(); i++) {
+				fixPtrSizes(utd[i].type, nearsize, farsize, isNear, isFar, isCodeNear, isCodeFar);
+			}
+		} else if (ti.is_array()) {
+			array_type_data_t atd;
+			ti.get_array_details(&atd);
+			fixPtrSizes(atd.elem_type, nearsize, farsize, isNear, isFar, isCodeNear, isCodeFar);
+		}
+	}
+	bool tryFixFuncModel(func_type_data_t& ftd, ea_t argSize) //argSize -1 for not trying to toggle pointer sizes
+	{
+		bool bFrameChange = false;
+		std::vector<unsigned long long> ptrSizes, funcPtrSizes;
+		//cannot include return pointer or will throw off comparison - need separate check but how?
+		//getPtrSizes(ftd.rettype, ptrSizes, funcPtrSizes);
+		for (size_t i = 0; i < ftd.size(); i++) {
+			getPtrSizes(ftd[i].type, ptrSizes, funcPtrSizes);
+		}
+		unsigned long long nearsize = inf_is_64bit() ? 8 : (inf_is_32bit() ? 4 : 2),
+			farsize = nearsize + ph.segreg_size;
+		bool isNear = false, isFar = false, isCodeNear = false, isCodeFar = false;
+		for (size_t i = 0; i < ptrSizes.size(); i++) {
+			if (ptrSizes[i] == farsize) {
+				if (isNear) { isNear = false; break; }
+				isFar = true;
+			} else if (ptrSizes[i] == nearsize) {
+				if (isFar) { isFar = false; break; }
+				isNear = true;
+			}
+		}
+		for (size_t i = 0; i < funcPtrSizes.size(); i++) {
+			if (funcPtrSizes[i] == farsize) {
+				if (isCodeNear) { isCodeNear = false; break; }
+				isCodeFar = true;
+			} else if (funcPtrSizes[i] == nearsize) {
+				if (isCodeFar) { isCodeFar = false; break; }
+				isCodeNear = true;
+			}
+		}
+		if (argSize != -1 && ftd.stkargs != argSize) {
+			if (isFar && ftd.stkargs - ptrSizes.size() * ph.segreg_size == argSize) {
+				isNear = true;
+				isFar = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			} else if (isNear && ftd.stkargs + ptrSizes.size() * ph.segreg_size == argSize) {
+				isFar = true;
+				isNear = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			} else if (isCodeFar && ftd.stkargs - funcPtrSizes.size() * ph.segreg_size == argSize) {
+				isCodeNear = true;
+				isCodeFar = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			} else if (isCodeNear && ftd.stkargs + funcPtrSizes.size() * ph.segreg_size == argSize) {
+				isCodeFar = true;
+				isCodeNear = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			} else if (isFar && isCodeFar && ftd.stkargs - (ptrSizes.size() + funcPtrSizes.size()) * ph.segreg_size == argSize) {
+				isNear = true; isCodeNear = true;
+				isFar = false; isCodeFar = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			} else if (isNear && isCodeNear && ftd.stkargs + (ptrSizes.size() + funcPtrSizes.size()) * ph.segreg_size == argSize) {
+				isFar = true; isCodeFar = true;
+				isNear = false; isCodeNear = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			} else if (isNear && isCodeFar && ftd.stkargs + (ptrSizes.size() - funcPtrSizes.size()) * ph.segreg_size == argSize) {
+				isFar = true; isCodeNear = true;
+				isNear = false; isCodeFar = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			} else if (isFar && isCodeNear && ftd.stkargs + (funcPtrSizes.size() - ptrSizes.size()) * ph.segreg_size == argSize) {
+				isNear = true; isCodeFar = true;
+				isFar = false; isCodeNear = false;
+				bFrameChange = true;
+				ftd.stkargs = argSize;
+			}
+			if (bFrameChange) {
+				fixPtrSizes(ftd.rettype, nearsize, farsize, isNear, isFar, isCodeNear, isCodeFar);
+				for (size_t i = 0; i < ftd.size(); i++) {
+					fixPtrSizes(ftd[i].type, nearsize, farsize, isNear, isFar, isCodeNear, isCodeFar);
+				}
+			}
+		}
+		auto ftdCc = GHIDRADEC_FTD_CC(ftd);
+		if ((ftdCc & CM_M_MASK) == CM_M_FN && isFar) ftdCc = (ftdCc & ~CM_M_MASK) | CM_M_FF;
+		else if ((ftdCc & CM_M_MASK) == CM_M_NN && isFar) ftdCc = (ftdCc & ~CM_M_MASK) | CM_M_NF;
+		else if ((ftdCc & CM_M_MASK) == CM_M_NF && isNear) ftdCc = (ftdCc & ~CM_M_MASK) | CM_M_NN;
+		else if ((ftdCc & CM_M_MASK) == CM_M_FF && isNear) ftdCc = (ftdCc & ~CM_M_MASK) | CM_M_FN;
+		if ((ftdCc & CM_M_MASK) == CM_M_NF && isCodeFar) ftdCc = (ftdCc & ~CM_M_MASK) | CM_M_FF;
+		else if ((ftdCc & CM_M_MASK) == CM_M_NN && isCodeFar) ftdCc = (ftdCc & ~CM_M_MASK) | CM_M_FN;
+		else if ((ftdCc & CM_M_MASK) == CM_M_FN && isCodeNear) ftdCc = (ftdCc & ~CM_M_MASK) | CM_M_NN;
+		else if ((ftdCc & CM_M_MASK) == CM_M_FF && isCodeNear) ftdCc = (ftdCc & ~CM_M_MASK) | CM_M_NF;
+		GHIDRADEC_SET_FTD_CC(ftd, ftdCc);
+		return bFrameChange;
+	}
+	void IdaCallback::funcInfoToIDA(FuncProtoInfo& paramInfo, tinfo_t & ti)
+	{
+		func_type_data_t ftd;
+		//ti.get_func_details(&ftd);
+		addrToArgLoc(paramInfo.retType.addr, ftd.retloc);
+		typeInfoToIDA(0, paramInfo.retType.pi.ti, ftd.rettype);
+		if (paramInfo.isNoReturn) ftd.flags |= FTI_NORET;
+		ftd.flags |= FTI_ARGLOCS;
+		if (paramInfo.killedByCall.size() != 0) ftd.flags |= FTI_SPOILED;
+		if (paramInfo.model == "__stdcall") {
+			GHIDRADEC_SET_FTD_CC(ftd, GHIDRADEC_FTD_CC(ftd) | (paramInfo.customStorage ? CM_CC_SPECIALP : CM_CC_STDCALL));
+		} else if (paramInfo.model == "__fastcall" || paramInfo.model == "__regcall" || paramInfo.model == "__vectorcall") {
+			GHIDRADEC_SET_FTD_CC(ftd, GHIDRADEC_FTD_CC(ftd) | (paramInfo.customStorage ? CM_CC_SPECIALP : CM_CC_FASTCALL));
+		} else if (paramInfo.model == "__thiscall") {
+			GHIDRADEC_SET_FTD_CC(ftd, GHIDRADEC_FTD_CC(ftd) | (paramInfo.customStorage ? CM_CC_SPECIALP : CM_CC_THISCALL));
+		} else if (paramInfo.model == "__cdecl") {
+			GHIDRADEC_SET_FTD_CC(ftd, GHIDRADEC_FTD_CC(ftd) | (paramInfo.dotdotdot ? (paramInfo.customStorage ? CM_CC_SPECIALE : CM_CC_ELLIPSIS) : (paramInfo.customStorage ? CM_CC_SPECIAL : CM_CC_CDECL)));
+		} else if (paramInfo.model == "__pascal") {
+			GHIDRADEC_SET_FTD_CC(ftd, GHIDRADEC_FTD_CC(ftd) | (paramInfo.customStorage ? CM_CC_SPECIALP : CM_CC_PASCAL));
+		} else if (paramInfo.model == "unknown") {
+			GHIDRADEC_SET_FTD_CC(ftd, GHIDRADEC_FTD_CC(ftd) | CM_CC_UNKNOWN);
+		} else if (paramInfo.model == "__stdcall16far") {
+			GHIDRADEC_SET_FTD_CC(ftd, GHIDRADEC_FTD_CC(ftd) | (paramInfo.customStorage ? CM_CC_SPECIALP : CM_CC_STDCALL) | CM_N16_F32);
+			if (!is_code_far(inf_cc_cm)) ftd.flags |= FTI_FARCALL;
+		} else if (paramInfo.model == "__stdcall16near") {
+			GHIDRADEC_SET_FTD_CC(ftd, GHIDRADEC_FTD_CC(ftd) | (paramInfo.customStorage ? CM_CC_SPECIALP : CM_CC_STDCALL) | CM_N16_F32);
+			if (is_code_far(inf_cc_cm)) ftd.flags |= FTI_NEARCALL;
+		} else if (paramInfo.model == "__cdecl16far") {
+			GHIDRADEC_SET_FTD_CC(ftd, GHIDRADEC_FTD_CC(ftd) | (paramInfo.dotdotdot ? (paramInfo.customStorage ? CM_CC_SPECIALE : CM_CC_ELLIPSIS) : (paramInfo.customStorage ? CM_CC_SPECIAL : CM_CC_CDECL)) | CM_N16_F32);
+			if (!is_code_far(inf_cc_cm)) ftd.flags |= FTI_FARCALL;
+		} else if (paramInfo.model == "__cdecl16near") {
+			GHIDRADEC_SET_FTD_CC(ftd, GHIDRADEC_FTD_CC(ftd) | (paramInfo.dotdotdot ? (paramInfo.customStorage ? CM_CC_SPECIALE : CM_CC_ELLIPSIS) : (paramInfo.customStorage ? CM_CC_SPECIAL : CM_CC_CDECL)) | CM_N16_F32);
+			if (is_code_far(inf_cc_cm)) ftd.flags |= FTI_NEARCALL;
+		}
+		GHIDRADEC_SET_FTD_CC(ftd, GHIDRADEC_FTD_CC(ftd) | (inf_cc_cm & CM_M_MASK));
+		GHIDRADEC_SET_FTD_CC(ftd, GHIDRADEC_FTD_CC(ftd) | (inf_cc_cm & CM_MASK));
+		/*if (paramInfo.customStorage && ((ftd.cc & CM_CC_MASK) == CM_CC_STDCALL ||
+			(ftd.cc & CM_CC_MASK) == CM_CC_PASCAL || (ftd.cc & CM_CC_MASK) == CM_CC_FASTCALL
+			|| (ftd.cc & CM_CC_MASK) == CM_CC_THISCALL)) ftd.cc = (ftd.cc & CM_CC_MASK) | CM_CC_SPECIALP;
+		if (paramInfo.customStorage && (ftd.cc & CM_CC_MASK) != CM_CC_STDCALL) ftd.cc = (ftd.cc & CM_CC_MASK) | CM_CC_SPECIAL;
+		if (paramInfo.dotdotdot && (ftd.cc & CM_CC_MASK) != CM_CC_ELLIPSIS) ftd.cc = (ftd.cc & CM_CC_MASK) | CM_CC_SPECIALE;*/
+		for (size_t i = 0; i < paramInfo.killedByCall.size(); i++) {
+			reg_info_t ri;
+			std::string reg = decInt->getRegisterFromIndex(paramInfo.killedByCall[i].addr.offset, (int)paramInfo.killedByCall[i].size);
+			parse_reg_name(&ri, reg.c_str());
+			ftd.spoiled.push_back(ri);
+		}
+		uval_t stkargs = 0;
+		for (size_t i = 0; i < paramInfo.syminfo.size(); i++) {
+			if (paramInfo.syminfo[i].argIndex == -1) continue;
+			funcarg_t fa;
+			addrToArgLoc(paramInfo.syminfo[i].addr, fa.argloc);
+			typeInfoToIDA(0, paramInfo.syminfo[i].pi.ti, fa.type);
+			fa.name = qstring(paramInfo.syminfo[i].pi.name.c_str());
+			if (ftd.size() <= paramInfo.syminfo[i].argIndex) ftd.resize(paramInfo.syminfo[i].argIndex + 1);
+			if (paramInfo.syminfo[i].addr.addr.space == "stack") stkargs += (uval_t)paramInfo.syminfo[i].addr.size;
+			ftd[paramInfo.syminfo[i].argIndex] = fa;
+		}
+		ftd.stkargs = stkargs;
+		//the far/near data/call method is basically irrelevant unless there are arguments/return value containing data or function pointers
+		//either the default as above, or the prior value would be fine
+		tryFixFuncModel(ftd, BADADDR);
+		//type_t t = BTMT_DEFCALL; //FTI_DEFCALL
+		//if ((ftd.flags & FTI_NEARCALL) != 0) t = BTMT_NEARCALL;
+		//else if ((ftd.flags & FTI_FARCALL) != 0) t = BTMT_FARCALL;
+		//else if ((ftd.flags & FTI_INTCALL) != 0) t = BTMT_INTCALL;
+		ti.create_func(ftd, BT_FUNC | (ftd.get_call_method() >> 2));
+	}
+	void IdaCallback::typeInfoToIDA(int idx, std::vector<TypeInfo>& type, tinfo_t & ti)
+	{
+		if (type[idx].size == -1) {
+			ti.get_named_type(get_idati(), type[idx].typeName.c_str());
+			return;
+		}
+		if (type[idx].metaType == "ptr") {
+			ptr_type_data_t ptd;
+			typeInfoToIDA(idx + 1, type, ptd.obj_type);
+			type_t t = BTMT_DEFPTR;
+			//if (ptd.obj_type.is_func()) {
+				//ptd.closure;
+				//t = BTMT_CLOSURE; //this pointer of capture object constructed
+			//} else {
+				ptd.based_ptr_size = (uchar)type[idx].size;
+				unsigned long long nearsize = inf_is_64bit() ? 8 : (inf_is_32bit() ? 4 : 2),
+					farsize = nearsize + ph.segreg_size;
+				if (type[idx].size == nearsize && is_data_far(inf_cc_cm)) t = BTMT_NEAR;
+				else if (type[idx].size == farsize && !is_data_far(inf_cc_cm)) t = BTMT_FAR;				
+			//}
+			ti.create_ptr(ptd, BT_PTR | t);
+		} else if (type[idx].metaType == "struct") {
+			udt_type_data_t utd;
+			for (size_t i = 0; i < type[idx].structMembers.size(); i++) {
+				udt_member_t um;
+				um.name = type[idx].structMembers[i].name.c_str();
+				um.offset = type[idx].structMembers[i].offset;
+				typeInfoToIDA(0, type[idx].structMembers[i].ti, um.type);
+				utd.push_back(um);
+			}
+			ti.create_udt(utd, BTF_STRUCT);
+		} else if (type[idx].metaType == "array") {
+			array_type_data_t atd;
+			atd.nelems = (uint32)type[idx].arraySize;
+			typeInfoToIDA(idx + 1, type, atd.elem_type);
+			ti.create_array(atd);
+		} else if (type[idx].metaType == "code") {
+			funcInfoToIDA(type[idx].funcInfo, ti);
+		} else if (type[idx].metaType == "void") {
+			ti.create_simple_type(BT_VOID);
+		} else {
+			if (type[idx].isEnum) {
+				enum_type_data_t etd;
+				for (size_t i = 0; i < type[idx].enumMembers.size(); i++) {
+					enum_member_t em;
+					em.name = type[idx].enumMembers[i].first.c_str();
+					em.value = type[idx].enumMembers[i].second;
+					etd.push_back(em);
+				}
+				ti.create_enum(etd);
+			} else {
+				if ((type[idx].metaType == "int" || type[idx].metaType == "uint" || type[idx].metaType == "unknown") &&
+					(type[idx].size == 1 || type[idx].size == 2 || type[idx].size == 4 || type[idx].size == 8)) {
+					type_t t = 0;
+					if (type[idx].metaType == "int") t = BTMT_SIGNED;
+					else if (type[idx].metaType == "uint") t = BTMT_UNSIGNED;
+					else if (type[idx].metaType == "unknown") t = BTMT_UNKSIGN;
+					if (type[idx].size == 1) ti.create_simple_type(BT_INT8 | t);
+					else if (type[idx].size == 2) ti.create_simple_type(BT_INT16 | t);
+					else if (type[idx].size == 4) ti.create_simple_type(BT_INT32 | t);
+					else if (type[idx].size == 8) ti.create_simple_type(BT_INT64 | t);
+				} else if (type[idx].metaType == "float" && (type[idx].size == 4 || type[idx].size == 8 || type[idx].size == 10)) {
+					ti.create_simple_type(BT_FLOAT | (type[idx].size == 4 ? BTMT_FLOAT : (type[idx].size == 8 ? BTMT_DOUBLE : BTMT_LNGDBL)));
+#ifndef __X64__
+				} else if (type[idx].metaType == "bool" && (type[idx].size == 1 || type[idx].size == 4 || type[idx].size == 2)) {
+#else
+				} else if (type[idx].metaType == "bool" && (type[idx].size == 1 || type[idx].size == 4 || type[idx].size == (inf_is_64bit() ? 8 : 2))) {
+#endif
+					ti.create_simple_type(BT_BOOL | (type[idx].size == 1 ? BTMT_BOOL1 : (type[idx].size == 4 ? BTMT_BOOL4 : BTMT_BOOL2 | BTMT_BOOL8)));
+				} else {
+					array_type_data_t atd;
+					atd.nelems = (uint32)type[idx].size;
+					atd.elem_type.create_simple_type(BT_INT8 | BTMT_CHAR);
+					ti.create_array(atd);
+				}
+			}
+		}
+	}
+	Options IdaCallback::getOpts()
+	{
+		Options opt = defaultOptions;
+		auto optionString = [](int value, const char* const* values, int count, int fallback) -> std::string {
+			if (value < 0 || value >= count)
+				value = fallback;
+			return values[value];
+		};
+		static const char* const aliasBlockOptions[] = { "none", "struct", "array", "all" };
+		static const char* const namespaceOptions[] = { "minimal", "none", "all" };
+		static const char* const nanIgnoreOptions[] = { "none", "compare", "all" };
+		static const char* const braceFormatOptions[] = { "same", "next", "skip" };
+		opt.protoEval = di->customCallStyle.empty() ? ccToStr(inf_cc_cm, is_code_far(inf_cc_cm) ? FTI_FARCALL : FTI_NEARCALL, true) : di->customCallStyle; //default calling convention can be very important such as on x86-16
+		if (opt.protoEval.empty() || opt.protoEval == "unknown")
+			opt.protoEval = "default";
+		opt.decompileUnreachable = (di->alysChecks & GHIDRADEC_ANALYSIS_UNREACHABLE) != 0;
+		opt.ignoreUnimplemented = (di->alysChecks & GHIDRADEC_ANALYSIS_IGNORE_UNIMPLEMENTED) != 0;
+		opt.inferConstPtr = (di->alysChecks & GHIDRADEC_ANALYSIS_INFER_CONST_PTR) != 0;
+		opt.readonly = (di->alysChecks & GHIDRADEC_ANALYSIS_READONLY) != 0;
+		opt.decompileDoublePrecis = (di->alysChecks & GHIDRADEC_ANALYSIS_DOUBLE_PRECISION) != 0;
+		opt.conditionalexe = (di->alysChecks & GHIDRADEC_ANALYSIS_CONDITIONAL_EXECUTION) != 0;
+		opt.inPlaceOps = (di->alysChecks & GHIDRADEC_ANALYSIS_INPLACE_OPS) != 0;
+		opt.analyzeForLoops = (di->behaviorChecks & GHIDRADEC_BEHAVIOR_ANALYZE_FOR_LOOPS) != 0;
+		opt.allowContextSet = (di->behaviorChecks & GHIDRADEC_BEHAVIOR_ALLOW_CONTEXT_SET) != 0;
+		opt.errorUnimplemented = (di->behaviorChecks & GHIDRADEC_BEHAVIOR_ERROR_UNIMPLEMENTED) != 0;
+		opt.errorReinterpreted = (di->behaviorChecks & GHIDRADEC_BEHAVIOR_ERROR_REINTERPRETED) != 0;
+		opt.errorTooManyInstructions = (di->behaviorChecks & GHIDRADEC_BEHAVIOR_ERROR_TOO_MANY_INSTRUCTIONS) != 0;
+		opt.jumpLoad = (di->behaviorChecks & GHIDRADEC_BEHAVIOR_JUMP_LOAD) != 0;
+		opt.maxJumpTableSize = (int)di->maxJumpTableSize;
+		opt.maxInstructions = (int)di->maxInstructions;
+		opt.aliasBlock = optionString(di->aliasBlock, aliasBlockOptions, 4, 2);
+		opt.splitDatatype1 = (di->splitDatatypeChecks & GHIDRADEC_SPLIT_DATATYPE_STRUCT) != 0 ? "struct" : "";
+		opt.splitDatatype2 = (di->splitDatatypeChecks & GHIDRADEC_SPLIT_DATATYPE_ARRAY) != 0 ? "array" : "";
+		opt.splitDatatype3 = (di->splitDatatypeChecks & GHIDRADEC_SPLIT_DATATYPE_POINTER) != 0 ? "pointer" : "";
+		opt.nanIgnore = optionString(di->nanIgnore, nanIgnoreOptions, 3, 1);
+		opt.commentIndent = (int)di->cmtLevel;
+		opt.noCastPrinting = (di->dispChecks & GHIDRADEC_DISPLAY_NO_CASTS) != 0;
+		opt.commentUser1 = (di->dispChecks & GHIDRADEC_DISPLAY_EOL_COMMENTS) != 0; //EOL
+		opt.commentHeader = (di->dispChecks & GHIDRADEC_DISPLAY_HEADER_COMMENTS) != 0;
+		opt.commentInstructionHeader = (di->dispChecks & GHIDRADEC_DISPLAY_PLATE_COMMENTS) != 0; //PLATE
+		opt.commentUser3 = (di->dispChecks & GHIDRADEC_DISPLAY_POST_COMMENTS) != 0; //POST
+		opt.commentUser2 = (di->dispChecks & GHIDRADEC_DISPLAY_PRE_COMMENTS) != 0; //PRE
+		opt.commentWarning = (di->dispChecks & GHIDRADEC_DISPLAY_WARNING_COMMENTS) != 0;
+		opt.commentWarningHeader = (di->dispChecks & GHIDRADEC_DISPLAY_WARNING_COMMENTS) != 0;
+		opt.nullPrinting = (di->dispChecks & GHIDRADEC_DISPLAY_NULL_PRINTING) != 0;
+		opt.conventionPrinting = (di->dispChecks & GHIDRADEC_DISPLAY_CONVENTION_PRINTING) != 0;
+		opt.hideExtensions = (di->dispChecks & GHIDRADEC_DISPLAY_HIDE_EXTENSIONS) != 0;
+		opt.commentStyle = (di->comStyle ? "cplusplus" : "c");
+		opt.integerFormat = (di->intFormat ? (di->intFormat == 2 ? "best" : "dec") : "hex");
+		opt.namespaceStrategy = optionString(di->namespaceStrategy, namespaceOptions, 3, 0);
+		opt.braceFormatFunction = optionString(di->braceFormatFunction, braceFormatOptions, 3, 2);
+		opt.braceFormatIfElse = optionString(di->braceFormatIfElse, braceFormatOptions, 3, 0);
+		opt.braceFormatLoop = optionString(di->braceFormatLoop, braceFormatOptions, 3, 0);
+		opt.braceFormatSwitch = optionString(di->braceFormatSwitch, braceFormatOptions, 3, 0);
+		opt.maxLineWidth = (int)di->maxChars;
+		opt.indentIncrement = (int)di->numChars;
+		return opt;
+	}
+	void checkNearFarFuncModelInfo(ea_t ea)
+	{
+		func_t* f = get_func(ea);
+		if (f == nullptr) return;
+		tinfo_t ti;
+		if (getFuncByGuess(ea, ti)) {
+			func_type_data_t ftd;
+			bool bChanged = false, bFrameChange = false;
+			if (ti.get_func_details(&ftd)) {
+				if (f->is_far() && (ftd.get_call_method() == FTI_NEARCALL || ftd.get_call_method() == FTI_DEFCALL && !is_code_far(inf_cc_cm)) ||
+					!f->is_far() && (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf_cc_cm))) {
+					ftd.flags &= ~FTI_CALLTYPE;
+					ftd.flags |= (f->is_far() ? FTI_FARCALL : FTI_NEARCALL);
+					bChanged = true;
+				}
+			}
+			if (f->frame != BADNODE) {
+				//range_t range;
+				//get_frame_part(&range, f, FPC_ARGS);
+				//int argSize = range.end_ea - range.start_ea;
+				//argloc_t al;
+				//const tinfo_t t(inf_is_64bit() ? BT_INT64 : (inf_is_32bit() ? BT_INT32 : BT_INT16)); //or use BT_INT8 - 1 byte like Ghidra?
+				//ph.calc_retloc(&al, t, inf_cc_cm) == 1;
+				ea_t argSize = getFrameArgsSize(f);
+				//unsigned long long nearsize = inf_is_64bit() ? 8 : (inf_is_32bit() ? 4 : 2),
+					//farsize = nearsize + ph.segreg_size;
+				//if (ftd.stkargs != argSize) {
+					//ftd.cc = (ftd.cc & ~CM_M_MASK) | (is_code_far(ftd.cc) ? CM_M_FN : CM_M_NN);
+					//ftd.guess_cc(f->argsize, 0);
+					//if (!is_user_cc(ftd.cc)) ph.calc_arglocs(&ftd);
+					/*if (ftd.is_vararg_cc()) {
+						regobjs_t rego;
+						relobj_t relo;
+						ph.calc_varglocs(&ftd, &rego, &relo, ftd.size());
+					}*/					
+				//}
+				bFrameChange = tryFixFuncModel(ftd, argSize);
+				/*for (size_t i = 0; i < s->memqty; i++) {
+					xreflist_t xlt;
+					build_stkvar_xrefs(&xlt, f, &s->members[i]);
+					for (size_t j = 0; j < xlt.size(); j++) {
+						flags_t fl = get_flags(xlt[j].ea);
+						int stkvar = is_stkvar0(fl) ? 0 : (is_stkvar1(fl) ? 1 : -1);
+						if (stkvar == -1) continue;
+						insn_t insn;
+						decode_insn(&insn, xlt[j].ea);
+						op_t op = insn.ops[stkvar];
+						if (op.type == o_displ && op.dtype == dt_word && s->members[i].eoff - s->members[i].soff == nearsize) {
+							//weak indicator: 2 byte near pointer detected as 4 bytes
+						} else if (op.type == o_displ && op.dtype == dt_dword && s->members[i].eoff - s->members[i].soff == farsize) {
+							//weak indicator: 4 byte near pointer detected as 6 bytes
+						} else if (op.type == o_displ && op.dtype == dt_dword && s->members[i].eoff - s->members[i].soff == nearsize) {
+							//strong indicator: 4 byte far pointer
+						} else if (op.type == o_displ && op.dtype == dt_fword && s->members[i].eoff - s->members[i].soff == farsize) {
+							//strong indicator: 6 byte far pointer
+						}
+							//lds/les/lfs/lgs/lss are the normal way of loading a far pointer, second operand is m16:16/32
+					}
+				}*/
+			}
+			if (bChanged || bFrameChange) {
+				tinfo_t newti;
+				newti.create_func(ftd, BT_FUNC | (ftd.get_call_method() >> 2));
+				apply_tinfo(ea, newti, TINFO_DEFINITE); //if a structure name has the function name, seems to be causing a warning message - very long standing issue in IDA apparently
+				if (bFrameChange) {
+					del_frame(f);
+					ph.create_func_frame(f);
+				}
+			}
+		}
+	}
+	bool compareFuncInfo(const FuncProtoInfo& f1, const FuncProtoInfo& f2);
+	bool compareParamInfo(const std::vector<TypeInfo> & t1, const std::vector<TypeInfo>& t2)
+	{
+		if (t1.size() != t2.size()) return false;
+		for (size_t i = 0; i < t1.size(); i++) {
+			if (t1[i].arraySize != t2[i].arraySize || t1[i].enumMembers.size() != t2[i].enumMembers.size() ||
+				!compareFuncInfo(t1[i].funcInfo, t2[i].funcInfo) || t1[i].isChar != t2[i].isChar ||
+				t1[i].isEnum != t2[i].isEnum || t1[i].isReadOnly != t2[i].isReadOnly || t1[i].isUtf != t2[i].isUtf ||
+				t1[i].metaType != t2[i].metaType || t1[i].size != t2[i].size || t1[i].structMembers.size() != t2[i].structMembers.size() ||
+				t1[i].typeName != t2[i].typeName) return false;
+			for (size_t j = 0; j < t1[i].enumMembers.size(); j++) {
+				if (t1[i].enumMembers[j].first != t2[i].enumMembers[j].first || t1[i].enumMembers[j].second != t2[i].enumMembers[j].second) return false;
+			}
+			for (size_t j = 0; j < t1[i].structMembers.size(); j++) {
+				if (t1[i].structMembers[j].name != t2[i].structMembers[j].name || t1[i].structMembers[j].offset != t2[i].structMembers[j].offset ||
+					!compareParamInfo(t1[i].structMembers[j].ti, t2[i].structMembers[j].ti)) return false;
+			}
+		}
+		return true;
+	}
+	bool compareFuncInfo(const FuncProtoInfo & f1, const FuncProtoInfo & f2)
+	{
+		if (f1.customStorage != f2.customStorage || f1.dotdotdot != f2.dotdotdot ||
+			f1.extraPop != f2.extraPop || f1.hasThis != f2.hasThis || f1.isConstruct != f2.isConstruct ||
+			f1.isDestruct != f2.isDestruct || f1.isInline != f2.isInline || f1.isNoReturn != f2.isNoReturn ||
+			f1.model != f2.model || f1.killedByCall.size() != f2.killedByCall.size() || f1.syminfo.size() != f2.syminfo.size()) return false;
+		for (size_t i = 0; i < f1.killedByCall.size(); i++) {
+			if (f1.killedByCall[i].size != f2.killedByCall[i].size || f1.killedByCall[i].addr.space != f2.killedByCall[i].addr.space ||
+				f1.killedByCall[i].addr.offset != f2.killedByCall[i].addr.offset || f1.killedByCall[i].addr.joins.size() != f2.killedByCall[i].addr.joins.size()) return false;
+			for (size_t j = 0; j < f1.killedByCall[i].addr.joins.size(); j++) {
+				if (f1.killedByCall[i].addr.joins[j].size != f2.killedByCall[i].addr.joins[j].size ||
+					f1.killedByCall[i].addr.joins[j].addr.offset != f2.killedByCall[i].addr.joins[j].addr.offset ||
+					f1.killedByCall[i].addr.joins[j].addr.space != f2.killedByCall[i].addr.joins[j].addr.space) return false;
+			}
+		}
+		for (size_t i = 0; i < f1.syminfo.size(); i++) {
+			if (f1.syminfo[i].argIndex != f2.syminfo[i].argIndex ||
+				f1.syminfo[i].addr.size != f2.syminfo[i].addr.size || f1.syminfo[i].addr.addr.offset != f2.syminfo[i].addr.addr.offset ||
+				f1.syminfo[i].addr.addr.space != f2.syminfo[i].addr.addr.space || f1.syminfo[i].addr.addr.joins.size() != f2.syminfo[i].addr.addr.joins.size() ||
+				f1.syminfo[i].range.space != f2.syminfo[i].range.space || f1.syminfo[i].range.beginoffset != f2.syminfo[i].range.beginoffset ||
+				f1.syminfo[i].range.endoffset != f2.syminfo[i].range.endoffset ||
+				f1.syminfo[i].pi.name != f2.syminfo[i].pi.name) return false;
+			for (size_t j = 0; j < f1.syminfo[i].addr.addr.joins.size(); j++) {
+				if (f1.syminfo[i].addr.addr.joins[j].size != f2.syminfo[i].addr.addr.joins[j].size ||
+					f1.syminfo[i].addr.addr.joins[j].addr.offset != f2.syminfo[i].addr.addr.joins[j].addr.offset ||
+					f1.syminfo[i].addr.addr.joins[j].addr.space != f2.syminfo[i].addr.addr.joins[j].addr.space) return false;
+			}
+			if (!compareParamInfo(f1.syminfo[i].pi.ti, f2.syminfo[i].pi.ti)) return false;
+		}
+		if (f1.retType.argIndex != f2.retType.argIndex ||
+			f1.retType.addr.size != f2.retType.addr.size || f1.retType.addr.addr.offset != f2.retType.addr.addr.offset ||
+			f1.retType.addr.addr.space != f2.retType.addr.addr.space || f1.retType.addr.addr.joins.size() != f2.retType.addr.addr.joins.size() ||
+			f1.retType.range.space != f2.retType.range.space || f1.retType.range.beginoffset != f2.retType.range.beginoffset ||
+			f1.retType.range.endoffset != f2.retType.range.endoffset ||
+			f1.retType.pi.name != f2.retType.pi.name) return false;
+		for (size_t j = 0; j < f1.retType.addr.addr.joins.size(); j++) {
+			if (f1.retType.addr.addr.joins[j].size != f2.retType.addr.addr.joins[j].size ||
+				f1.retType.addr.addr.joins[j].addr.offset != f2.retType.addr.addr.joins[j].addr.offset ||
+				f1.retType.addr.addr.joins[j].addr.space != f2.retType.addr.addr.joins[j].addr.space) return false;
+		}
+		if (!compareParamInfo(f1.retType.pi.ti, f2.retType.pi.ti)) return false;
+		return true;
+	}
+	void IdaCallback::identParams(ea_t ea)
+	{
+		//if (funcProtoInfos.find(ea) != funcProtoInfos.end() && funcProtoInfos[ea].bFromParamId) return;
+		//how to avoid excessive repeated calls?
+		//if all types in frame are known, its a very good indicator
+		//however sometimes specifically IDA will choose a wrong data model for libraries - far instead of near, and the frame and type both have bad information
+		//perhaps this peculiar case should be solved by a simple database script which correlates the stack frame pointers to its specific usages
+		//as largely it is just working around and fixing a bug in this particular area
+		if (di->outputFile.empty() && isX86() && !inf_is_32bit() && !inf_is_64bit()) {
+			executeOnMainThread([ea]() { checkNearFarFuncModelInfo(ea); }, "near-far-preflight");
+		} else {
+			TRACE_MSG("skipping near/far model preflight during paramid\n");
+		}
+		DecMode dm = defaultDecMode;
+		dm.actionname = "paramid";
+		dm.sendParamMeasures = true;
+		std::string display, funcProto, funcColorProto;
+		FuncProtoInfo paramInfo = {};
+		std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>> blockGraph;
+		//should turn off eliminate unreachable option switch
+		Options opt = getOpts();
+		bool bChangeOpt = false;
+		const bool needsGuiUnreachableParamid =
+			di->outputFile.empty() && isX86() && !inf_is_32bit() && !inf_is_64bit();
+		if (needsGuiUnreachableParamid && !opt.decompileUnreachable) {
+			opt.decompileUnreachable = true;
+			TRACE_MSG("paramid enabling decompile-unreachable option\n");
+			decInt->setOptions(opt);
+			bChangeOpt = true;
+		}
+		//decInt->toggleCCode(false);
+		//decInt->toggleSyntaxTree(false);
+		dm.printCCode = false;
+		dm.printSyntaxTree = false;
+		TRACE_MSG("paramid doDecompile begin @ " << std::hex << ea << "\n");
+		decInt->doDecompile(dm, AddrInfo{ "ram", ea }, display, funcProto,
+			funcColorProto, paramInfo, blockGraph); //let outer try handle errors
+		TRACE_MSG("paramid doDecompile complete @ " << std::hex << ea << "\n");
+		if (bChangeOpt) {
+			TRACE_MSG("paramid restoring decompile options\n");
+			decInt->setOptions(getOpts());
+		}
+		//perhaps better way to detect graceful error than empty model - return XML has comment field - perhaps empty string if success for paramid
+		if (paramInfo.model.size() == 0) return; //error occurred such as most likely overlapping input varnodes
+		funcProtoInfos[ea] = FuncInfo{ funcProtoInfos[ea].name, true, paramInfo, funcProtoInfos[ea].fpi };
+	}
+#ifdef __X64__
+	class FuncChooser : public chooser_multi_t
+	{
+	public:
+		struct FuncRow
+		{
+			qstring oldval;
+			qstring val;
+		};
+		std::vector<FuncRow> inits;
+		static const int widths[];
+		static const char* strs[];
+		FuncChooser(std::vector<FuncRow>& its, sizevec_t* s) : chooser_multi_t(CH_KEEP | CH_MODAL, 2, widths, strs, "Function Prototype Changes"), inits(its), sv(s)
+		{}
+		sizevec_t* sv;
+		/// User pressed the enter key.
+		/// \param[in,out] sel  selected items
+		/// \return             what is changed
+		virtual cbres_t idaapi enter(sizevec_t* sel)
+		{
+			//sv = *sel;
+			*sv = *sel;
+#if IDA_SDK_VERSION < 720
+			if (sel->size() == 0) return NOTHING_CHANGED;
+			return (sel->size() == inits.size()) ? ALL_CHANGED : SELECTION_CHANGED;
+#else
+			return cbres_t(callui(ui_chooser_default_enter, this, sel).i);
+#endif
+		}
+		/// Selection changed
+		/// \note This callback is not supported in the txt-version.
+		/// \param sel  new selected items
+		virtual void idaapi select(const sizevec_t& sel) const
+		{
+			*sv = sel;
+			//void* thisPtr = (void*)this; //serious hack to get around the const
+			//((FuncChooser*)thisPtr)->sv = sel;
+		}
+		/// get the number of elements in the chooser
+		virtual size_t idaapi get_count() const
+		{
+			return inits.size();
+		}
+
+		/// get a description of an element.
+		/// \param[out] cols   vector of strings. \n
+		///                    will receive the contents of each column
+		/// \param[out] icon   element's icon id, -1 - no icon
+		/// \param[out] attrs  element attributes
+		/// \param n           element number (0..get_count()-1)
+		virtual void idaapi get_row(
+			qstrvec_t* cols,
+			int* icon_,
+			chooser_item_attrs_t* attrs,
+			size_t n) const
+		{
+			if (n >= inits.size()) return;
+			if (cols != nullptr) {
+				(*cols)[0] = inits[n].oldval;
+				(*cols)[1] = inits[n].val;
+			}
+			if (icon_ != nullptr) *icon_ = -1;
+			if (attrs != nullptr) {
+				//attrs->color = DEFCOLOR;
+				//attrs->flags = 0; //CHITEM_...
+			}
+		}
+	};
+	const int FuncChooser::widths[] = { 40, 40 };
+	const char* FuncChooser::strs[] = { "Old", "New" };
+#endif
+
+	void IdaCallback::updateDatabaseFromParams(std::vector<ea_t> eas)
+	{
+		if ((di->viewFeatures & VIEW_FEATURE_APPLY_PARAM_ID) == 0) return;
+		return; //not fully working
+		for (size_t i = 0; i < eas.size(); ) {
+			if (!funcProtoInfos[eas[i]].bFromParamId) eas.erase(eas.begin() + i); else i++;
+		}
+#ifdef __X64__
+		executeOnMainThread([this, eas]() {
+			//std::vector<ushort> checks;
+			//checks.resize(eas.size());
+			sizevec_t checks;
+			if (eas.size() == 1) {
+				std::string val, disp;
+				if (!compareFuncInfo(funcProtoInfos[eas[0]].fpi, funcProtoInfos[eas[0]].oldfpi)) {
+					val = "Change signature from '";
+					//disp = "Change signature from '";
+					FuncProtoInfo fpi = funcProtoInfos[eas[0]].fpi;
+					funcProtoInfos[eas[0]].fpi = funcProtoInfos[eas[0]].oldfpi;
+					val += print_func(eas[0], disp, COLOR_DEFAULT);
+					funcProtoInfos[eas[0]].fpi = fpi;
+					val += "' to parameter identified version from Ghidra: '";
+					//disp += "' to parameter identified version from Ghidra: '";
+					val += print_func(eas[0], disp, COLOR_DEFAULT);
+					val += "'?";
+					//disp += "'?";
+				} else return;
+				if (ask_yn(ASKBTN_YES, val.c_str()) != ASKBTN_YES) return;
+				//checks[0] = 1;
+				checks.push_back(0);
+			} else {
+				//qstring ask = "GhidraDec Parameter Identification Acceptance\n"
+				//	"\n"
+				//	"\n"
+				//	"Accepted parameter identifications will cause updates to occur in both IDA function prototype and function stack frame.\n"
+				//	"\n"
+				//	"<~C~hooser:E1:0:80:::>\n\n";
+				std::vector<FuncChooser::FuncRow> vals;
+				for (size_t idx = 0; idx < eas.size(); idx++) {
+					std::string val, valold, disp;
+					if (!compareFuncInfo(funcProtoInfos[eas[idx]].fpi, funcProtoInfos[eas[idx]].oldfpi)) {
+						FuncProtoInfo fpi = funcProtoInfos[eas[idx]].fpi;
+						funcProtoInfos[eas[idx]].fpi = funcProtoInfos[eas[idx]].oldfpi;
+						valold = print_func(eas[idx], disp, COLOR_DEFAULT);
+						funcProtoInfos[eas[idx]].fpi = fpi;
+						val = print_func(eas[idx], disp, COLOR_DEFAULT);
+						//ask += qstring("<:C>") + qstring(std::to_string(idx + 1).c_str()) + ">" + qstring(val.c_str()) + "   " + qstring(valold.c_str()) + "\n";
+						vals.push_back(FuncChooser::FuncRow{ valold.c_str(), val.c_str() });
+						checks.push_back(idx);
+					}
+					//checks[idx] = 1;
+				}
+				if (vals.size() == 0) return;
+				//(va_list)checks.data() //this will not work on x86-64 GCC which uses different ABI format for va_list
+				FuncChooser cm(vals, &checks);
+				//ask_form(ask.c_str(), &cm);
+				ssize_t choice = cm.choose(checks); //initial choice but does not return and select is const method that cannot be used
+				if (choice == chooser_base_t::NO_SELECTION || choice == chooser_base_t::EMPTY_CHOOSER) return;
+				//checks = cm.sv;
+			}
+			for (size_t idx = 0; idx < eas.size(); idx++) {
+				if (checks.find(idx) == checks.end()) continue;
+				ea_t ea = eas[idx];
+				tinfo_t ti;
+				if (!getFuncByGuess(eas[idx], ti)) {}
+				tinfo_t newti;
+				FuncProtoInfo& paramInfo = funcProtoInfos[ea].fpi;
+				funcInfoToIDA(paramInfo, newti);
+				apply_tinfo(ea, newti, TINFO_DEFINITE); //can cause crash error 984 if type not correct
+				func_type_data_t ftd;
+				newti.get_func_details(&ftd);
+				func_t* f = get_func(ea);
+				if (f != nullptr) {
+					bool bChanged = false;
+					if (ftd.get_call_method() == FTI_FARCALL || ftd.get_call_method() == FTI_DEFCALL && is_code_far(inf_cc_cm) && !f->is_far() && (f->flags & FUNC_USERFAR) == 0) {
+						f->flags |= FUNC_FAR; //FUNC_USERFAR
+						bChanged = true;
+					}
+					if ((ftd.flags & FTI_NORET) != 0) {
+						f->flags |= FUNC_NORET; bChanged = true;
+					}
+					if (f->argsize == 0 && (f->flags & FUNC_PURGED_OK) == 0) {
+						f->flags |= FUNC_PURGED_OK;
+						if (is_purging_cc(GHIDRADEC_FTD_CC(ftd))) f->argsize = ftd.stkargs;
+						bChanged = true;
+					}
+					if (bChanged) update_func(f);
+
+					bool hasFrame = f->frame != BADNODE;
+					sval_t frsize = 0;
+					asize_t argsize = 0;
+					for (size_t i = 0; i < paramInfo.syminfo.size(); i++) {
+						if (paramInfo.syminfo[i].addr.addr.space != "stack") continue;
+						if (paramInfo.syminfo[i].argIndex == -1)
+							frsize += (sval_t)paramInfo.syminfo[i].pi.ti.begin()->size;
+						else
+							argsize += (asize_t)paramInfo.syminfo[i].pi.ti.begin()->size;
+					}
+					if (hasFrame) {
+						set_frame_size(f, frsize, f->frregs /*frame_off_savregs(f) - frame_off_lvars(f)*/, argsize);
+					} else {
+						if (frsize != 0 || argsize != 0) {
+							add_frame(f, frsize, f->frregs, argsize);
+							hasFrame = true;
+						}
+					}
+					for (size_t i = 0; i < paramInfo.syminfo.size(); i++) {
+						if (paramInfo.syminfo[i].addr.addr.space == "register") {
+							if (paramInfo.syminfo[i].argIndex == -1) {
+								std::string reg = decInt->getRegisterFromIndex(paramInfo.syminfo[i].addr.addr.offset, (int)paramInfo.syminfo[i].addr.size);
+								regvar_t* rv = find_regvar(f, (ea_t)paramInfo.syminfo[i].range.beginoffset, (ea_t)paramInfo.syminfo[i].range.endoffset, reg.c_str(), nullptr);
+								if (rv == nullptr)
+									add_regvar(f, (ea_t)paramInfo.syminfo[i].range.beginoffset, (ea_t)paramInfo.syminfo[i].range.endoffset,
+										reg.c_str(), paramInfo.syminfo[i].pi.name.c_str(), nullptr);
+							} else {
+								std::string reg = decInt->getRegisterFromIndex(paramInfo.syminfo[i].addr.addr.offset, (int)paramInfo.syminfo[i].addr.size);
+								reg_info_t ri;
+								parse_reg_name(&ri, reg.c_str());
+								read_regargs(f);
+								/*size_t j;
+								for (j = 0; j < f->regargqty; j++) {
+									if (f->regargs[j].reg == ri.reg) break;
+								}
+								if (j == f->regargqty) {}*/
+								tinfo_t ti;
+								typeInfoToIDA(0, paramInfo.syminfo[i].pi.ti, ti);
+								add_regarg(f, ri.reg, ti, paramInfo.syminfo[i].pi.name.c_str());
+							}
+						} else if (paramInfo.syminfo[i].addr.addr.space == "stack") {
+							tinfo_t ti;
+							typeInfoToIDA(0, paramInfo.syminfo[i].pi.ti, ti);
+							opinfo_t oi = {};
+#if IDA_SDK_VERSION >= 850
+							define_stkvar(f, paramInfo.syminfo[i].pi.name.c_str(),
+								(sval_t)(paramInfo.syminfo[i].addr.addr.offset - (frame_off_args(f) - frame_off_retaddr(f))),
+								ti, nullptr);
+#else
+							flags_t flag;
+							size_t sz; //size of ti
+							get_idainfo_by_type(&sz, &flag, &oi, ti, nullptr);
+							define_stkvar(f, paramInfo.syminfo[i].pi.name.c_str(),
+								(sval_t)(paramInfo.syminfo[i].addr.addr.offset - (frame_off_args(f) - frame_off_retaddr(f))),
+								flag, &oi, (asize_t)paramInfo.syminfo[i].addr.size);
+#endif
+						} else if (paramInfo.syminfo[i].addr.addr.space == "ram") {
+						}
+					}
+				}
+			}
+			}, "apply-paramid-results");
+#endif
+	}
+	std::string IdaCallback::tryDecomp(DecMode dec, ea_t ea, std::string funcName, std::string& display, std::string& err,
+		std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph, bool paramOnly)
+	{
+		std::string code, funcProto, funcColorProto;
+		FuncProtoInfo paramInfo;
+		definedFuncs[ea] = true;
+		try {
+			TRACE_MSG("tryDecomp begin for " << funcName.c_str() << " @ " << std::hex << ea << "\n");
+			if (di->decompPid == 0) {
+				TRACE_MSG("registerProgram begin\n");
+				decInt->registerProgram();
+				TRACE_MSG("registerProgram complete, pid=" << std::dec << di->decompPid << "\n");
+			}
+			if (!di->skipParamIdentification && (funcProtoInfos.find(ea) == funcProtoInfos.end() || !funcProtoInfos[ea].bFromParamId)) {
+				TRACE_MSG("paramid begin for " << funcName.c_str() << " @ " << std::hex << ea << "\n");
+				identParams(ea);
+				std::vector<ea_t> notIded;
+				for (std::map<ea_t, FuncInfo>::iterator it = funcProtoInfos.begin(); it != funcProtoInfos.end(); it++)
+					if (!it->second.bFromParamId) {
+						if (it->first != ea && imports.find(it->first) == imports.end()) notIded.push_back(it->first);
+					}
+				TRACE_MSG("paramid dependent count=" << std::dec << notIded.size() << "\n");
+				for (size_t i = 0; i < notIded.size(); i++) {
+					TRACE_MSG("paramid dependent " << std::dec << (i + 1) << "/" << notIded.size() << " @ " << std::hex << notIded[i] << "\n");
+					identParams(notIded[i]);
+				}
+				for (std::map<ea_t, FuncInfo>::iterator it = funcProtoInfos.begin(); it != funcProtoInfos.end(); )
+					if (!it->second.bFromParamId) funcProtoInfos.erase(it++); else it++;
+				if (!paramOnly) {
+					notIded.push_back(ea);
+					TRACE_MSG("updating IDA database from paramid results\n");
+					updateDatabaseFromParams(notIded);
+				}
+				//usage tracking obviously should not be affected by sub-functions
+				usedImports.clear();
+				usedTypes.clear();
+				usedData.clear();
+				usedFuncs.clear();
+			}
+			else if (di->skipParamIdentification) {
+				TRACE_MSG("skipping parameter identification for regression smoke test\n");
+			}
+			if (paramOnly) return code;
+			TRACE_MSG("doDecompile begin for " << funcName.c_str() << " @ " << std::hex << ea << "\n");
+			code = decInt->doDecompile(dec, AddrInfo{ "ram", ea }, display, funcProto, funcColorProto, paramInfo, blockGraph);
+			TRACE_MSG("doDecompile complete, code bytes=" << std::dec << code.size() << ", display bytes=" << display.size() << "\n");
+			if (funcProto.size() != 0) {
+				funcProtos[ea] = funcProto;
+				funcColorProtos[ea] = funcColorProto;
+			} else {
+				err = code.substr(3).c_str();
+				code += "//Decompiling function: " + funcName + " @ 0x" + to_string(ea, std::hex) + "\n";
+				display += "//Decompiling function: " + funcName + " @ 0x" + to_string(ea, std::hex) + "\n";
+			}
+		} catch (DecompError& e) {
+			std::string str = e.explain;
+			//str.erase(std::remove(str.begin(), str.end(), '\r'), str.end());
+			//str.erase(std::remove(str.begin(), str.end(), '\n'), str.end());
+			err = "Caught decompilation error: " + str + "\n";
+			stopDecompilation(di, false, false, true);
+			code = "//Error decompiling function: " + funcName + " @ 0x" + to_string(ea, std::hex) + "\n" "//" + str + "\n";
+			display = "//Error decompiling function: " + funcName + " @ 0x" + to_string(ea, std::hex) + "\n" "//" + str + "\n";
+		}
+		if (recvfp != nullptr) qflush(recvfp);
+		if (sendfp != nullptr) qflush(sendfp);
+		if (recfp != nullptr) qflush(recfp);
+		return code;
+	}
+
+	//graph.hpp and a graph emitter should take care of the AST information...
+
+std::string tryDecomp(RdGlobalInfo* di, DecMode dec, ea_t ea, std::string & display, bool & bSucc,
+	std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>& blockGraph, bool paramOnly = false)
+{
+	std::string code, err;
+	std::string fn = di->idacb->allFuncNames[ea];
+	TRACE_MSG((paramOnly ? "Identifying function parameters: " : "Decompiling function: ") << fn.c_str() << " @ " << std::hex << ea << std::endl);
+	code = di->idacb->tryDecomp(dec, ea, fn.c_str(), display, err, blockGraph, paramOnly);
+	if (err.size() != 0) { INFO_MSG(err); }
+	else bSucc = true;
+	return code;
+}
+
+bool detectProcCompiler(RdGlobalInfo* di, std::string& pspec, std::string & cspec, std::string& sleighfilename)
+{
+	std::string pname = inf_procname;
+	std::transform(pname.begin(), pname.end(), pname.begin(), [](unsigned char c) { return std::tolower(c); });
+	std::vector<int>::iterator it = di->toolMap[pname].begin();
+	for (; it != di->toolMap[pname].end(); it++) {
+		if ((di->li[*it].size == 32 && inf_is_32bit() && !inf_is_64bit() || di->li[*it].size == 64 && inf_is_64bit() || di->li[*it].size != 32 && di->li[*it].size != 64 && !inf_is_32bit() && !inf_is_64bit()) &&
+			di->li[*it].bigEndian == inf_is_be() || di->toolMap[pname].size() == 1) { //should only be one match though, and parameters should always match
+			sleighfilename = di->li[*it].basePath + di->li[*it].slafile;
+			pspec = di->li[*it].basePath + di->li[*it].processorspec;
+			if (di->li[*it].compilers.size() == 1) {
+				cspec = di->li[*it].basePath + di->li[*it].compilers.begin()->second;
+			} else {
+				//gcc, windows, o32, n32, o64, macosx, borlandcpp, borlanddelphi, posStack, pointer16, pointer32, pointer64, iarV1, imgCraftV8, Archimedes and default
+				if (default_compiler() == COMP_MS && di->li[*it].compilers.find("windows") != di->li[*it].compilers.end()) cspec = di->li[*it].basePath + di->li[*it].compilers["windows"];
+				else if (default_compiler() == COMP_BC && di->li[*it].compilers.find("borlandcpp") != di->li[*it].compilers.end()) cspec = di->li[*it].basePath + di->li[*it].compilers["borlandcpp"];
+				else if (default_compiler() == COMP_BP && di->li[*it].compilers.find("borlanddelphi") != di->li[*it].compilers.end()) cspec = di->li[*it].basePath + di->li[*it].compilers["borlanddelphi"];
+				else if (default_compiler() == COMP_GNU && di->li[*it].compilers.find("gcc") != di->li[*it].compilers.end()) cspec = di->li[*it].basePath + di->li[*it].compilers["gcc"];
+				else if (di->li[*it].compilers.find("default") != di->li[*it].compilers.end()) cspec = di->li[*it].basePath + di->li[*it].compilers["default"];
+				else cspec = di->li[*it].basePath + di->li[*it].compilers.begin()->second;
+			}
+			break;
+		}
+	}
+	if (it == di->toolMap[pname].end()) {
+		return false;
+	}
+	return true;
+}
+
+/**
+ * Decompile locally on work station.
+ * Working RetDec must be installed on the station.
+ * @param di Plugin's global information.
+ */
+static void idaapi localDecompilation(RdGlobalInfo *di)
+{
+	//di->endian == "big", inf.min_ea
+	std::string code, display;
+	std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>> blockGraph;
+	if (di->idacb->decInt == nullptr) di->idacb->decInt = new DecompInterface();
+	std::vector<CoreType> cts(&defaultCoreTypes[0], &defaultCoreTypes[numDefCoreTypes]);
+	try {
+		TRACE_MSG("decompiler setup begin\n");
+		di->idacb->decInt->setup(di->idacb, di->idacb->sleighfilename, di->idacb->pspec, di->idacb->cspec, cts, di->idacb->getOpts(), (int)di->timeout, (int)di->maxPayload);
+		TRACE_MSG("decompiler setup complete\n");
+	} catch (DecompError& err) {
+		WARNING_GUI("Decompilation FAILED: " << err.explain << ".\n");
+		di->decompSuccess = false;
+		di->outputFile.clear();
+		return;
+	}
+	if (!di->idacb->exportData.empty()) {
+		TRACE_MSG("deferring export data lookup, count="
+			<< std::dec << di->idacb->exportData.size() << "\n");
+	}
+	time_t startTime = time(NULL);
+	if (di->decompiledFunction == nullptr) {
+		//can decompile entry points first
+		std::map<ea_t, size_t> entries;
+		size_t num = di->idacb->allFuncs.size();
+		size_t startIndex = 0;
+		size_t endIndex = num;
+		qstring sliceStartEnv, sliceMaxEnv;
+		if (qgetenv("GHIDRADEC_BATCH_FUNCTION_START_INDEX", &sliceStartEnv) && !sliceStartEnv.empty())
+			startIndex = (size_t)strtoull(sliceStartEnv.c_str(), nullptr, 0);
+		if (startIndex > num) startIndex = num;
+		if (qgetenv("GHIDRADEC_BATCH_FUNCTION_MAX", &sliceMaxEnv) && !sliceMaxEnv.empty()) {
+			size_t maxCount = (size_t)strtoull(sliceMaxEnv.c_str(), nullptr, 0);
+			if (maxCount != 0 && startIndex + maxCount < endIndex)
+				endIndex = startIndex + maxCount;
+		}
+		if (startIndex != 0 || endIndex != num) {
+			INFO_MSG("Running all-decompile slice: functions " << std::dec
+				<< startIndex << ".." << endIndex << " of " << num << "\n");
+		}
+		if (di->decompPid == 0) {
+			TRACE_MSG("all-decompile registerProgram begin\n");
+			di->idacb->decInt->registerProgram();
+			TRACE_MSG("all-decompile registerProgram complete, pid=" << std::dec << di->decompPid << "\n");
+		}
+		std::vector<ea_t> notIded;
+		if (!di->skipParamIdentification) {
+			for (size_t i = startIndex; i < endIndex; i++) {
+				if (di->idacb->imports.find(di->idacb->allFuncs[i]) != di->idacb->imports.end()) continue;
+				bool bSucc = false;
+				std::string disp;
+				tryDecomp(di, defaultDecMode, di->idacb->allFuncs[i], disp, bSucc, blockGraph, true);
+				if (di->exiting) {
+					di->decompSuccess = false; return;
+				}
+				notIded.push_back(di->idacb->allFuncs[i]);
+			}
+			TRACE_MSG("all-decompile updateDatabaseFromParams begin, count=" << std::dec << notIded.size() << "\n");
+			di->idacb->updateDatabaseFromParams(notIded);
+			TRACE_MSG("all-decompile updateDatabaseFromParams complete\n");
+		}
+		int successes = 0, total = 0;
+		for (size_t i = startIndex; i < endIndex; i++) {
+			if (di->idacb->imports.find(di->idacb->allFuncs[i]) != di->idacb->imports.end()) continue;
+			std::string disp;
+			total++;
+			bool bSucc = false;
+			code += tryDecomp(di, defaultDecMode, di->idacb->allFuncs[i], disp, bSucc, blockGraph);
+			if (di->exiting) {
+				di->decompSuccess = false; return;
+			}
+			if (bSucc) successes++;
+			display += disp;
+		}
+		double percent = total == 0 ? 100.0 : (100.0 * (successes / (double)total));
+		INFO_MSG("Decompilation completed: " << successes << " successfully decompiled out of " << total << " (" << percent << "%) in " <<
+			std::dec << (time(NULL) - startTime) << " seconds\n");
+		qstring batchOutputEnv;
+		const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
+		if (total == 0 && batchOutput && !di->outputFile.empty()) {
+			code = "/* GhidraDec: no analyzed functions were available for decompilation. */\n";
+			display = code;
+		}
+	} else {
+		bool bSucc = false;
+		if (di->idacb->imports.find(di->decompiledFunction->start_ea) != di->idacb->imports.end()) {
+			di->decompSuccess = false;
+			std::string funcName = di->idacb->allFuncNames[di->decompiledFunction->start_ea];
+			std::string message = "Skipped decompiling import function: " + funcName +
+				" @ 0x" + to_string((unsigned long long)di->decompiledFunction->start_ea, std::hex);
+			INFO_MSG(message << "\n");
+			qstring batchOutputEnv;
+			const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
+			if (batchOutput && !di->outputFile.empty()) {
+				std::string code = "//" + message + "\n";
+				FILE* fp = qfopen(di->outputFile.c_str(), "wb");
+				qfwrite(fp, code.c_str(), code.size());
+				qfclose(fp);
+				di->outputFile.clear();
+			} else {
+				WARNING_GUI(message << ".\n");
+			}
+			return;
+		}
+		code = tryDecomp(di, defaultDecMode, (unsigned long long)di->decompiledFunction->start_ea, display, bSucc, blockGraph);
+		if (di->exiting) {
+			di->decompSuccess = false; return;
+		}
+		if (!bSucc) {
+			di->decompSuccess = false;
+			qstring batchOutputEnv;
+			const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
+			if (batchOutput && !code.empty() && !di->outputFile.empty()) {
+				code += "\n";
+				FILE* fp = qfopen(di->outputFile.c_str(), "wb");
+				qfwrite(fp, code.c_str(), code.size());
+				qfclose(fp);
+				di->outputFile.clear();
+			} else if (!di->outputFile.empty()) {
+				di->outputFile.clear();
+			}
+			return;
+		}
+		INFO_MSG("Decompilation completed: " << di->idacb->allFuncNames[di->decompiledFunction->start_ea] << " in " << std::dec << (time(NULL) - startTime) << " seconds\n");
+	}
+
+	if (code.size() == 0) {
+		WARNING_GUI("Decompilation FAILED.\n");
+		di->decompSuccess = false;
+		di->outputFile.clear();
+		return;
+	}
+
+	TRACE_MSG("final output assembly begin, code bytes=" << std::dec
+		<< code.size() << ", display bytes=" << display.size() << "\n");
+	qstring batchOutputEnv;
+	const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
+	qstring forceAnalysisDumpEnv;
+	const bool forceAnalysisDump =
+		qgetenv("GHIDRADEC_TEST_FORCE_ANALYSIS_DUMP", &forceAnalysisDumpEnv) &&
+		std::string(forceAnalysisDumpEnv.c_str()) != "0";
+	if (batchOutput && !forceAnalysisDump) {
+		code += "\n";
+		display += "\n";
+	} else {
+		std::string definitions, defdisplay, idaInfo;
+		di->idacb->analysisDump(definitions, defdisplay, idaInfo);
+		code = definitions + code + "\n";
+		display = defdisplay + display + "\n";
+		if (!idaInfo.empty()) {
+			code += "/*\n" + idaInfo + "\n*/\n";
+			std::string str;
+			idaInfo = "/*\n" + idaInfo + "\n*/";
+			std::for_each(idaInfo.begin(), idaInfo.end(), [&str](char c) { if (c == '\n') str += std::string({ COLOR_OFF, COLOR_AUTOCMT }) + c + std::string({ COLOR_ON, COLOR_AUTOCMT }); else str += c; });
+			display += std::string({ COLOR_ON, COLOR_AUTOCMT }) + str + std::string({ COLOR_OFF, COLOR_AUTOCMT }) + "\n";
+		}
+	}
+	TRACE_MSG("final output assembly complete, code bytes=" << std::dec
+		<< code.size() << ", display bytes=" << display.size() << "\n");
+
+	//should save to a .c file?
+	//INFO_MSG("Decompiled file: " << decName << "\n");
+	if (di->outputFile.size() != 0) {
+		TRACE_MSG("final output write begin: " << di->outputFile.c_str() << "\n");
+		FILE* fp = qfopen(di->outputFile.c_str(), "wb");
+		qfwrite(fp, code.c_str(), code.size());
+		qfclose(fp);
+		TRACE_MSG("final output write complete\n");
+		di->outputFile.clear();
+	}
+
+	if (di->decompiledFunction != nullptr)
+	{
+		di->fnc2code[di->decompiledFunction].code = display;
+		di->fnc2code[di->decompiledFunction].blockGraph = blockGraph;
+	}
+
+	di->decompSuccess = true;
+	TRACE_MSG("localDecompilation complete\n");
+}
+
+#if IDA_SDK_VERSION < 700
+typedef int ghidradec_graph_cb_ret_t;
+#else
+typedef ssize_t ghidradec_graph_cb_ret_t;
+#endif
+
+ghidradec_graph_cb_ret_t idaapi GraphCallback(void* user_data, int notification_code, va_list va)
+{
+	try {
+	RdGlobalInfo* di = (RdGlobalInfo*)user_data;
+	auto getCurrentGraph = [di]() -> const std::vector<std::tuple<std::vector<unsigned int>, std::string, unsigned int>>* {
+		if (di == nullptr || di->decompiledFunction == nullptr)
+			return nullptr;
+		auto fit = di->fnc2code.find(di->decompiledFunction);
+		if (fit == di->fnc2code.end())
+			return nullptr;
+		return &fit->second.blockGraph;
+	};
+
+	if (notification_code == grcode_user_refresh) {
+		mutable_graph_t* mg = va_arg(va, mutable_graph_t*);
+		const auto* currentGraph = getCurrentGraph();
+		if (currentGraph == nullptr)
+			return 0;
+		const auto& blockGraph = *currentGraph;
+		mg->resize((int)blockGraph.size());
+		/*for (size_t i = 0; i < blockGraph.size(); i++) {
+			int node = mg->add_node(&r);
+			node_info_t ni;
+#ifdef __X64__
+			ni.flags = NIFF_SHOW_CONTENTS;
+#endif
+			ni.text = ("  //" + std::to_string(i) + "\n" + std::get<1>(blockGraph[i])).c_str();
+			set_node_info(mg->gid, node, ni, NIF_TEXT | NIF_FLAGS);
+			//if (std::get<1>(blockGraph[i]).size() == 0) mg->node_flags[node] |= MTG_NON_DISPLAYABLE_NODE;
+		}*/
+		for (size_t i = 0; i < blockGraph.size(); i++) {
+			for (size_t j = 0; j < std::get<0>(blockGraph[i]).size(); j++) {
+				if (std::get<0>(blockGraph[i])[j] >= blockGraph.size())
+					continue;
+				edge_info_t ei;
+				mg->add_edge(std::get<0>(blockGraph[i])[j], (int)i, &ei);
+			}
+		}
+		//for (size_t i = blockGraph.size() - 1; i != -1; i--) {
+			//if (std::get<1>(blockGraph[i]).size() == 0) mg->del_node((int)i);
+		//}
+		mg->create_digraph_layout();
+		mg->redo_layout();
+		//refresh_viewer(di->graphViewer);
+#if IDA_SDK_VERSION < 760
+		return 1;
+	} else if (notification_code == grcode_user_gentext) {
+		mutable_graph_t* mg = va_arg(va, mutable_graph_t*);
+		const auto* currentGraph = getCurrentGraph();
+		if (currentGraph == nullptr)
+			return 0;
+		const auto& blockGraph = *currentGraph;
+#endif
+		di->graphText.assign(blockGraph.size(), std::string());
+		for (size_t i = 0; i < blockGraph.size(); i++) {
+			if (std::get<1>(blockGraph[i]).size() != 0)
+				di->graphText[i] = ("  //" + std::to_string(std::get<2>(blockGraph[i])) + "\n" + std::get<1>(blockGraph[i])).c_str();
+		}
+		return 1;
+	} else if (notification_code == grcode_user_text) {
+		mutable_graph_t* mg = va_arg(va, mutable_graph_t*);
+		int node = va_argi(va, int);
+		const char** text = va_arg(va, const char**);
+		bgcolor_t* bgcolor = va_arg(va, bgcolor_t*);
+		if (node < 0 || (size_t)node >= di->graphText.size())
+		{
+			*text = nullptr;
+			return 1;
+		}
+		*text = (di->graphText[node].size() == 0) ? nullptr : di->graphText[node].c_str();
+		return 1;
+		//} else if (notification_code == grcode_user_hint) {
+	} else if (notification_code == grcode_user_title) {
+		mutable_graph_t* mg = va_arg(va, mutable_graph_t*);
+		int node = va_arg(va, int);
+		rect_t* title_rect = va_arg(va, rect_t*);
+		int title_bg_color = va_arg(va, int);
+		void* dc = va_arg(va, void*); //this is not a Windows GDI device context apparently but a QT::QPainter object
+		//QT::QPainter dc
+		//RECT rect = { 0, 0, title_rect->right - title_rect->left, title_rect->bottom - title_rect->top };
+		int invColor = (~title_bg_color & 0xffffff) | (title_bg_color & 0xff000000);
+		//HBRUSH hbr = CreateSolidBrush(invColor);// title_bg_color);
+		//FillRect(dc, &rect, hbr);
+		//HPEN pn = CreatePen(PS_SOLID, 1, invColor);
+		//HFONT fnt = CreateFont();
+		//HGDIOBJ old = SelectObject(dc, pn);
+		//COLORREF oldbk = SetBkColor(dc, invColor);
+		//COLORREF oldfg = SetTextColor(dc, invColor);
+		//std::string str = "//" + std::to_string(node);
+		//DrawTextA(dc, str.c_str(), (int)str.size(), &rect, DT_CENTER | DT_TOP | DT_SINGLELINE);
+		//SetBkColor(dc, oldbk);
+		//SetTextColor(dc, oldfg);
+		//SelectObject(dc, old);
+		//DeleteObject(hbr);
+		return 0;
+	} else if (notification_code == grcode_user_draw) {
+		return 0;
+	//} else if (notification_code == grcode_destroyed) {
+	//} else if (notification_code == grcode_changed_graph) {
+	}
+	} catch (const std::exception& e) {
+		WARNING_MSG("GhidraDec graph callback failed: " << e.what() << "\n");
+		return 0;
+	} catch (...) {
+		WARNING_MSG("GhidraDec graph callback failed with an unknown exception\n");
+		return 0;
+	}
+	return 0;
+}
+
+void displayBlockGraph(RdGlobalInfo* di, ea_t ea)
+{
+	if ((di->viewFeatures & VIEW_FEATURE_GRAPH) == 0) return;
+	di->idacb->executeOnMainThread([di, ea]() {
+		if (di->graphViewer != nullptr) {
+			if (find_widget((di->viewerName + "_Graph").c_str()) != nullptr)
+				close_widget(di->graphViewer, 0);
+			di->graphViewer = nullptr;
+		}
+		if (di->graphWidget != nullptr) {
+			if (find_widget((di->viewerName + " Graph").c_str()) != nullptr)
+				close_widget(di->graphWidget, 0);
+			di->graphWidget = nullptr;
+			if (di->mg != nullptr)
+			{
+				delete_mutable_graph(di->mg);
+				di->mg = nullptr;
+			}
+			di->graphText.clear();
+			netnode nn("GhidraGraph", 0, true);
+			nn.kill();
+		}
+		if (di->decompiledFunction == nullptr)
+			return;
+		auto fit = di->fnc2code.find(di->decompiledFunction);
+		if (fit == di->fnc2code.end() || fit->second.blockGraph.empty())
+			return;
+
+		di->graphWidget = create_empty_widget((di->viewerName + " Graph").c_str());
+		netnode nn("GhidraGraph", 0, true);
+		di->mg = create_mutable_graph(nn);
+		di->graphViewer = create_graph_viewer((di->viewerName + "_Graph").c_str(),
+			nn, GraphCallback, di, 12, di->graphWidget);
+#if !defined(IDA_SDK_VERSION) || IDA_SDK_VERSION < 750
+		display_widget(di->graphWidget,
+			WOPN_DP_TAB
+#if !defined(IDA_SDK_VERSION) || IDA_SDK_VERSION < 720
+			| WOPN_MENU
+#endif
+		);
+#else
+		display_widget(di->graphWidget, WOPN_DP_TAB, di->viewerName.c_str());
+#endif
+		viewer_fit_window(di->graphViewer);
+	}, "display-graph");
+}
+
+/**
+ * Thread function, it runs the decompilation and displays decompiled code.
+ * @param ud Plugin's global information.
+ */
+static int idaapi threadFunc(void* ud)
+{
+	RdGlobalInfo* di = static_cast<RdGlobalInfo*>(ud);
+	const bool selectiveDecompilation = di->decompiledFunction != nullptr;
+	di->decompRunning = true;
+
+	INFO_MSG("Local decompilation ...\n");
+	localDecompilation(di);
+
+	if (di->decompSuccess && selectiveDecompilation && !di->suppressViewer)
+	{
+		//showDecompiledCode(di);
+		ShowOutput show(di);
+		TRACE_MSG("show decompiled output begin\n");
+		di->idacb->executeOnMainThread([&show]() {
+			show.execute();
+			}, "show-output");
+		TRACE_MSG("show decompiled output complete\n");
+		if (di->decompiledFunction != nullptr &&
+			di->fnc2code.find(di->decompiledFunction) != di->fnc2code.end()) {
+			TRACE_MSG("display block graph begin\n");
+			displayBlockGraph(di, di->decompiledFunction->start_ea);
+			TRACE_MSG("display block graph complete\n");
+		}
+	}
+
+	di->outputFile.clear();
+	di->suppressViewer = false;
+	TRACE_MSG("worker cleanup begin\n");
+	stopDecompilation(di, true, false, true);
+	TRACE_MSG("worker cleanup complete\n");
+	di->decompRunning = false;
+	writeBatchDoneMarker(di);
+	return 0;
+}
+
+/**
+ * Create ranges to decompile from the provided function.
+ * @param[out] decompInfo Plugin's global information.
+ * @param      fnc        Function selected for decompilation.
+ */
+void createRangesFromSelectedFunction(RdGlobalInfo& decompInfo, func_t* fnc)
+{
+	std::stringstream ss;
+	ss << "0x" << std::hex << fnc->start_ea << "-" << "0x" << std::hex << (fnc->end_ea-1);
+
+	decompInfo.ranges = ss.str();
+	decompInfo.decompiledFunction = fnc;
+}
+
+/**
+ * Decompile IDA's input.
+ * @param decompInfo Plugin's global information.
+ */
+void decompileInput(RdGlobalInfo &decompInfo)
+{
+	INFO_MSG("Decompile input ...\n");
+
+	// Construct decompiler call command.
+	//
+	decompInfo.decCmd = decompInfo.decompilerExePath + decompInfo.decompilerExeName;
+
+	//database queries for main thread
+	if (decompInfo.idacb == nullptr) decompInfo.idacb = new IdaCallback(&decompInfo);
+	auto tmp = decompInfo.decCmd;
+	std::replace(tmp.begin(), tmp.end(), ' ', '\n');
+	INFO_MSG("Decompilation command: " << tmp << "\n");
+	INFO_MSG("Running the decompilation command ...\n");
+
+	std::string sleighfilename;
+	std::string pspec;
+	std::string cspec;
+
+	time_t stageStart = time(NULL);
+	TRACE_MSG("detectProcCompiler begin\n");
+	if ((decompInfo.customCspec.empty() || decompInfo.customPspec.empty() || decompInfo.customSlafile.empty()) &&
+		!detectProcCompiler(&decompInfo, pspec, cspec, sleighfilename)) {
+		std::string message = "No matching Ghidra processor found - Decompilation FAILED.";
+		qstring batchOutputEnv;
+		const bool batchOutput = qgetenv("GHIDRADEC_BATCH_OUTPUT", &batchOutputEnv) && !batchOutputEnv.empty();
+		if (batchOutput) {
+			INFO_MSG(message << "\n");
+			FILE* fp = qfopen(batchOutputEnv.c_str(), "wb");
+			if (fp != nullptr) {
+				std::string code = "//" + message + "\n";
+				qfwrite(fp, code.c_str(), code.size());
+				qfclose(fp);
+			}
+			writeBatchDoneMarker(&decompInfo);
+		} else {
+			WARNING_GUI(message << "\n");
+		}
+		decompInfo.decompSuccess = false;
+		decompInfo.outputFile.clear();
+		return;
+	}
+	TRACE_MSG("detectProcCompiler complete in " << std::dec << (time(NULL) - stageStart) << " seconds\n");
+
+	if (!decompInfo.customCspec.empty()) cspec = decompInfo.customCspec;
+	if (!decompInfo.customPspec.empty()) pspec = decompInfo.customPspec;
+	if (!decompInfo.customSlafile.empty()) sleighfilename = decompInfo.customSlafile;
+	INFO_MSG("Detected Processor spec: " << pspec << " Compiler spec: " << cspec << " Sleigh file: " << sleighfilename << "\n");
+	stageStart = time(NULL);
+	TRACE_MSG("IdaCallback init begin\n");
+	decompInfo.idacb->init(sleighfilename, pspec, cspec);
+	TRACE_MSG("IdaCallback init complete in " << std::dec << (time(NULL) - stageStart) << " seconds\n");
+
+	// Create decompilation thread.
+	//
+	if (decompInfo.isUseThreads())
+	{
+		decompInfo.decompThread = qthread_create(threadFunc, static_cast<void*>(&decompInfo));
+	}
+	else
+	{
+		threadFunc(static_cast<void*>(&decompInfo));
+	}
+}
+
+} // namespace idaplugin

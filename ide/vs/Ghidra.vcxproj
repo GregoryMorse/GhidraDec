@@ -1,0 +1,381 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <ProjectGuid>{FBC85CDD-37C5-44EF-9085-50E616D5A1B3}</ProjectGuid>
+    <RootNamespace>Ghidra</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+    <Import Project="PropertySheet.props" />
+    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.props" Condition="'$(WIN_FLEX_BISON_PATH)'!='' And Exists('$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.props')" />
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros">
+    <GhidraSourceDir>$(MSBuildProjectDirectory)\..\..\build\deps\ghidra-decompiler\Ghidra\</GhidraSourceDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ExecutablePath>$(VC_ExecutablePath_x86);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ExecutablePath>$(VC_ExecutablePath_x86);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ExecutablePath>$(VC_ExecutablePath_x64);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ExecutablePath>$(VC_ExecutablePath_x64);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>false</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <PreprocessorDefinitions>_MBCS;_WINDOWS;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>false</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <PreprocessorDefinitions>_MBCS;_WINDOWS;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>false</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <PreprocessorDefinitions>_MBCS;_WINDOWS;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>false</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <PreprocessorDefinitions>_MBCS;_WINDOWS;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="$(GhidraSourceDir)action.hh" />
+    <ClInclude Include="$(GhidraSourceDir)address.hh" />
+    <ClInclude Include="$(GhidraSourceDir)architecture.hh" />
+    <ClInclude Include="$(GhidraSourceDir)bfd_arch.hh" />
+    <ClInclude Include="$(GhidraSourceDir)block.hh" />
+    <ClInclude Include="$(GhidraSourceDir)blockaction.hh" />
+    <ClInclude Include="$(GhidraSourceDir)callgraph.hh" />
+    <ClInclude Include="$(GhidraSourceDir)capability.hh" />
+    <ClInclude Include="$(GhidraSourceDir)cast.hh" />
+    <ClInclude Include="$(GhidraSourceDir)codedata.hh" />
+    <ClInclude Include="$(GhidraSourceDir)comment.hh" />
+    <ClInclude Include="$(GhidraSourceDir)comment_ghidra.hh" />
+    <ClInclude Include="$(GhidraSourceDir)condexe.hh" />
+    <ClInclude Include="$(GhidraSourceDir)context.hh" />
+    <ClInclude Include="$(GhidraSourceDir)coreaction.hh" />
+    <ClInclude Include="$(GhidraSourceDir)cover.hh" />
+    <ClInclude Include="$(GhidraSourceDir)cpool.hh" />
+    <ClInclude Include="$(GhidraSourceDir)cpool_ghidra.hh" />
+    <ClInclude Include="$(GhidraSourceDir)crc32.hh" />
+    <ClInclude Include="$(GhidraSourceDir)database.hh" />
+    <ClInclude Include="$(GhidraSourceDir)database_ghidra.hh" />
+    <ClInclude Include="$(GhidraSourceDir)doccore.hh" />
+    <ClInclude Include="$(GhidraSourceDir)docmain.hh" />
+    <ClInclude Include="$(GhidraSourceDir)double.hh" />
+    <ClInclude Include="$(GhidraSourceDir)dynamic.hh" />
+    <ClInclude Include="$(GhidraSourceDir)emulate.hh" />
+    <ClInclude Include="$(GhidraSourceDir)emulateutil.hh" />
+    <ClInclude Include="$(GhidraSourceDir)error.hh" />
+    <ClInclude Include="$(GhidraSourceDir)filemanage.hh" />
+    <ClInclude Include="$(GhidraSourceDir)float.hh" />
+    <ClInclude Include="$(GhidraSourceDir)flow.hh" />
+    <ClInclude Include="$(GhidraSourceDir)fspec.hh" />
+    <ClInclude Include="$(GhidraSourceDir)funcdata.hh" />
+    <ClInclude Include="$(GhidraSourceDir)ghidra_arch.hh" />
+    <ClInclude Include="$(GhidraSourceDir)ghidra_context.hh" />
+    <ClInclude Include="$(GhidraSourceDir)ghidra_process.hh" />
+    <ClInclude Include="$(GhidraSourceDir)ghidra_translate.hh" />
+    <ClInclude Include="$(GhidraSourceDir)globalcontext.hh" />
+    <ClInclude Include="$(GhidraSourceDir)grammar.hh" />
+    <ClInclude Include="$(GhidraSourceDir)grammar.tab.h" />
+    <ClInclude Include="$(GhidraSourceDir)graph.hh" />
+    <ClInclude Include="$(GhidraSourceDir)heritage.hh" />
+    <ClInclude Include="$(GhidraSourceDir)ifacedecomp.hh" />
+    <ClInclude Include="$(GhidraSourceDir)ifaceterm.hh" />
+    <ClInclude Include="$(GhidraSourceDir)inject_ghidra.hh" />
+    <ClInclude Include="$(GhidraSourceDir)inject_sleigh.hh" />
+    <ClInclude Include="$(GhidraSourceDir)interface.hh" />
+    <ClInclude Include="$(GhidraSourceDir)jumptable.hh" />
+    <ClInclude Include="$(GhidraSourceDir)libdecomp.hh" />
+    <ClInclude Include="$(GhidraSourceDir)loadimage.hh" />
+    <ClInclude Include="$(GhidraSourceDir)loadimage_bfd.hh" />
+    <ClInclude Include="$(GhidraSourceDir)loadimage_ghidra.hh" />
+    <ClInclude Include="$(GhidraSourceDir)loadimage_xml.hh" />
+    <ClInclude Include="$(GhidraSourceDir)memstate.hh" />
+    <ClInclude Include="$(GhidraSourceDir)merge.hh" />
+    <ClInclude Include="$(GhidraSourceDir)op.hh" />
+    <ClInclude Include="$(GhidraSourceDir)opbehavior.hh" />
+    <ClInclude Include="$(GhidraSourceDir)opcodes.hh" />
+    <ClInclude Include="$(GhidraSourceDir)options.hh" />
+    <ClInclude Include="$(GhidraSourceDir)override.hh" />
+    <ClInclude Include="$(GhidraSourceDir)paramid.hh" />
+    <ClInclude Include="$(GhidraSourceDir)partmap.hh" />
+    <ClInclude Include="$(GhidraSourceDir)pcodecompile.hh" />
+    <ClInclude Include="$(GhidraSourceDir)pcodeinject.hh" />
+    <ClInclude Include="$(GhidraSourceDir)pcodeparse.hh" />
+    <ClInclude Include="$(GhidraSourceDir)pcodeparse.tab.h" />
+    <ClInclude Include="$(GhidraSourceDir)pcoderaw.hh" />
+    <ClInclude Include="$(GhidraSourceDir)prefersplit.hh" />
+    <ClInclude Include="$(GhidraSourceDir)prettyprint.hh" />
+    <ClInclude Include="$(GhidraSourceDir)printc.hh" />
+    <ClInclude Include="$(GhidraSourceDir)printjava.hh" />
+    <ClInclude Include="$(GhidraSourceDir)printlanguage.hh" />
+    <ClInclude Include="$(GhidraSourceDir)rangemap.hh" />
+    <ClInclude Include="$(GhidraSourceDir)rangeutil.hh" />
+    <ClInclude Include="$(GhidraSourceDir)raw_arch.hh" />
+    <ClInclude Include="$(GhidraSourceDir)ruleaction.hh" />
+    <ClInclude Include="$(GhidraSourceDir)rulecompile.hh" />
+    <ClInclude Include="$(GhidraSourceDir)ruleparse.tab.h" />
+    <ClInclude Include="$(GhidraSourceDir)semantics.hh" />
+    <ClInclude Include="$(GhidraSourceDir)sleigh.hh" />
+    <ClInclude Include="$(GhidraSourceDir)sleighbase.hh" />
+    <ClInclude Include="$(GhidraSourceDir)sleigh_arch.hh" />
+    <ClInclude Include="$(GhidraSourceDir)slghparse.tab.hh" />
+    <ClInclude Include="$(GhidraSourceDir)slghpatexpress.hh" />
+    <ClInclude Include="$(GhidraSourceDir)slghpattern.hh" />
+    <ClInclude Include="$(GhidraSourceDir)slghsymbol.hh" />
+    <ClInclude Include="$(GhidraSourceDir)slgh_compile.hh" />
+    <ClInclude Include="$(GhidraSourceDir)space.hh" />
+    <ClInclude Include="$(GhidraSourceDir)stringmanage.hh" />
+    <ClInclude Include="$(GhidraSourceDir)string_ghidra.hh" />
+    <ClInclude Include="$(GhidraSourceDir)subflow.hh" />
+    <ClInclude Include="$(GhidraSourceDir)transform.hh" />
+    <ClInclude Include="$(GhidraSourceDir)translate.hh" />
+    <ClInclude Include="$(GhidraSourceDir)type.hh" />
+    <ClInclude Include="$(GhidraSourceDir)typegrp_ghidra.hh" />
+    <ClInclude Include="$(GhidraSourceDir)typeop.hh" />
+    <ClInclude Include="$(GhidraSourceDir)types.h" />
+    <ClInclude Include="$(GhidraSourceDir)unify.hh" />
+    <ClInclude Include="$(GhidraSourceDir)userop.hh" />
+    <ClInclude Include="$(GhidraSourceDir)variable.hh" />
+    <ClInclude Include="$(GhidraSourceDir)varmap.hh" />
+    <ClInclude Include="$(GhidraSourceDir)varnode.hh" />
+    <ClInclude Include="$(GhidraSourceDir)xml.hh" />
+    <ClInclude Include="$(GhidraSourceDir)xml.tab.h" />
+    <ClInclude Include="$(GhidraSourceDir)xml_arch.hh" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(GhidraSourceDir)action.cc" />
+    <ClCompile Include="$(GhidraSourceDir)address.cc" />
+    <ClCompile Include="$(GhidraSourceDir)architecture.cc" />
+    <ClCompile Include="$(GhidraSourceDir)block.cc" />
+    <ClCompile Include="$(GhidraSourceDir)blockaction.cc" />
+    <ClCompile Include="$(GhidraSourceDir)callgraph.cc" />
+    <ClCompile Include="$(GhidraSourceDir)capability.cc" />
+    <ClCompile Include="$(GhidraSourceDir)cast.cc" />
+    <ClCompile Include="$(GhidraSourceDir)comment.cc" />
+    <ClCompile Include="$(GhidraSourceDir)comment_ghidra.cc" />
+    <ClCompile Include="$(GhidraSourceDir)condexe.cc" />
+    <ClCompile Include="$(GhidraSourceDir)context.cc" />
+    <ClCompile Include="$(GhidraSourceDir)coreaction.cc" />
+    <ClCompile Include="$(GhidraSourceDir)cover.cc" />
+    <ClCompile Include="$(GhidraSourceDir)cpool.cc" />
+    <ClCompile Include="$(GhidraSourceDir)cpool_ghidra.cc" />
+    <ClCompile Include="$(GhidraSourceDir)crc32.cc" />
+    <ClCompile Include="$(GhidraSourceDir)database.cc" />
+    <ClCompile Include="$(GhidraSourceDir)database_ghidra.cc" />
+    <ClCompile Include="$(GhidraSourceDir)double.cc" />
+    <ClCompile Include="$(GhidraSourceDir)dynamic.cc" />
+    <ClCompile Include="$(GhidraSourceDir)emulate.cc" />
+    <ClCompile Include="$(GhidraSourceDir)emulateutil.cc" />
+    <ClCompile Include="$(GhidraSourceDir)filemanage.cc" />
+    <ClCompile Include="$(GhidraSourceDir)float.cc" />
+    <ClCompile Include="$(GhidraSourceDir)flow.cc" />
+    <ClCompile Include="$(GhidraSourceDir)fspec.cc" />
+    <ClCompile Include="$(GhidraSourceDir)funcdata.cc" />
+    <ClCompile Include="$(GhidraSourceDir)funcdata_block.cc" />
+    <ClCompile Include="$(GhidraSourceDir)funcdata_op.cc" />
+    <ClCompile Include="$(GhidraSourceDir)funcdata_varnode.cc" />
+    <ClCompile Include="$(GhidraSourceDir)ghidra_arch.cc" />
+    <ClCompile Include="$(GhidraSourceDir)ghidra_context.cc" />
+    <ClCompile Include="$(GhidraSourceDir)ghidra_process.cc" />
+    <ClCompile Include="$(GhidraSourceDir)ghidra_translate.cc" />
+    <ClCompile Include="$(GhidraSourceDir)globalcontext.cc" />
+    <ClCompile Include="$(GhidraSourceDir)grammar.tab.cpp" />
+    <ClCompile Include="$(GhidraSourceDir)graph.cc" />
+    <ClCompile Include="$(GhidraSourceDir)heritage.cc" />
+    <ClCompile Include="$(GhidraSourceDir)ifacedecomp.cc" />
+    <ClCompile Include="$(GhidraSourceDir)ifaceterm.cc" />
+    <ClCompile Include="$(GhidraSourceDir)inject_ghidra.cc" />
+    <ClCompile Include="$(GhidraSourceDir)inject_sleigh.cc" />
+    <ClCompile Include="$(GhidraSourceDir)interface.cc" />
+    <ClCompile Include="$(GhidraSourceDir)jumptable.cc" />
+    <ClCompile Include="$(GhidraSourceDir)libdecomp.cc" />
+    <ClCompile Include="$(GhidraSourceDir)loadimage.cc" />
+    <ClCompile Include="$(GhidraSourceDir)loadimage_ghidra.cc" />
+    <ClCompile Include="$(GhidraSourceDir)loadimage_xml.cc" />
+    <ClCompile Include="$(GhidraSourceDir)memstate.cc" />
+    <ClCompile Include="$(GhidraSourceDir)merge.cc" />
+    <ClCompile Include="$(GhidraSourceDir)op.cc" />
+    <ClCompile Include="$(GhidraSourceDir)opbehavior.cc" />
+    <ClCompile Include="$(GhidraSourceDir)opcodes.cc" />
+    <ClCompile Include="$(GhidraSourceDir)options.cc" />
+    <ClCompile Include="$(GhidraSourceDir)override.cc" />
+    <ClCompile Include="$(GhidraSourceDir)paramid.cc" />
+    <ClCompile Include="$(GhidraSourceDir)pcodecompile.cc" />
+    <ClCompile Include="$(GhidraSourceDir)pcodeinject.cc" />
+    <ClCompile Include="$(GhidraSourceDir)pcodeparse.tab.cpp" />
+    <ClCompile Include="$(GhidraSourceDir)pcoderaw.cc" />
+    <ClCompile Include="$(GhidraSourceDir)prefersplit.cc" />
+    <ClCompile Include="$(GhidraSourceDir)prettyprint.cc" />
+    <ClCompile Include="$(GhidraSourceDir)printc.cc" />
+    <ClCompile Include="$(GhidraSourceDir)printjava.cc" />
+    <ClCompile Include="$(GhidraSourceDir)printlanguage.cc" />
+    <ClCompile Include="$(GhidraSourceDir)rangeutil.cc" />
+    <ClCompile Include="$(GhidraSourceDir)raw_arch.cc" />
+    <ClCompile Include="$(GhidraSourceDir)ruleaction.cc" />
+    <ClCompile Include="$(GhidraSourceDir)rulecompile.cc" />
+    <ClCompile Include="$(GhidraSourceDir)ruleparse.tab.cpp" />
+    <ClCompile Include="$(GhidraSourceDir)semantics.cc" />
+    <ClCompile Include="$(GhidraSourceDir)sleigh.cc" />
+    <ClCompile Include="$(GhidraSourceDir)sleighbase.cc" />
+    <ClCompile Include="$(GhidraSourceDir)sleigh_arch.cc" />
+    <ClCompile Include="$(GhidraSourceDir)slghpatexpress.cc" />
+    <ClCompile Include="$(GhidraSourceDir)slghpattern.cc" />
+    <ClCompile Include="$(GhidraSourceDir)slghsymbol.cc" />
+    <ClCompile Include="$(GhidraSourceDir)space.cc" />
+    <ClCompile Include="$(GhidraSourceDir)stringmanage.cc" />
+    <ClCompile Include="$(GhidraSourceDir)string_ghidra.cc" />
+    <ClCompile Include="$(GhidraSourceDir)subflow.cc" />
+    <ClCompile Include="$(GhidraSourceDir)transform.cc" />
+    <ClCompile Include="$(GhidraSourceDir)translate.cc" />
+    <ClCompile Include="$(GhidraSourceDir)type.cc" />
+    <ClCompile Include="$(GhidraSourceDir)typegrp_ghidra.cc" />
+    <ClCompile Include="$(GhidraSourceDir)typeop.cc" />
+    <ClCompile Include="$(GhidraSourceDir)unify.cc" />
+    <ClCompile Include="$(GhidraSourceDir)userop.cc" />
+    <ClCompile Include="$(GhidraSourceDir)variable.cc" />
+    <ClCompile Include="$(GhidraSourceDir)varmap.cc" />
+    <ClCompile Include="$(GhidraSourceDir)varnode.cc" />
+    <ClCompile Include="$(GhidraSourceDir)xml.tab.cpp" />
+    <ClCompile Include="$(GhidraSourceDir)xml_arch.cc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Bison Include="$(GhidraSourceDir)grammar.y">
+      <FileType>Document</FileType>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">-p cparse %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-p cparse %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">-p cparse %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-p cparse %(AdditionalOptions)</AdditionalOptions>
+    </Bison>
+    <Bison Include="$(GhidraSourceDir)pcodeparse.y">
+      <FileType>Document</FileType>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">-p pcode %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-p pcode %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">-p pcode %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-p pcode %(AdditionalOptions)</AdditionalOptions>
+    </Bison>
+    <Bison Include="$(GhidraSourceDir)ruleparse.y">
+      <FileType>Document</FileType>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">-p ruleparse %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-p ruleparse %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">-p ruleparse %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-p ruleparse %(AdditionalOptions)</AdditionalOptions>
+    </Bison>
+    <Bison Include="$(GhidraSourceDir)xml.y">
+      <FileType>Document</FileType>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">-p xml %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-p xml %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">-p xml %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-p xml %(AdditionalOptions)</AdditionalOptions>
+    </Bison>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.targets" Condition="'$(WIN_FLEX_BISON_PATH)'!='' And Exists('$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.targets')" />
+  </ImportGroup>
+</Project>

@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <ProjectGuid>{AC1BAB6D-F66A-4CD1-A743-A4883ED8830C}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>GhidraDecIface</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+    <Import Project="PropertySheet.props" />
+    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.props" Condition="Exists('$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.props')" />
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <LinkIncremental>false</LinkIncremental>
+    <IntDir>$(GhidraDecMsvcBuildRoot)obj\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <ExecutablePath>$(VC_ExecutablePath_x64);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <LinkIncremental>true</LinkIncremental>
+    <IntDir>$(GhidraDecMsvcBuildRoot)obj\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <ExecutablePath>$(VC_ExecutablePath_x86);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>true</LinkIncremental>
+    <IntDir>$(GhidraDecMsvcBuildRoot)obj\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <ExecutablePath>$(VC_ExecutablePath_x64);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+    <IntDir>$(GhidraDecMsvcBuildRoot)obj\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <ExecutablePath>$(VC_ExecutablePath_x86);$(WindowsSDK_ExecutablePath);$(VS_ExecutablePath);$(MSBuild_ExecutablePath);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);$(WIN_FLEX_BISON_PATH)</ExecutablePath>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <PrecompiledHeader>
+      </PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;_WINDOWS;_WIN64;NO_GZIP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <CallingConvention>StdCall</CallingConvention>
+      <AdditionalIncludeDirectories>src;decompile;decompile\zlib</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>
+      </PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;_DEBUG;_CONSOLE;NO_GZIP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <CallingConvention>StdCall</CallingConvention>
+      <AdditionalIncludeDirectories>src;decompile;decompile\zlib</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <PrecompiledHeader>
+      </PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;_WINDOWS;_WIN64;NO_GZIP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <CallingConvention>StdCall</CallingConvention>
+      <AdditionalIncludeDirectories>src;decompile;decompile\zlib</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>
+      </PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;NDEBUG;_CONSOLE;NO_GZIP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <CallingConvention>StdCall</CallingConvention>
+      <AdditionalIncludeDirectories>src;decompile;decompile\zlib</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)address.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)context.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)emulate.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)filemanage.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)float.cc" />
+    <ClCompile Include="$(GhidraDecRoot)src\GhidraDecIface.cpp" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)globalcontext.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)loadimage.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)marshal.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)memstate.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)opbehavior.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)opcodes.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)pcodecompile.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)pcodeparse.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)pcoderaw.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)semantics.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)slaformat.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)sleigh.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)sleighbase.cc" />
+    <ClCompile Include="$(GhidraDecRoot)src\sleighinterface.cpp" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)slghpatexpress.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)slghpattern.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)slghsymbol.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)space.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)translate.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)xml.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)compression.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)crc32.cc" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)zlib\adler32.c" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)zlib\deflate.c" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)zlib\inffast.c" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)zlib\inflate.c" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)zlib\inftrees.c" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)zlib\trees.c" />
+    <ClCompile Include="$(GhidraDecDecompileSourceDir)zlib\zutil.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)address.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)context.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)emulate.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)error.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)filemanage.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)float.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)globalcontext.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)loadimage.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)marshal.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)memstate.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)opbehavior.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)opcodes.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)partmap.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)pcodecompile.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)pcodeparse.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)pcoderaw.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)rangemap.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)semantics.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)slaformat.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)sleigh.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)sleighbase.hh" />
+    <ClInclude Include="$(GhidraDecRoot)src\sleighinterface.h" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)slghpatexpress.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)slghpattern.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)slghsymbol.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)space.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)translate.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)types.h" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)xml.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)compression.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)crc32.hh" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\deflate.h" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\gzguts.h" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\inffast.h" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\inffixed.h" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\inflate.h" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\inftrees.h" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\trees.h" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\zconf.h" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\zlib.h" />
+    <ClInclude Include="$(GhidraDecDecompileSourceDir)zlib\zutil.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.targets" Condition="Exists('$(WIN_FLEX_BISON_PATH)\custom_build_rules\win_flex_bison_custom_build.targets')" />
+  </ImportGroup>
+</Project>

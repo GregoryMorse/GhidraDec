@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <PropertyGroup>
+    <GhidraDecRepoRoot>$(MSBuildThisFileDirectory)</GhidraDecRepoRoot>
+    <GhidraDecUseRepoMsvcOutput Condition="'$(GhidraDecUseRepoMsvcOutput)'=='' And '$([System.String]::Copy(&quot;$(MSBuildProjectFullPath)&quot;).StartsWith(&quot;$(GhidraDecRepoRoot)build\&quot;))'!='True'">true</GhidraDecUseRepoMsvcOutput>
+    <GhidraDecMsvcBuildRoot Condition="'$(GhidraDecUseRepoMsvcOutput)'=='true'">$(GhidraDecRepoRoot)build\msvc\</GhidraDecMsvcBuildRoot>
+    <GhidraDecMsvcProjectName Condition="'$(GhidraDecUseRepoMsvcOutput)'=='true' And '$(GhidraDecMsvcProjectName)'==''">$(MSBuildProjectName)</GhidraDecMsvcProjectName>
+    <OutDir Condition="'$(GhidraDecUseRepoMsvcOutput)'=='true'">$(GhidraDecMsvcBuildRoot)bin\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir Condition="'$(GhidraDecUseRepoMsvcOutput)'=='true'">$(GhidraDecMsvcBuildRoot)obj\$(GhidraDecMsvcProjectName)\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+</Project>
