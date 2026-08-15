@@ -9,7 +9,7 @@ on:
       ida_versions:
         description: "IDA SDK versions to publish: 9.3, 9.4, future tagged SDKs, latest, 7.7, major groups 6/7/8/9, comma lists, or all"
         type: string
-        default: "9.3"
+        default: "latest"
       private_sdk_base_url:
         description: "Optional temporary base URL for private SDK archives; may include a short-lived path token"
         type: string
@@ -72,7 +72,7 @@ jobs:
           args=()
           versions="${{ github.event.inputs.ida_versions }}"
           if [[ -z "$versions" ]]; then
-            versions="9.3"
+            versions="latest"
           fi
           if [[ "$versions" == "all" ]]; then
             args+=(--all)
@@ -203,19 +203,24 @@ jobs:
           path: dist
           merge-multiple: true
       - id: missing-assets
-        name: Keep only missing release assets
+        name: Stage release assets
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
-          mkdir -p upload
+          mkdir -p upload overwrite
           existing="$(gh release view "$TAG_NAME" --json assets --jq '.assets[].name' 2>/dev/null || true)"
           shopt -s nullglob
           for file in dist/*.zip; do
             name="$(basename "$file")"
             if grep -Fxq "$name" <<< "$existing"; then
-              echo "Skipping existing release asset: $name"
+              if [[ "$name" == ghidradec-idalatest-* ]]; then
+                echo "Refreshing moving latest release asset: $name"
+                cp "$file" overwrite/
+              else
+                echo "Skipping existing release asset: $name"
+              fi
             else
               cp "$file" upload/
             fi
@@ -225,6 +230,18 @@ jobs:
           else
             echo "has_uploads=false" >> "$GITHUB_OUTPUT"
           fi
+          if compgen -G "overwrite/*.zip" > /dev/null; then
+            echo "has_overwrites=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_overwrites=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Refresh moving latest assets
+        if: ${{ steps.missing-assets.outputs.has_overwrites == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: gh release upload "$TAG_NAME" overwrite/*.zip --clobber
       - uses: softprops/action-gh-release@v2
         if: ${{ steps.missing-assets.outputs.has_uploads == 'true' }}
         with:

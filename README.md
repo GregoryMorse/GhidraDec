@@ -21,7 +21,7 @@ See `CHANGELOG.md` for release notes.
 ## Status
 
 * Primary local development target: IDA Pro 9.3, EA64.
-* Default CI/release target: IDA SDK 9.3 only.
+* Default manual CI/release target: the moving public `latest` SDK.
 * Older IDA SDK artifacts are generated on demand from tagged releases.
 * Build system: CMake, with Visual Studio project files kept under `ide/vs`.
 * Runtime decompiler source: generated under `build/deps/ghidra-decompiler`;
@@ -173,10 +173,10 @@ msbuild ide\vs\GhidraDec.vcxproj /p:Configuration=Release /p:Platform=x64 /p:IDA
 
 ## Release Workflow
 
-The normal release workflow builds IDA 9.3 artifacts by default. Other supported
-IDA versions are intended to be generated on demand from official tagged
-releases, then attached permanently to the release for users who need those
-specific SDK targets.
+The manual release workflow builds the moving public `latest` SDK by default.
+Fixed IDA versions are generated on demand from official tagged releases, then
+attached permanently to the release for users who need those specific SDK
+targets.
 
 This avoids building every historical SDK on every release while still allowing
 the project to accumulate version-specific artifacts over time.

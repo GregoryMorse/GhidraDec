@@ -67,10 +67,10 @@ limit a backfill run when you do not want both macOS packages.
 
 ## GitHub Actions
 
-Normal CI and tag releases build only IDA SDK 9.3 by default. Manual workflow
-runs can set `ida_versions` to `9.2`, `9.3`, `9.4`, future public release SDKs
-such as `9.5`, `latest`, a legacy SDK such as `7.7`, a major group such as `8`,
-a comma-separated list, or `all`.
+Manual CI and release runs build the moving public `latest` SDK by default.
+Runs can set `ida_versions` to `9.2`, `9.3`, `9.4`, future public release SDKs
+such as `9.5`, a legacy SDK such as `7.7`, a major group such as `8`, a
+comma-separated list, or `all`.
 
 The release workflow only runs on tagged refs. For an on-demand backfill, open
 Actions, choose the Release workflow, select the official release tag in the
@@ -86,6 +86,10 @@ When running on a tag, the matrix skips version/OS entries that already have a
 matching release ZIP. This makes `all` useful for backfilling only missing
 assets. Set `rebuild_existing_assets` only when you have intentionally deleted
 old assets or want to regenerate them.
+
+`latest` is the exception because it follows a moving branch. Release runs
+always rebuild `latest`, and the publish job replaces existing
+`ghidradec-idalatest-*` assets with `gh release upload --clobber`.
 
 The release build matrix runs sequentially. This keeps `all` backfills gentle on
 temporary SDK tunnels and avoids many GitHub runners downloading private SDK

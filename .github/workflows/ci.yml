@@ -8,7 +8,7 @@ on:
       ida_versions:
         description: "Public IDA SDK versions to build: 9.3, 9.4, future tagged SDKs, latest, or all"
         type: string
-        default: "9.3"
+        default: "latest"
 
 jobs:
   matrix:
@@ -23,7 +23,7 @@ jobs:
           args=()
           versions="${{ github.event.inputs.ida_versions }}"
           if [[ -z "$versions" ]]; then
-            versions="9.3"
+            versions="latest"
           fi
           if [[ "$versions" == "all" ]]; then
             args+=(--all)

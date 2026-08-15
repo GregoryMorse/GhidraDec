@@ -328,6 +328,8 @@ def load_existing_assets(path: str | None) -> set[str]:
 
 
 def has_existing_release_asset(entry: dict, existing_assets: set[str]) -> bool:
+    if entry.get("sdk_source") == "public-branch" or entry.get("ida") == "latest":
+        return False
     return entry.get("asset_name", "") in existing_assets
 
 
