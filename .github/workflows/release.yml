@@ -214,13 +214,11 @@ jobs:
           shopt -s nullglob
           for file in dist/*.zip; do
             name="$(basename "$file")"
-            if grep -Fxq "$name" <<< "$existing"; then
-              if [[ "$name" == ghidradec-idalatest-* ]]; then
-                echo "Refreshing moving latest release asset: $name"
-                cp "$file" overwrite/
-              else
-                echo "Skipping existing release asset: $name"
-              fi
+            if [[ "$name" == ghidradec-idalatest-* ]]; then
+              echo "Refreshing moving latest release asset: $name"
+              cp "$file" overwrite/
+            elif grep -Fxq "$name" <<< "$existing"; then
+              echo "Skipping existing release asset: $name"
             else
               cp "$file" upload/
             fi
