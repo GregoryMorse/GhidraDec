@@ -57,7 +57,13 @@
 
 #if IDA_SDK_VERSION >= 760
 #define inf_is_32bit inf_is_32bit_or_higher
-inline uint32 get_aflags0(ea_t ea) { return flags_t(getnode(ea).altval(NALT_AFLAGS)); }
+inline uint32 get_aflags0(ea_t ea) {
+#ifdef NALT_AFLAGS
+	return flags_t(getnode(ea).altval(NALT_AFLAGS));
+#else
+	return uint32(get_aflags(ea));
+#endif
+}
 #endif
 #if IDA_SDK_VERSION < 750
 #define PLUGIN_MULTI 0

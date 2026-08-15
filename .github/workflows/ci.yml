@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       ida_versions:
-        description: "Public IDA SDK versions to build: 9.3, 9.2, latest, or all"
+        description: "Public IDA SDK versions to build: 9.3, 9.4, future tagged SDKs, latest, or all"
         type: string
         default: "9.3"
 
@@ -30,11 +30,15 @@ jobs:
           else
             args+=(--versions "$versions")
           fi
-          echo "matrix=$(python tools/ida_sdk.py matrix "${args[@]}")" >> "$GITHUB_OUTPUT"
+          if ! matrix_json="$(python tools/ida_sdk.py matrix "${args[@]}")"; then
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
 
   build:
     needs: matrix
-    if: ${{ fromJson(needs.matrix.outputs.matrix).include[0] != null }}
+    if: ${{ needs.matrix.result == 'success' && needs.matrix.outputs.matrix != '' && fromJson(needs.matrix.outputs.matrix).include[0] != null }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}

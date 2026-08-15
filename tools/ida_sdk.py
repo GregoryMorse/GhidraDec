@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "ghidradec.targets.json"
 DEFAULT_SDK_DIR = ROOT / ".idasdks"
 PUBLIC_SDK_SOURCES = {"public-release", "public-branch"}
+PUBLIC_TAGGED_SDK_MINIMUM = (9, 4)
 
 
 def env_int(name: str, default: int) -> int:
@@ -57,6 +59,8 @@ def find_sdk(manifest: dict, version: str) -> dict:
     for sdk in manifest["idaSdks"]:
         if sdk["version"] == version:
             return sdk
+    if sdk := synthesize_public_tagged_sdk(version):
+        return sdk
     raise SystemExit(f"IDA SDK {version} is not defined in {MANIFEST}")
 
 
@@ -113,23 +117,58 @@ def sdk_version_major(version: str) -> str:
     return version.split(".", 1)[0]
 
 
-def expand_version_selectors(selectors: set[str], known_versions: set[str]) -> set[str]:
+def synthesize_public_tagged_sdk(selector: str) -> dict | None:
+    value = selector.strip()
+    if value.startswith("v"):
+        value = value[1:]
+    match = re.fullmatch(r"9\.(\d+)(?:\.(\d+))?(?:-(release|sdk\.\d+))?", value)
+    if not match:
+        return None
+
+    minor = int(match.group(1))
+    patch = int(match.group(2) or "0")
+    suffix = match.group(3) or "release"
+    if (9, minor) < PUBLIC_TAGGED_SDK_MINIMUM:
+        return None
+
+    tag = f"v9.{minor}.{patch}-{suffix}"
+    version = f"9.{minor}" if patch == 0 and suffix == "release" else f"9.{minor}.{patch}-{suffix}"
+    directory_suffix = re.sub(r"[^0-9A-Za-z]+", "", version)
+    return {
+        "version": version,
+        "directory": f"idasdk{directory_suffix}",
+        "archive": f"ida-sdk-{tag}.zip",
+        "source": "public-release",
+        "url": f"https://github.com/HexRaysSA/ida-sdk/archive/refs/tags/{tag}.zip",
+        "enabled": True,
+        "platforms": ["windows", "linux", "macos"],
+        "hostArchitectures": ["x64", "arm64"],
+        "eaModes": [64],
+        "cmakeVariable": "IDA_SDK_DIR",
+    }
+
+
+def expand_version_selectors(selectors: set[str], known_versions: set[str]) -> tuple[set[str], dict[str, dict]]:
     expanded = set()
+    dynamic_sdks = {}
     unknown = set()
     for selector in selectors:
         if selector in known_versions:
             expanded.add(selector)
         elif selector in {"6", "7", "8", "9"}:
             expanded.update(version for version in known_versions if sdk_version_major(version) == selector)
+        elif sdk := synthesize_public_tagged_sdk(selector):
+            expanded.add(sdk["version"])
+            dynamic_sdks[sdk["version"]] = sdk
         else:
             unknown.add(selector)
     if unknown:
         raise SystemExit(
             "Unknown IDA SDK version selector(s): "
             + ", ".join(sorted(unknown))
-            + ". Use exact versions, latest, major groups 6/7/8/9, or all."
+            + ". Use exact versions, future public tags such as 9.4, latest, major groups 6/7/8/9, or all."
         )
-    return expanded
+    return expanded, dynamic_sdks
 
 
 def parse_arches(value: str | None) -> set[str]:
@@ -229,13 +268,17 @@ def selected_matrix_entries(
     if all_versions and versions:
         raise SystemExit("--all and --versions are mutually exclusive")
 
-    known_versions = {sdk["version"] for sdk in manifest["idaSdks"]}
-    versions = expand_version_selectors(versions, known_versions)
+    sdk_entries = list(manifest["idaSdks"])
+    known_versions = {sdk["version"] for sdk in sdk_entries}
+    versions, dynamic_sdks = expand_version_selectors(versions, known_versions)
+    for version, sdk in dynamic_sdks.items():
+        if version not in known_versions:
+            sdk_entries.append(sdk)
 
     current = host_platform()
     default_version = manifest["project"]["defaultIdaSdk"]
     include = []
-    for sdk in manifest["idaSdks"]:
+    for sdk in sdk_entries:
         if not sdk.get("enabled", False):
             continue
         is_public = sdk["source"] in PUBLIC_SDK_SOURCES

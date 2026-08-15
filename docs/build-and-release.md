@@ -3,11 +3,14 @@
 `ghidradec.targets.json` is the source of truth for supported IDA SDKs,
 platforms, EA modes, and source dependency artifacts.
 
-Public IDA SDKs, currently 9.2, 9.3, and `latest`, are downloaded from the
-Hex-Rays `ida-sdk` GitHub repository. `latest` follows the repository's master
-branch and is intentionally moving. Older SDKs must stay private: place local
-archives in `.idasdks` or pass an explicit SDK path with `IDA_SDK_DIR` /
-`IDA_SDK_DIR32`. Do not commit IDA SDK archives, encrypted or otherwise.
+Public IDA SDKs are downloaded from the Hex-Rays `ida-sdk` GitHub repository.
+IDA 9.2 and 9.3 are pinned in the manifest. IDA 9.4 and newer public release
+SDKs are generated from the Hex-Rays tag pattern, so `--versions 9.4` resolves
+to `v9.4.0-release`, `9.5` resolves to `v9.5.0-release`, and so on. `latest`
+follows the repository's master branch and is intentionally moving. Older SDKs
+must stay private: place local archives in `.idasdks` or pass an explicit SDK
+path with `IDA_SDK_DIR` / `IDA_SDK_DIR32`. Do not commit IDA SDK archives,
+encrypted or otherwise.
 
 ## Local Build
 
@@ -50,8 +53,9 @@ python tools/ida_sdk.py matrix --all --include-private
 ```
 
 By default, the matrix emits only the manifest's `defaultIdaSdk`, currently
-IDA SDK 9.3. Use `--versions` for a comma-separated backfill set, major groups
-`6`, `7`, `8`, or `9`, or `--all` for every enabled manifest target. Use
+IDA SDK 9.3. Use `--versions` for a comma-separated backfill set, future public
+tags such as `9.4`, major groups `6`, `7`, `8`, or `9`, or `--all` for every
+enabled manifest target. Use
 `--include-private` only for local or private-runner builds where the required
 licensed SDK archives are already available.
 
@@ -64,8 +68,9 @@ limit a backfill run when you do not want both macOS packages.
 ## GitHub Actions
 
 Normal CI and tag releases build only IDA SDK 9.3 by default. Manual workflow
-runs can set `ida_versions` to `9.2`, `9.3`, `latest`, a legacy SDK such as
-`7.7`, a major group such as `8`, a comma-separated list, or `all`.
+runs can set `ida_versions` to `9.2`, `9.3`, `9.4`, future public release SDKs
+such as `9.5`, `latest`, a legacy SDK such as `7.7`, a major group such as `8`,
+a comma-separated list, or `all`.
 
 The release workflow only runs on tagged refs. For an on-demand backfill, open
 Actions, choose the Release workflow, select the official release tag in the
