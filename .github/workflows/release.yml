@@ -239,7 +239,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
-        run: gh release upload "$TAG_NAME" overwrite/*.zip --clobber
+        run: gh release upload "$TAG_NAME" overwrite/*.zip --clobber --repo "${{ github.repository }}"
       - uses: softprops/action-gh-release@v2
         if: ${{ steps.missing-assets.outputs.has_uploads == 'true' }}
         with:
