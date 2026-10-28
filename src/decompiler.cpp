@@ -4995,28 +4995,39 @@ ghidradec_graph_cb_ret_t idaapi GraphCallback(void* user_data, int notification_
 	return 0;
 }
 
+void closeBlockGraph(RdGlobalInfo* di, TWidget* closingWidget)
+{
+	auto* viewer = di->graphViewer;
+	auto* parent = di->graphWidget;
+	auto* graph = di->mg;
+	// Closing a widget can synchronously notify our view listener again.
+	di->graphViewer = nullptr;
+	di->graphWidget = nullptr;
+	di->mg = nullptr;
+	if (viewer != nullptr) {
+		if (auto* displayedGraph = get_viewer_graph(viewer))
+			displayedGraph->set_callback(nullptr, nullptr);
+#ifdef __X64__
+		if (viewer != closingWidget && parent != closingWidget)
+			close_widget(viewer, 0);
+#endif // Legacy close_tform only accepts the containing form, not its child control.
+	}
+	if (parent != nullptr && parent != closingWidget)
+		close_widget(parent, closingWidget != nullptr ? WCLS_CLOSE_LATER : 0);
+	if (graph != nullptr)
+		delete_mutable_graph(graph);
+	di->graphText.clear();
+	if (viewer != nullptr || parent != nullptr || graph != nullptr) {
+		netnode nn("GhidraGraph", 0, true);
+		nn.kill();
+	}
+}
+
 void displayBlockGraph(RdGlobalInfo* di, ea_t ea)
 {
 	if ((di->viewFeatures & VIEW_FEATURE_GRAPH) == 0) return;
 	di->idacb->executeOnMainThread([di, ea]() {
-		if (di->graphViewer != nullptr) {
-			if (find_widget((di->viewerName + "_Graph").c_str()) != nullptr)
-				close_widget(di->graphViewer, 0);
-			di->graphViewer = nullptr;
-		}
-		if (di->graphWidget != nullptr) {
-			if (find_widget((di->viewerName + " Graph").c_str()) != nullptr)
-				close_widget(di->graphWidget, 0);
-			di->graphWidget = nullptr;
-			if (di->mg != nullptr)
-			{
-				delete_mutable_graph(di->mg);
-				di->mg = nullptr;
-			}
-			di->graphText.clear();
-			netnode nn("GhidraGraph", 0, true);
-			nn.kill();
-		}
+		closeBlockGraph(di);
 		if (di->decompiledFunction == nullptr)
 			return;
 		auto fit = di->fnc2code.find(di->decompiledFunction);

@@ -828,7 +828,7 @@ bool GhidraDec::canDecompileInput()
 					decompInfo->setIsUseThreads(liveCallbackRegression ? false : runAsyncRegression);
 					decompInfo->skipParamIdentification = skipRegressionParamId;
 					decompInfo->suppressViewer = !showViewerRegression;
-					decompInfo->pm->runSelectiveDecompilation(fnc);
+					decompInfo->pm->runSelectiveDecompilation(fnc, true);
 					if (!runAsyncRegression)
 						decompInfo->skipParamIdentification = false;
 					break;
@@ -889,22 +889,8 @@ ssize_t idaapi GhidraDec::view_callback(void* ud, int notification_code, va_list
 	case view_close:
 		TWidget* view = va_arg(va, TWidget*);
 		if (view == nullptr) return 0;
-		if (decompInfo->graphWidget == view) {
-			decompInfo->graphWidget = nullptr;
-			delete_mutable_graph(decompInfo->mg);
-			decompInfo->graphText.clear();
-			netnode nn("GhidraGraph", 0, true);
-			nn.kill();
-		} else if (decompInfo->graphViewer == view) { //only this not for graphWidget
-			decompInfo->graphViewer = nullptr;
-			if (decompInfo->graphWidget) {
-				close_widget(decompInfo->graphWidget, 0);
-				decompInfo->graphWidget = nullptr;
-				delete_mutable_graph(decompInfo->mg);
-				decompInfo->graphText.clear();
-				netnode nn("GhidraGraph", 0, true);
-				nn.kill();
-			}
+		if (decompInfo->graphWidget == view || decompInfo->graphViewer == view) {
+			closeBlockGraph(decompInfo, view);
 		} else if (decompInfo->codeViewer == view) {
 			decompInfo->codeViewer = nullptr;
 		} else if (decompInfo->custViewer == view) { //only this not for codeViewer
@@ -999,20 +985,7 @@ void idaapi GhidraDec::term()
 		delete decompInfo->idacb;
 		decompInfo->idacb = nullptr;
 	}
-	if (decompInfo->graphViewer != nullptr) {
-		if (find_widget((decompInfo->viewerName + "_Graph").c_str()) != nullptr)
-			close_widget(decompInfo->graphViewer, 0);
-		decompInfo->graphViewer = nullptr;
-	}
-	if (decompInfo->graphWidget != nullptr) {
-		if (find_widget((decompInfo->viewerName + " Graph").c_str()) != nullptr)
-			close_widget(decompInfo->graphWidget, 0);
-		decompInfo->graphWidget = nullptr;
-		delete_mutable_graph(decompInfo->mg);
-		decompInfo->graphText.clear();
-		netnode nn("GhidraGraph", 0, true);
-		nn.kill();
-	}
+	closeBlockGraph(decompInfo);
 	if (decompInfo->custViewer) {
 		close_widget(decompInfo->custViewer, 0);
 		decompInfo->custViewer = nullptr;

@@ -247,7 +247,6 @@ def wait_for_done(done_path, start_time, timeout_seconds):
         pump_ui_events()
         if done_ready(done_path, start_time):
             log("Done marker ready: {}".format(done_path))
-            ida_pro.qexit(0)
             return
 
         elapsed = time.time() - start_time
@@ -313,12 +312,20 @@ def main():
         gui_like = os.environ.get("GHIDRADEC_TEST_GUI_LIKE", "") not in ("", "0", "false", "False")
 
         start_time = time.time()
-        run_plugin(plugin_argument)
         if gui_like:
             if not done_path:
                 fail("GHIDRADEC_TEST_GUI_LIKE requires GHIDRADEC_BATCH_DONE", 2)
-            wait_for_done(done_path, start_time, timeout_seconds)
+            repeat_count = max(1, env_int("GHIDRADEC_BATCH_GUI_REPEATS", 1))
+            for iteration in range(repeat_count):
+                if os.path.exists(done_path):
+                    os.remove(done_path)
+                start_time = time.time()
+                log("GUI invocation {}/{}".format(iteration + 1, repeat_count))
+                run_plugin(plugin_argument)
+                wait_for_done(done_path, start_time, timeout_seconds)
+            ida_pro.qexit(0)
             return
+        run_plugin(plugin_argument)
         ready, size = output_ready(output_path, start_time, min_bytes)
         if ready and stable_polls <= 1 and done_ready(done_path, start_time):
             log("Output ready: decompile output is {} bytes".format(size))

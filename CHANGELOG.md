@@ -9,6 +9,8 @@ All notable user-facing changes are tracked here.
   added real-parser protocol regressions and a documented upstream boundary audit.
 * Fixed dropped switch case/default label tokens and reject empty case labels
   in the regression output-quality gate.
+* Detach graph callbacks and close owned viewers before unloading the plugin,
+  including hidden/embedded viewers; guard against reentrant close notifications.
 * Fixed text-mode/autonomous IDA worker deadlocks (issue #9); headless runs
   no longer need a regression-test flag. Added `GHIDRADEC_NO_THREADS=1`.
   Protocol callbacks now stay on the invoking thread; a watchdog only interrupts

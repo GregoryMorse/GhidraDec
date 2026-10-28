@@ -169,9 +169,36 @@ clear setup error instead of silently skipping the asset.
 Microsoft Dev Tunnels can expose the same localhost server. Keep private
 backfills deferred until the public-SDK staging matrix is green. An optional
 local `.env.private-sdk` is ignored by Git; never commit tunnel credentials.
-Use tunnel client authentication or the SDK server's independent bearer token,
-and stop hosting when the backfill completes. Public dependencies and completed
-plugin artifacts should be reused before spending more tunnel bandwidth.
+It is local operator configuration, not automatically sourced by the tools.
+
+For a temporary tunnel compatible with the workflow's existing bearer-token
+input, first run the archive server with a strong token in an ignored local
+file (for example `build/private-sdk.token`):
+
+```powershell
+python tools/private_sdk_server.py --root .idasdks --port 8765 --token-file build/private-sdk.token
+```
+
+In another terminal, after completing the interactive login yourself:
+
+```powershell
+devtunnel user login
+devtunnel host -p 8765 --protocol http --allow-anonymous
+```
+
+Here `--allow-anonymous` applies only to the tunnel relay. **The archive server
+must still require its own token**; do not expose a tokenless SDK server. Use
+the printed HTTPS port URL for `private_sdk_base_url` and the server's token
+for `private_sdk_token`. Do not use the inspection URL. Stop both processes
+after the backfill. A relay restricted with Dev Tunnel client tokens is also
+possible but needs a separate `X-Tunnel-Authorization` header, which the current
+workflow does not configure.
+
+See Microsoft's [setup](https://learn.microsoft.com/en-us/azure/developer/dev-tunnels/get-started)
+and [CLI reference](https://learn.microsoft.com/en-us/azure/developer/dev-tunnels/cli-commands).
+Reuse public dependency caches and unchanged completed plugin artifacts before
+spending more tunnel bandwidth. If a fix changes plugin sources, rebuild the
+affected assets; retaining a tag must not silently retain stale binaries.
 
 Private SDK downloads retry transient tunnel failures such as HTTP 429 and 5xx
 responses. The workflow defaults are intentionally patient for long `all`

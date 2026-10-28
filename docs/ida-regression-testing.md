@@ -29,6 +29,33 @@ output, with zero graceful/dangerous failures in their summaries:
 * `build/release-1.1/headless-final-summary.json`
 * `build/release-1.1/live-paramid-labels-summary.json`
 
+The licensed Windows GUI run also passed `authenticate` and `main` from the
+public `fauxware` database, each with **three forced decompilations in one IDA
+process**, code and graph viewers enabled, and a clean process exit:
+
+* `build/release-1.1/gui-repeat/fauxware-861b453b8f25/individual/summary.json`
+
+This caught and fixed a real shutdown bug: an embedded/hidden graph viewer kept
+its callback after the plugin DLL was unloaded. Graph cleanup now detaches the
+callback, clears ownership before reentrant close notifications, and closes
+owned viewers without relying on top-level title lookup. The fix also builds
+against the 6.8 SDK's EA32/EA64 APIs; older GUI runtimes remain untested.
+
+To repeat this lifecycle check on an already analyzed disposable database:
+
+```bash
+python tools/ida_batch.py --ida /path/to/ida --ghidra-dir /path/to/ghidra_12.2_PUBLIC \
+  --plugin /path/to/plugin --input /path/to/public.i64 --no-batch \
+  --gui-like --show-viewer --gui-repeat 3 --individual-functions \
+  --individual-ea 0xFUNCTION_ENTRY --reuse-database --work-dir build/gui-regression
+```
+
+Use the address of a real local function, not the placeholder. The outer
+timeout bounds the entire process, including all repeats. This is a lifecycle
+smoke test, not pixel-level GUI correctness or exhaustive protocol/CPU coverage.
+Debugger runs are diagnostic only: a debugger command such as `q` can exit zero
+after stopping on a fault; use a normal non-debugger run for pass/fail results.
+
 The SDK-free runtime checks cover execution policy, watchdog deadlines and the
 actual protocol reader/function mapping behavior, alongside Python provisioning
 and upstream-ID checks. They do not replace licensed GUI testing or certify

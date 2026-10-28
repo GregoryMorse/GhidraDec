@@ -280,7 +280,7 @@ def run_ida(args: argparse.Namespace, ida_args: list[str], env: dict[str, str], 
         if args.debugger_symbols:
             process_args.extend(["-y", args.debugger_symbols])
         if args.debugger_command_file:
-            process_args.extend(["-c", f"$$><{Path(args.debugger_command_file).resolve()}"])
+            process_args.extend(["-c", f"$$<{Path(args.debugger_command_file).resolve()}"])
         if args.debugger_command:
             process_args.extend(["-c", args.debugger_command])
         process_args.extend(ida_args)
@@ -467,6 +467,7 @@ def run_one(
     env["GHIDRADEC_TEST_SKIP_PARAMID"] = "0" if args.paramid else "1"
     env["GHIDRADEC_TEST_GUI_LIKE"] = "1" if args.gui_like else "0"
     env["GHIDRADEC_TEST_SHOW_VIEWER"] = "1" if args.show_viewer else "0"
+    env["GHIDRADEC_BATCH_GUI_REPEATS"] = str(args.gui_repeat)
     env["GHIDRADEC_TEST_FORCE_ANALYSIS_DUMP"] = "1" if args.force_analysis_dump else "0"
     env["GHIDRADEC_TEST_LIVE_CALLBACKS"] = "1" if args.live_callbacks else "0"
     env["GHIDRADEC_TEST_ASYNC"] = "1" if args.gui_like or args.force_analysis_dump or args.live_callbacks else "0"
@@ -781,6 +782,8 @@ def main() -> int:
         action="store_true",
         help="In GUI-like individual runs, do not suppress the decompiler viewer",
     )
+    parser.add_argument("--gui-repeat", type=int, default=1,
+                        help="Repeat a GUI-like invocation in one IDA process to test viewer reuse/replacement")
     parser.add_argument(
         "--force-analysis-dump",
         action="store_true",
@@ -823,7 +826,7 @@ def main() -> int:
     )
     parser.add_argument("--debugger", help="Launch IDA under a debugger such as cdb.exe")
     parser.add_argument("--debugger-command", help="Debugger command string passed with cdb/windbg -c")
-    parser.add_argument("--debugger-command-file", help="Debugger command file loaded with cdb/windbg $$><")
+    parser.add_argument("--debugger-command-file", help="Debugger command file loaded line by line with cdb/windbg $$<")
     parser.add_argument("--debugger-symbols", help="Debugger symbol path passed with cdb/windbg -y")
     parser.add_argument("--debugger-child", action="store_true", help="Ask cdb/windbg to debug child processes")
     parser.add_argument(
@@ -835,6 +838,9 @@ def main() -> int:
     parser.set_defaults(debugger_initial_go=True)
     parser.add_argument("inputs", nargs="*")
     args = parser.parse_args()
+
+    if args.gui_repeat < 1 or (args.gui_repeat != 1 and not args.gui_like):
+        parser.error("--gui-repeat must be positive and requires --gui-like when greater than one")
 
     args.inputs = read_input_lists(args.input_list) + args.input_paths + args.inputs
     if not args.inputs:

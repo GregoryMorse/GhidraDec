@@ -141,6 +141,7 @@ namespace idaplugin {
 	void createRangesFromSelectedFunction(RdGlobalInfo& decompInfo, func_t* fnc);
 	void decompileInput(RdGlobalInfo &decompInfo);
 	void displayBlockGraph(RdGlobalInfo* di, ea_t ea);
+	void closeBlockGraph(RdGlobalInfo* di, TWidget* closingWidget = nullptr);
 
 } // namespace idaplugin
 
