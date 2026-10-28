@@ -225,11 +225,19 @@ function(ghidradec_find_ida_library OUT_VAR EA_MODE)
 			file(GLOB _preferred_candidates LIST_DIRECTORIES false
 				"${GHIDRADEC_IDA_SDK_ROOT}/lib/arm64_mac_*_${EA_MODE}*/libida*.dylib"
 				"${GHIDRADEC_IDA_SDK_ROOT}/lib/arm64_mac_${EA_MODE}*/libida*.dylib")
+			file(GLOB _stub_candidates LIST_DIRECTORIES false
+				"${GHIDRADEC_IDA_SDK_ROOT}/lib/arm64_mac_*_${EA_MODE}*/libida.tbd"
+				"${GHIDRADEC_IDA_SDK_ROOT}/lib/arm64_mac_${EA_MODE}*/libida.tbd")
+			list(APPEND _preferred_candidates ${_stub_candidates})
 			set(_candidates ${_preferred_candidates})
 		else()
 			file(GLOB _preferred_candidates LIST_DIRECTORIES false
 				"${GHIDRADEC_IDA_SDK_ROOT}/lib/x64_mac_*_${EA_MODE}*/libida*.dylib"
 				"${GHIDRADEC_IDA_SDK_ROOT}/lib/x64_mac_${EA_MODE}*/libida*.dylib")
+			file(GLOB _stub_candidates LIST_DIRECTORIES false
+				"${GHIDRADEC_IDA_SDK_ROOT}/lib/x64_mac_*_${EA_MODE}*/libida.tbd"
+				"${GHIDRADEC_IDA_SDK_ROOT}/lib/x64_mac_${EA_MODE}*/libida.tbd")
+			list(APPEND _preferred_candidates ${_stub_candidates})
 			set(_candidates ${_preferred_candidates})
 		endif()
 	elseif(UNIX)

@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -155,6 +156,36 @@ class OutputQuality(unittest.TestCase):
             self.assertEqual(ida_batch.classify_run_result(0, log, output)[0], "graceful_fail")
             output.write_text("switch (x) {\n case 7: break;\n default: break;\n}", encoding="utf-8")
             self.assertEqual(ida_batch.classify_run_result(0, log, output)[0], "success")
+
+
+@unittest.skipUnless(shutil.which("cmake"), "CMake not installed")
+class MacSdkLibraries(unittest.TestCase):
+    def test_dylib_and_tbd_kernel_discovery(self):
+        cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        function = re.search(r"function\(ghidradec_find_ida_library\b.*?endfunction\(\)", cmake, re.S).group()
+        for arch, sdk_dir, library in (
+            ("x86_64", "x64_mac_clang_64", "libida64.dylib"),
+            ("arm64", "arm64_mac_clang_64", "libida.dylib"),
+            ("x86_64", "x64_mac_64", "libida.tbd"),
+            ("arm64", "arm64_mac_64", "libida.tbd"),
+        ):
+            with self.subTest(arch=arch, library=library), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                expected = root / "lib" / sdk_dir / library
+                expected.parent.mkdir(parents=True)
+                expected.touch()
+                (expected.parent / "libidalib.tbd").touch()
+                script = root / "test.cmake"
+                script.write_text(
+                    'set(WIN32 FALSE)\nset(APPLE TRUE)\n'
+                    f'set(CMAKE_OSX_ARCHITECTURES "{arch}")\n'
+                    f'set(GHIDRADEC_IDA_SDK_ROOT "{root.as_posix()}")\n'
+                    + function + '\nghidradec_find_ida_library(found 64)\n'
+                    + f'if(NOT found STREQUAL "{expected.as_posix()}")\n'
+                    + 'message(FATAL_ERROR "Wrong IDA kernel: ${found}")\nendif()\n',
+                    encoding="utf-8")
+                result = subprocess.run(["cmake", "-P", str(script)], text=True, capture_output=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":
