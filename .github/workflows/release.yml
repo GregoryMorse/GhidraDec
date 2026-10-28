@@ -15,7 +15,7 @@ on:
         type: string
         default: ""
       private_sdk_token:
-        description: "Optional bearer token for private SDK downloads; prefer short-lived values"
+        description: "Deprecated: use the GHIDRADEC_PRIVATE_SDK_TOKEN repository secret instead"
         type: string
         default: ""
       rebuild_existing_assets:
@@ -118,7 +118,7 @@ jobs:
         shell: bash
         env:
           PRIVATE_SDK_BASE_URL: ${{ inputs.private_sdk_base_url }}
-          PRIVATE_SDK_TOKEN: ${{ inputs.private_sdk_token }}
+          PRIVATE_SDK_TOKEN: ${{ secrets.GHIDRADEC_PRIVATE_SDK_TOKEN || inputs.private_sdk_token }}
         run: |
           if [[ -n "$PRIVATE_SDK_BASE_URL" ]]; then
             echo "::add-mask::$PRIVATE_SDK_BASE_URL"
@@ -132,7 +132,7 @@ jobs:
         shell: bash
         env:
           GHIDRADEC_PRIVATE_SDK_BASE_URL: ${{ inputs.private_sdk_base_url }}
-          GHIDRADEC_PRIVATE_SDK_TOKEN: ${{ inputs.private_sdk_token }}
+          GHIDRADEC_PRIVATE_SDK_TOKEN: ${{ secrets.GHIDRADEC_PRIVATE_SDK_TOKEN || inputs.private_sdk_token }}
           GHIDRADEC_PRIVATE_SDK_FETCH_RETRIES: "12"
           GHIDRADEC_PRIVATE_SDK_FETCH_RETRY_DELAY: "45"
         run: |
@@ -196,58 +196,30 @@ jobs:
           path: build/ida-${{ matrix.ida }}/artifacts/*.zip
           if-no-files-found: error
 
-  publish:
-    needs: build
-    if: ${{ startsWith(github.ref, 'refs/tags/') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-      - id: missing-assets
-        name: Stage release assets
+      - name: Publish passing package immediately
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
           REBUILD_EXISTING: ${{ inputs.rebuild_existing_assets }}
         run: |
-          mkdir -p upload overwrite
-          existing="$(gh release view "$TAG_NAME" --json assets --jq '.assets[].name' 2>/dev/null || true)"
+          if ! gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "GhidraDec $TAG_NAME" --latest=false \
+              --notes "Passing packages are uploaded incrementally; additional SDK backfills may still be running." \
+              || gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null
+          fi
+          existing="$(gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
           shopt -s nullglob
-          for file in dist/*.zip; do
+          for file in build/ida-${{ matrix.ida }}/artifacts/*.zip; do
             name="$(basename "$file")"
             if [[ "$name" == ghidradec-idalatest-* || "$REBUILD_EXISTING" == "true" ]]; then
               echo "Refreshing release asset: $name"
-              cp "$file" overwrite/
+              gh release upload "$TAG_NAME" "$file" --clobber --repo "$GITHUB_REPOSITORY"
             elif grep -Fxq "$name" <<< "$existing"; then
               echo "Skipping existing release asset: $name"
             else
-              cp "$file" upload/
+              gh release upload "$TAG_NAME" "$file" --repo "$GITHUB_REPOSITORY"
             fi
           done
-          if compgen -G "upload/*.zip" > /dev/null; then
-            echo "has_uploads=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_uploads=false" >> "$GITHUB_OUTPUT"
-          fi
-          if compgen -G "overwrite/*.zip" > /dev/null; then
-            echo "has_overwrites=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_overwrites=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Refresh rebuilt assets
-        if: ${{ steps.missing-assets.outputs.has_overwrites == 'true' }}
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ github.ref_name }}
-        run: gh release upload "$TAG_NAME" overwrite/*.zip --clobber --repo "${{ github.repository }}"
-      - uses: softprops/action-gh-release@v2
-        if: ${{ steps.missing-assets.outputs.has_uploads == 'true' }}
-        with:
-          files: upload/*.zip
-          draft: false
-          make_latest: false
-          overwrite_files: false

@@ -111,8 +111,9 @@ comma-separated list, or `all`.
 The release workflow only runs on tagged refs. For an on-demand backfill, open
 Actions, choose the Release workflow, select the official release tag in the
 branch/tag picker, and set `ida_versions` to the missing public SDK version or
-list. The publish step uploads only release ZIPs that are not already attached
-to that GitHub Release.
+list. Each passing build uploads its package immediately, so a different failed
+or cancelled matrix job cannot discard completed backfills. Existing release
+assets are not replaced unless an explicit rebuild was requested.
 
 For a package-only rehearsal, run the same workflow manually from a branch. It
 builds the matrix and stores workflow artifacts, but the GitHub Release publish
@@ -148,21 +149,22 @@ URL into the Release workflow's `private_sdk_base_url` input.
 python tools/private_sdk_server.py --root .idasdks --port 8765 --token <short-lived-token>
 ```
 
-If the tunnel gives you `https://example-tunnel.trycloudflare.com`, either set:
+Set the repository secret `GHIDRADEC_PRIVATE_SDK_TOKEN` to the server's token.
+It takes precedence over the legacy `private_sdk_token` workflow input and
+keeps the credential out of the dispatch payload. For example, from Bash:
 
-```text
-private_sdk_base_url = https://example-tunnel.trycloudflare.com/<short-lived-token>
-private_sdk_token    =
+```bash
+gh secret set GHIDRADEC_PRIVATE_SDK_TOKEN --repo OWNER/GhidraDec < build/private-sdk.token
 ```
 
-or keep the token out of the URL path and use bearer auth:
+If the tunnel gives you `https://example-tunnel.trycloudflare.com`, use:
 
 ```text
 private_sdk_base_url = https://example-tunnel.trycloudflare.com
-private_sdk_token    = <short-lived-token>
+private_sdk_token    =
 ```
 
-The workflow masks both fields in logs before downloading. If a private SDK is
+The workflow masks credentials before downloading. If a private SDK is
 requested without a reachable `private_sdk_base_url`, the build fails with a
 clear setup error instead of silently skipping the asset.
 
@@ -189,7 +191,8 @@ devtunnel host -p 8765 --protocol http --allow-anonymous
 Here `--allow-anonymous` applies only to the tunnel relay. **The archive server
 must still require its own token**; do not expose a tokenless SDK server. Use
 the printed HTTPS port URL for `private_sdk_base_url` and the server's token
-for `private_sdk_token`. Do not use the inspection URL. Stop both processes
+for the `GHIDRADEC_PRIVATE_SDK_TOKEN` repository secret. Leave the token input
+empty. Do not use the inspection URL. Stop both processes
 after the backfill. A relay restricted with Dev Tunnel client tokens is also
 possible but needs a separate `X-Tunnel-Authorization` header, which the current
 workflow does not configure.
