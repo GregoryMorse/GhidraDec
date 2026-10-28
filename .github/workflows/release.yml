@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       ida_versions:
-        description: "IDA SDK versions to publish: 9.3, 9.4, future tagged SDKs, latest, 7.7, major groups 6/7/8/9, comma lists, or all"
+        description: "SDKs: 9.5, 9.4sp1, exact tags, 7.7, major groups 6/7/8/9, comma lists, or all"
         type: string
-        default: "latest"
+        default: "9.5"
       private_sdk_base_url:
         description: "Optional temporary base URL for private SDK archives; may include a short-lived path token"
         type: string
@@ -68,11 +68,13 @@ jobs:
           echo "Loaded $count existing release asset names for $TAG_NAME."
       - id: matrix
         shell: bash
+        env:
+          REQUESTED_VERSIONS: ${{ inputs.ida_versions }}
         run: |
           args=()
-          versions="${{ github.event.inputs.ida_versions }}"
+          versions="$REQUESTED_VERSIONS"
           if [[ -z "$versions" ]]; then
-            versions="latest"
+            versions="9.2,9.3,9.3sp1,9.4,9.4sp1,9.5"
           fi
           if [[ "$versions" == "all" ]]; then
             args+=(--all)
@@ -105,7 +107,7 @@ jobs:
     if: ${{ needs.matrix.result == 'success' && needs.matrix.outputs.matrix != '' && fromJson(needs.matrix.outputs.matrix).include[0] != null }}
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: ${{ github.event_name == 'workflow_dispatch' && 1 || 4 }}
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     steps:
@@ -141,13 +143,11 @@ jobs:
           fi
           python tools/ida_sdk.py fetch-private --version "${{ matrix.ida }}"
 
-      - name: Prepare IDA SDK
-        shell: bash
-        run: python tools/ida_sdk.py ensure --version "${{ matrix.ida }}"
-
-      - name: Prepare Ghidra decompiler sources
-        shell: bash
-        run: python tools/deps.py ensure-ghidra-sources
+      - uses: ./.github/actions/public-dependencies
+        with:
+          ida: ${{ matrix.ida }}
+          sdk_dir: ${{ matrix.sdk_dir }}
+          sdk_source: ${{ matrix.sdk_source }}
 
       - name: Configure
         shell: bash
@@ -171,6 +171,9 @@ jobs:
         run: |
           cmake --build "build/ida-${{ matrix.ida }}" --config Release --parallel
           cmake --build "build/ida-${{ matrix.ida }}" --config Release --target package_plugins
+
+      - name: Test
+        run: ctest --test-dir "build/ida-${{ matrix.ida }}" -C Release --output-on-failure
 
       - id: package-name
         name: Determine package artifact name
@@ -208,14 +211,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
+          REBUILD_EXISTING: ${{ inputs.rebuild_existing_assets }}
         run: |
           mkdir -p upload overwrite
           existing="$(gh release view "$TAG_NAME" --json assets --jq '.assets[].name' 2>/dev/null || true)"
           shopt -s nullglob
           for file in dist/*.zip; do
             name="$(basename "$file")"
-            if [[ "$name" == ghidradec-idalatest-* ]]; then
-              echo "Refreshing moving latest release asset: $name"
+            if [[ "$name" == ghidradec-idalatest-* || "$REBUILD_EXISTING" == "true" ]]; then
+              echo "Refreshing release asset: $name"
               cp "$file" overwrite/
             elif grep -Fxq "$name" <<< "$existing"; then
               echo "Skipping existing release asset: $name"
@@ -233,7 +237,7 @@ jobs:
           else
             echo "has_overwrites=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Refresh moving latest assets
+      - name: Refresh rebuilt assets
         if: ${{ steps.missing-assets.outputs.has_overwrites == 'true' }}
         shell: bash
         env:

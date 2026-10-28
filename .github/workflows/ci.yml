@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       ida_versions:
-        description: "Public IDA SDK versions to build: 9.3, 9.4, future tagged SDKs, latest, or all"
+        description: "Public SDKs: 9.5, 9.4sp1, exact tags (v9.4.0-sdk.1), comma lists, latest, or all"
         type: string
-        default: "latest"
+        default: "9.5"
 
 jobs:
   matrix:
@@ -17,13 +17,17 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
+      - name: Test build helpers
+        run: python -m unittest discover -s tests/unit -p "test_*.py"
       - id: matrix
         shell: bash
+        env:
+          REQUESTED_VERSIONS: ${{ inputs.ida_versions }}
         run: |
           args=()
-          versions="${{ github.event.inputs.ida_versions }}"
+          versions="$REQUESTED_VERSIONS"
           if [[ -z "$versions" ]]; then
-            versions="latest"
+            versions="9.5"
           fi
           if [[ "$versions" == "all" ]]; then
             args+=(--all)
@@ -46,17 +50,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare IDA SDK
-        shell: bash
-        run: python tools/ida_sdk.py ensure --version "${{ matrix.ida }}"
-
-      - name: Prepare Ghidra decompiler sources
-        shell: bash
-        run: python tools/deps.py ensure-ghidra-sources
+      - uses: ./.github/actions/public-dependencies
+        with:
+          ida: ${{ matrix.ida }}
+          sdk_dir: ${{ matrix.sdk_dir }}
+          sdk_source: ${{ matrix.sdk_source }}
 
       - name: Configure
         shell: bash
-        run: cmake -S . -B "build/ida-${{ matrix.ida }}" -DGHIDRADEC_IDA_VERSION="${{ matrix.ida }}" -DCMAKE_BUILD_TYPE=Release
+        run: |
+          configure_args=(-S . -B "build/ida-${{ matrix.ida }}" -DGHIDRADEC_IDA_VERSION="${{ matrix.ida }}" -DCMAKE_BUILD_TYPE=Release)
+          if [[ -n "${{ matrix.cmake_platform }}" ]]; then
+            configure_args+=(-A "${{ matrix.cmake_platform }}")
+          fi
+          if [[ -n "${{ matrix.cmake_osx_arch }}" ]]; then
+            configure_args+=(-DCMAKE_OSX_ARCHITECTURES="${{ matrix.cmake_osx_arch }}")
+          fi
+          cmake "${configure_args[@]}"
 
       - name: Build
         shell: bash
@@ -66,8 +76,11 @@ jobs:
         shell: bash
         run: cmake --build "build/ida-${{ matrix.ida }}" --config Release --target package_plugins
 
+      - name: Test
+        run: ctest --test-dir "build/ida-${{ matrix.ida }}" -C Release --output-on-failure
+
       - uses: actions/upload-artifact@v4
         with:
-          name: ghidradec-ida${{ matrix.ida }}-${{ matrix.os }}
+          name: ghidradec-ida${{ matrix.ida }}-${{ matrix.os }}-${{ matrix.host_arch }}
           path: build/ida-${{ matrix.ida }}/artifacts/*.zip
           if-no-files-found: error

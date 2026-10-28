@@ -10,7 +10,7 @@ processor modules, navigation, and scripting ecosystem while also having access
 to Ghidra decompilation for processors where Hex-Rays is unavailable or where a
 second decompiler view is useful.
 
-The current mainline target is Ghidra 12.1.x and IDA SDK 9.3. The repository
+The current mainline target is Ghidra 12.2 and IDA SDK 9.5. The repository
 also carries compatibility targets for older IDA SDKs through the manifest in
 `ghidradec.targets.json`.
 
@@ -18,10 +18,14 @@ Author: Gregory Morse.
 
 See `CHANGELOG.md` for release notes.
 
+The [12.2 boundary review](docs/ghidra-12.2-upgrade.md) documents protocol
+changes and tests. The [Windows IDA runtime grid](docs/ida-windows-test-grid.md)
+recommends a reduced set of licensed installations for compatibility testing.
+
 ## Status
 
 * Primary local development target: IDA Pro 9.3, EA64.
-* Default manual CI/release target: the moving public `latest` SDK.
+* Default CI/manual release SDK: pinned public 9.5; `latest` is opt-in.
 * Older IDA SDK artifacts are generated on demand from tagged releases.
 * Build system: CMake, with Visual Studio project files kept under `ide/vs`.
 * Runtime decompiler source: generated under `build/deps/ghidra-decompiler`;
@@ -31,7 +35,7 @@ See `CHANGELOG.md` for release notes.
 
 ## Installation
 
-1. Install or extract a supported Ghidra release.
+1. Install or extract Ghidra 12.2.
 2. Install the plugin binary from a release package, or build it locally.
 3. Copy the plugin into IDA's plugin directory.
 
@@ -61,6 +65,8 @@ Useful environment variables:
 * `GHIDRA_INSTALL_DIR`: extracted Ghidra runtime.
 * `GHIDRADEC_GHIDRA_DIR`: alternate Ghidra runtime override.
 * `GHIDRADEC_TRACE=1`: enables verbose diagnostic trace messages.
+* `GHIDRADEC_NO_THREADS=1`: forces synchronous decompilation. Text-mode IDA
+  and autonomous/batch runs select this behavior automatically.
 * `GHIDRADEC_PROTOCOL_LOG=<path>`: records decompiler protocol traffic for
   debugging regression failures.
 
@@ -101,6 +107,7 @@ Use `ghidradec` instead of `ghidradec64` when binding an EA32 plugin build.
 
 * C++17 compiler.
 * CMake 3.19 or newer.
+* Python 3.10 or newer for SDK resolution and dependency provisioning.
 * IDA SDK selected from `ghidradec.targets.json`.
 * Ghidra source archive or local Ghidra source/install for generated decompiler
   support sources.
@@ -216,7 +223,7 @@ Dependency versions and source archives are pinned in `ghidradec.targets.json`.
 
 Current notable dependencies:
 
-* Ghidra 12.1.x decompiler support sources.
+* Ghidra 12.2 decompiler support sources.
 * RetDec v5.0 config/common/serdes/utils libraries.
 * jsoncpp v1.9.8.
 

@@ -8,6 +8,7 @@
 #include "plugin_config.h"
 #include "decompiler.h"
 #include "sleighinterface.h"
+#include "execution_policy.h"
 
 #if defined(OS_WINDOWS)
 	#include <windows.h>
@@ -329,7 +330,10 @@ bool RdGlobalInfo::isDecompilerInSystemPath()
 
 bool RdGlobalInfo::isUseThreads() const
 {
-	return useThreads;
+	qstring noThreads;
+	const bool forceSynchronous = qgetenv("GHIDRADEC_NO_THREADS", &noThreads) &&
+		!noThreads.empty() && std::string(noThreads.c_str()) != "0";
+	return useDecompilerWorker(useThreads, is_idaq(), batch != 0, forceSynchronous);
 }
 
 void RdGlobalInfo::setIsUseThreads(bool f)
@@ -370,6 +374,11 @@ bool RdGlobalInfo::configureDecompilation()
 	}
 	else
 	{
+		if (!is_idaq() || batch != 0)
+		{
+			WARNING_MSG("Decompilation is not configured. Set GHIDRADEC_GHIDRA_DIR to the Ghidra installation.\n");
+			return true;
+		}
 		WARNING_GUI("Decompilation is not properly configured.\n"
 				"The path to " << decompilerExeName << " must be provided in the configuration menu.");
 		auto canceled = pluginConfigurationMenu(*this);

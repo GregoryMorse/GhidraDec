@@ -333,6 +333,7 @@ ASALocalRun/
 /Tests
 !/tests/
 /tests/*
+!/tests/unit/
 !/tests/ida93/
 !/tests/ida93/*.idc.in
 !/tests/ida93/*.ps1
@@ -350,4 +351,5 @@ ASALocalRun/
 /Debug32EA/GhidraDec.tlog
 /tests/ida93/work/
 /.idasdks/
+/.env.private-sdk
 /idasdks/

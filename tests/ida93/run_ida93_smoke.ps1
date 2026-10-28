@@ -2,7 +2,7 @@ param(
     [string]$IdaDir = "C:\Program Files\IDA Professional 9.3",
     [string]$Database = "",
     [string]$InputFile = "",
-    [string]$GhidraDir = "C:\Users\Gregory\Desktop\Apps\ghidra_12.1.2_PUBLIC",
+    [string]$GhidraDir = $env:GHIDRA_INSTALL_DIR,
     [string]$PluginDll = "",
     [string]$PluginName = "ghidradec64",
     [string]$WorkDir = "",
@@ -59,6 +59,12 @@ if (!(Test-Path -LiteralPath $Database)) {
 }
 if (!(Test-Path -LiteralPath $InputFile)) {
     throw "Input binary was not found: $InputFile"
+}
+if ([string]::IsNullOrWhiteSpace($GhidraDir)) {
+    $GhidraDir = $env:GHIDRADEC_GHIDRA_DIR
+}
+if ([string]::IsNullOrWhiteSpace($GhidraDir)) {
+    throw "Pass -GhidraDir <Ghidra 12.2 installation> or set GHIDRA_INSTALL_DIR."
 }
 if (!(Test-Path -LiteralPath $GhidraDir)) {
     throw "Ghidra directory was not found: $GhidraDir"

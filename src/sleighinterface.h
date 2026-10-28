@@ -290,6 +290,9 @@ public:
 	virtual size_t readDec(void* Buf, size_t MaxCharCount) = 0;
 	virtual size_t writeDec(void const* Buf, size_t MaxCharCount) = 0;
 	virtual void terminate() = 0;
+	virtual void decompilerWarning(const std::string& message) { protocolRecorder(message, false); }
+	// Must unblock a pending read without destroying callback state.
+	virtual void interrupt() { terminate(); }
 };
 
 namespace ghidra {
@@ -307,6 +310,7 @@ class CallbackLoadImage;
 
 class DecompInterface
 {
+	friend struct DecompInterfaceTestAccess;
 
 	DecompileCallback* callback;
 	bool statusGood;     // true if decompiler process is running
@@ -361,7 +365,7 @@ class DecompInterface
 	uchar read();
 	void write(void const* Buf, size_t MaxCharCount);
 	uchar readToBurst();
-	uchar readToBuffer(std::vector<uchar>& buf);
+	uchar readToBuffer(std::vector<uchar>& buf, size_t maxBytes = 0);
 	std::string readQueryString();
 	void generateException();
 	void readToResponse();

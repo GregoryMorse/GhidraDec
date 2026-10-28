@@ -2,9 +2,9 @@
   "schema": 1,
   "project": {
     "name": "GhidraDec",
-    "releaseVersion": "1.0",
-    "defaultIdaSdk": "9.3",
-    "defaultGhidraVersion": "12.1.2"
+    "releaseVersion": "1.1",
+    "defaultIdaSdk": "9.5",
+    "defaultGhidraVersion": "12.2"
   },
   "dependencies": {
     "jsoncpp": {
@@ -263,7 +263,7 @@
     },
     {
       "version": "9.0sp1",
-      "directory": "idasdk90",
+      "directory": "idasdk90sp1",
       "archive": "idasdk90sp1.zip",
       "source": "private-local",
       "enabled": true,
@@ -301,6 +301,56 @@
       "archive": "ida-sdk-v9.3.zip",
       "source": "public-release",
       "url": "https://github.com/HexRaysSA/ida-sdk/archive/refs/tags/v9.3.zip",
+      "enabled": true,
+      "platforms": ["windows", "linux", "macos"],
+      "hostArchitectures": ["x64", "arm64"],
+      "eaModes": [64],
+      "cmakeVariable": "IDA_SDK_DIR"
+    },
+    {
+      "version": "9.3.1-sdk.1",
+      "aliases": ["9.3sp1"],
+      "directory": "idasdk931sdk1",
+      "archive": "ida-sdk-v9.3.1-sdk.1.zip",
+      "source": "public-release",
+      "url": "https://github.com/HexRaysSA/ida-sdk/archive/refs/tags/v9.3.1-sdk.1.zip",
+      "enabled": true,
+      "platforms": ["windows", "linux", "macos"],
+      "hostArchitectures": ["x64", "arm64"],
+      "eaModes": [64],
+      "cmakeVariable": "IDA_SDK_DIR"
+    },
+    {
+      "version": "9.4",
+      "directory": "idasdk94",
+      "archive": "ida-sdk-v9.4.0-release.zip",
+      "source": "public-release",
+      "url": "https://github.com/HexRaysSA/ida-sdk/archive/refs/tags/v9.4.0-release.zip",
+      "enabled": true,
+      "platforms": ["windows", "linux", "macos"],
+      "hostArchitectures": ["x64", "arm64"],
+      "eaModes": [64],
+      "cmakeVariable": "IDA_SDK_DIR"
+    },
+    {
+      "version": "9.4.0-sdk.1",
+      "aliases": ["9.4sp1"],
+      "directory": "idasdk940sdk1",
+      "archive": "ida-sdk-v9.4.0-sdk.1.zip",
+      "source": "public-release",
+      "url": "https://github.com/HexRaysSA/ida-sdk/archive/refs/tags/v9.4.0-sdk.1.zip",
+      "enabled": true,
+      "platforms": ["windows", "linux", "macos"],
+      "hostArchitectures": ["x64", "arm64"],
+      "eaModes": [64],
+      "cmakeVariable": "IDA_SDK_DIR"
+    },
+    {
+      "version": "9.5",
+      "directory": "idasdk95",
+      "archive": "ida-sdk-v9.5.0-release.zip",
+      "source": "public-release",
+      "url": "https://github.com/HexRaysSA/ida-sdk/archive/refs/tags/v9.5.0-release.zip",
       "enabled": true,
       "platforms": ["windows", "linux", "macos"],
       "hostArchitectures": ["x64", "arm64"],

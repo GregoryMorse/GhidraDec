@@ -87,6 +87,16 @@ if(GHIDRADEC_REFRESH_GHIDRA_SOURCES)
 	if(EXISTS "${GHIDRA_DECOMPILER_CPP_DIR}/../zlib/zlib.h")
 		file(COPY "${GHIDRA_DECOMPILER_CPP_DIR}/../zlib" DESTINATION "${GHIDRADEC_GHIDRA_DECOMPILE_DIR}")
 	endif()
+else()
+	set(_ghidra_stamp "${GHIDRADEC_GHIDRA_DECOMPILE_DIR}/../source-version.json")
+	if(NOT EXISTS "${_ghidra_stamp}")
+		message(FATAL_ERROR "Unversioned Ghidra sources. Run python tools/deps.py ensure-ghidra-sources --version ${GHIDRA_VER}.")
+	endif()
+	file(READ "${_ghidra_stamp}" _ghidra_metadata)
+	string(JSON _ghidra_source_version GET "${_ghidra_metadata}" version)
+	if(NOT _ghidra_source_version STREQUAL GHIDRA_VER)
+		message(FATAL_ERROR "Ghidra source version ${_ghidra_source_version} does not match requested ${GHIDRA_VER}. Run python tools/deps.py ensure-ghidra-sources --version ${GHIDRA_VER}.")
+	endif()
 endif()
 
 # Set the default build type to 'Release'
@@ -100,6 +110,21 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
+
+find_package(Threads REQUIRED)
+include(CTest)
+if(BUILD_TESTING)
+	find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+	add_executable(command_timeout_test tests/unit/command_timeout.cpp)
+	target_include_directories(command_timeout_test PRIVATE src)
+	target_link_libraries(command_timeout_test PRIVATE Threads::Threads)
+	add_test(NAME command_timeout COMMAND command_timeout_test)
+	add_executable(execution_policy_test tests/unit/execution_policy.cpp)
+	target_include_directories(execution_policy_test PRIVATE src)
+	add_test(NAME execution_policy COMMAND execution_policy_test)
+	add_test(NAME build_helpers COMMAND "${Python3_EXECUTABLE}" -m unittest discover
+		-s "${CMAKE_SOURCE_DIR}/tests/unit" -p "test_*.py")
+endif()
 
 # Check that obligatory parameters were defined.
 ghidradec_manifest_resolve_ida_sdk("${GHIDRADEC_IDA_VERSION}")
@@ -264,7 +289,6 @@ set(IDAPLUGIN_SOURCES
 	src/defs.cpp
 	src/idaplugin.cpp
 	src/plugin_config.cpp
-	src/sleighinterface.cpp
 )
 
 set(GHIDRA_SLEIGH_SOURCES
@@ -325,10 +349,24 @@ foreach(_ghidradec_required_source IN LISTS GHIDRADEC_REQUIRED_DECOMPILER_SOURCE
 endforeach()
 
 # GhidraDec idaplugin libs.
+add_library(ghidradec_protocol STATIC src/sleighinterface.cpp ${GHIDRA_SLEIGH_SOURCES} ${GHIDRA_CORE_SOURCES} ${GHIDRA_LIBSLA_NAMES} ${GHIDRA_ZLIB_SOURCES})
+set_target_properties(ghidradec_protocol PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(ghidradec_protocol PUBLIC Threads::Threads)
+target_compile_options(ghidradec_protocol PRIVATE
+	$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-include>
+	$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:cstdint>
+)
+if(BUILD_TESTING)
+	add_executable(protocol_response_test tests/unit/protocol_response.cpp)
+	target_include_directories(protocol_response_test PRIVATE src)
+	target_link_libraries(protocol_response_test PRIVATE ghidradec_protocol Threads::Threads)
+	add_test(NAME protocol_response COMMAND protocol_response_test)
+endif()
+
 set(GHIDRADEC_PLUGIN_TARGETS)
 
 function(ghidradec_add_idaplugin TARGET_NAME EA_MODE IDA_LIBRARY OUTPUT_NAME)
-	add_library(${TARGET_NAME} SHARED ${IDAPLUGIN_SOURCES} ${GHIDRA_SLEIGH_SOURCES} ${GHIDRA_CORE_SOURCES} ${GHIDRA_LIBSLA_NAMES} ${GHIDRA_ZLIB_SOURCES})
+	add_library(${TARGET_NAME} SHARED ${IDAPLUGIN_SOURCES})
 	target_compile_options(${TARGET_NAME} PRIVATE
 		$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-include>
 		$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:cstdint>
@@ -346,7 +384,7 @@ function(ghidradec_add_idaplugin TARGET_NAME EA_MODE IDA_LIBRARY OUTPUT_NAME)
 		target_compile_definitions(${TARGET_NAME} PUBLIC __EA64__)
 	endif()
 
-	target_link_libraries(${TARGET_NAME} retdec jsoncpp "${IDA_LIBRARY}")
+	target_link_libraries(${TARGET_NAME} ghidradec_protocol retdec jsoncpp "${IDA_LIBRARY}")
 	if(WIN32)
 		# shlwapi.dll for PathRemoveFileSpec() used in utilsl/filesystem_path.h
 		target_link_libraries(${TARGET_NAME} shlwapi)

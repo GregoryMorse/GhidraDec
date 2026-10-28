@@ -1,0 +1,32 @@
+name: Public dependencies
+description: Cache only public SDKs and versioned Ghidra support sources
+inputs:
+  ida:
+    required: true
+    description: Canonical SDK version
+  sdk_dir:
+    required: true
+    description: SDK directory in .idasdks
+  sdk_source:
+    required: true
+    description: SDK source classification
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v4
+      if: ${{ inputs.sdk_source == 'public-release' }}
+      with:
+        path: .idasdks/${{ inputs.sdk_dir }}
+        key: public-sdk-${{ runner.os }}-${{ inputs.ida }}-${{ hashFiles('ghidradec.targets.json', 'tools/ida_sdk.py') }}
+    - shell: bash
+      env:
+        IDA_VERSION: ${{ inputs.ida }}
+      run: python tools/ida_sdk.py ensure --version "$IDA_VERSION"
+    - uses: actions/cache@v4
+      with:
+        path: |
+          build/deps/ghidra-decompiler
+          build/deps/downloads
+        key: public-deps-${{ runner.os }}-${{ hashFiles('ghidradec.targets.json', 'tools/deps.py', 'deps/**/CMakeLists.txt') }}
+    - shell: bash
+      run: python tools/deps.py ensure-ghidra-sources

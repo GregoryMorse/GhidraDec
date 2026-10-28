@@ -575,6 +575,16 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 		if (recfp != nullptr) { qfclose(recfp); recfp = nullptr; }
 		stopDecompilation(di, false, false, true);
 	}
+	void IdaCallback::interrupt()
+	{
+		// Leave pipe/log ownership with the command thread until its read returns.
+		if (di->decompPid)
+			term_process(di->hDecomp);
+	}
+	void IdaCallback::decompilerWarning(const std::string& message)
+	{
+		WARNING_MSG(message << "\n");
+	}
 	void IdaCallback::getInits(std::vector<InitStateItem>& inits)
 	{
 		//inf_start_ea == ea; inf.start_ss; inf.start_sp;
@@ -3413,7 +3423,7 @@ inf_is_64bit() ? 8 : 2, inf.cc.size_ldbl,                   ph.max_ptr_size(),  
 	};
 	void IdaCallback::executeOnMainThread(std::function<void()> fun, const char* label)
 	{
-		if (is_main_thread() || liveCallbackRegressionMode())
+		if (is_main_thread())
 		{
 			try {
 				fun();
@@ -5151,6 +5161,7 @@ void decompileInput(RdGlobalInfo &decompInfo)
 	}
 	else
 	{
+		TRACE_MSG("Running decompilation synchronously on IDA's calling thread\n");
 		threadFunc(static_cast<void*>(&decompInfo));
 	}
 }

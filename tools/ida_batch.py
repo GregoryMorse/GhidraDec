@@ -373,6 +373,8 @@ def classify_run_result(exit_code: int, log_path: Path, output_path: Path) -> tu
     for pattern in QUALITY_FAILURE_PATTERNS:
         if pattern in combined:
             return "graceful_fail", pattern
+    if re.search(r"(?m)^\s*case\s*:", output_text):
+        return "graceful_fail", "switch case label has no value"
     incomplete = find_incomplete_decompile_all(combined)
     if incomplete is not None:
         return "graceful_fail", incomplete

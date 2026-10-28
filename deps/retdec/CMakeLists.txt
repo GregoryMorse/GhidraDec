@@ -3,6 +3,7 @@ include(ExternalProject)
 ExternalProject_Add(retdec-project
 	URL ${GHIDRADEC_RETDEC_URL}
 	URL_HASH SHA256=${GHIDRADEC_RETDEC_SHA256}
+	DOWNLOAD_DIR "${GHIDRADEC_GENERATED_DEPS_DIR}/downloads"
 	DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 	# Disable the configure step.
         CONFIGURE_COMMAND ""

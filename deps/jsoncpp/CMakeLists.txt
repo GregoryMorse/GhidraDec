@@ -3,6 +3,7 @@ include(ExternalProject)
 ExternalProject_Add(jsoncpp-project
 	URL ${GHIDRADEC_JSONCPP_URL}
 	URL_HASH SHA256=${GHIDRADEC_JSONCPP_SHA256}
+	DOWNLOAD_DIR "${GHIDRADEC_GENERATED_DEPS_DIR}/downloads"
 	DOWNLOAD_NAME jsoncpp.zip
 	DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 	# We build the three jsoncpp sources as part of the top-level project.

@@ -92,6 +92,8 @@ namespace idaplugin {
 		size_t writeDec(void const* Buf, size_t MaxCharCount);
 		void protocolRecorder(std::string data, bool bWrite);
 		void terminate();
+		void interrupt() override;
+		void decompilerWarning(const std::string& message) override;
 		void getInits(std::vector<InitStateItem>& inits);
 		std::string getPcodeInject(int type, std::string name, AddrInfo addr, std::string fixupbase, unsigned long long fixupoffset);
 		void getCPoolRef(const std::vector<unsigned long long>& refs, CPoolRecord& rec);

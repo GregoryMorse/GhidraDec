@@ -55,6 +55,7 @@ def cmake_command() -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ida-version", default="", help="IDA SDK version from ghidradec.targets.json")
+    parser.add_argument("--ghidra-version", default="", help="Ghidra version; defaults to the target manifest")
     parser.add_argument("--build-dir", default="", help="CMake build directory. Defaults to build/matrix/ida-<version>.")
     parser.add_argument("--config", default="Release")
     parser.add_argument("--generator", default="")
@@ -66,9 +67,12 @@ def main() -> int:
     args = parser.parse_args()
 
     ida_version = args.ida_version or default_ida_version()
+    ghidra_version = args.ghidra_version or json.loads(
+        (ROOT / "ghidradec.targets.json").read_text(encoding="utf-8"))["project"]["defaultGhidraVersion"]
     build_dir = args.build_dir or default_build_dir(ida_version)
     cmake = cmake_command()
     run([sys.executable, "tools/ida_sdk.py", "ensure", "--version", ida_version])
+    run([sys.executable, "tools/deps.py", "ensure-ghidra-sources", "--version", ghidra_version])
 
     configure = [cmake]
     if args.generator:
@@ -83,6 +87,7 @@ def main() -> int:
         "-B",
         build_dir,
         f"-DGHIDRADEC_IDA_VERSION={ida_version}",
+        f"-DGHIDRA_VER={ghidra_version}",
         f"-DCMAKE_BUILD_TYPE={args.config}",
         f"-DGHIDRADEC_AUTO_DEPLOY={'ON' if args.deploy else 'OFF'}",
     ])

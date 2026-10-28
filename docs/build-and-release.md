@@ -4,23 +4,58 @@
 platforms, EA modes, and source dependency artifacts.
 
 Public IDA SDKs are downloaded from the Hex-Rays `ida-sdk` GitHub repository.
-IDA 9.2 and 9.3 are pinned in the manifest. IDA 9.4 and newer public release
-SDKs are generated from the Hex-Rays tag pattern, so `--versions 9.4` resolves
-to `v9.4.0-release`, `9.5` resolves to `v9.5.0-release`, and so on. `latest`
+IDA 9.2 through 9.5, including the published SDK revisions, are pinned in the
+manifest. Future public SDKs are generated from the Hex-Rays tag pattern, so
+`--versions 9.6` resolves to `v9.6.0-release`. `latest`
 follows the repository's master branch and is intentionally moving. Older SDKs
 must stay private: place local archives in `.idasdks` or pass an explicit SDK
 path with `IDA_SDK_DIR` / `IDA_SDK_DIR32`. Do not commit IDA SDK archives,
 encrypted or otherwise.
 
+Short revision selectors are supported in both Actions' `ida_versions` input
+and local `--ida-version`/`--version` options:
+
+| Input | Upstream Tag | Canonical Package Version |
+| --- | --- | --- |
+| `9.4` | `v9.4.0-release` | `9.4` |
+| `9.4sp1` | `v9.4.0-sdk.1` | `9.4.0-sdk.1` |
+| `9.3sp1` | `v9.3.1-sdk.1` | `9.3.1-sdk.1` |
+| `9.5` | `v9.5.0-release` | `9.5` |
+
+`spN` here is a **selector convenience for SDK revision N**, not a claim that
+Hex-Rays released a product named IDA 9.4 SP1. An exact tag such as
+`v9.4.0-sdk.1` is also accepted. Future `9.6sp2` follows
+`v9.6.0-sdk.2`; add a manifest alias when upstream changes the patch number,
+as it did for 9.3. Inspect a resolution without downloading:
+
+```bash
+python tools/ida_sdk.py describe --version 9.4sp1
+python tools/ida_sdk.py matrix --versions 9.4,9.4sp1,9.5
+```
+
+Python 3.10+ is required. CMake invokes the same resolver as the matrix, so SDK
+aliases cannot accidentally select a different directory or package name.
+
 ## Local Build
 
 ```bash
-python tools/build.py --ida-version 9.3
+python tools/build.py --ida-version 9.5
+python tools/build.py --ida-version 9.4sp1
 python tools/build.py --ida-version latest
 ```
 
 The helper downloads/extracts public SDKs into `.idasdks` and then configures
 CMake with `GHIDRADEC_IDA_VERSION`.
+It also provisions Ghidra 12.2 support sources. Generated subsets carry a
+`source-version.json` marker: a 12.1 subset is not reused for a 12.2 build.
+An old CMake build directory with a cached `GHIDRA_VER` must be reconfigured
+with `-DGHIDRA_VER=12.2`; the build helper sets this explicitly.
+
+An installed runtime that includes sources avoids downloading another archive:
+
+```bash
+python tools/deps.py ensure-ghidra-sources --source-dir /path/to/ghidra_12.2_PUBLIC/Ghidra/Features/Decompiler/src/decompile/cpp
+```
 
 ## Legacy SDK Builds
 
@@ -53,7 +88,7 @@ python tools/ida_sdk.py matrix --all --include-private
 ```
 
 By default, the matrix emits only the manifest's `defaultIdaSdk`, currently
-IDA SDK 9.3. Use `--versions` for a comma-separated backfill set, future public
+IDA SDK 9.5. Use `--versions` for a comma-separated backfill set, future public
 tags such as `9.4`, major groups `6`, `7`, `8`, or `9`, or `--all` for every
 enabled manifest target. Use
 `--include-private` only for local or private-runner builds where the required
@@ -67,9 +102,10 @@ limit a backfill run when you do not want both macOS packages.
 
 ## GitHub Actions
 
-Manual CI and release runs build the moving public `latest` SDK by default.
-Runs can set `ida_versions` to `9.2`, `9.3`, `9.4`, future public release SDKs
-such as `9.5`, a legacy SDK such as `7.7`, a major group such as `8`, a
+CI and manual release runs build the pinned public `9.5` SDK by default.
+Tag pushes build all six pinned public SDK variants (9.2, 9.3, 9.3sp1, 9.4,
+9.4sp1 and 9.5). Runs can set `ida_versions` to these versions, an exact
+public tag, `latest`, a legacy SDK such as `7.7`, a major group such as `8`, a
 comma-separated list, or `all`.
 
 The release workflow only runs on tagged refs. For an on-demand backfill, open
@@ -91,9 +127,15 @@ old assets or want to regenerate them.
 always rebuild `latest`, and the publish job replaces existing
 `ghidradec-idalatest-*` assets with `gh release upload --clobber`.
 
-The release build matrix runs sequentially. This keeps `all` backfills gentle on
-temporary SDK tunnels and avoids many GitHub runners downloading private SDK
-archives at the same time.
+Public SDKs and Ghidra support sources are cached by version/provisioner.
+Public RetDec/jsoncpp download archives share a build-local cache as well.
+`latest` is never restored from an immutable SDK cache.
+**Private SDK archives and extracted trees are never put in Actions caches
+or workflow artifacts**, because caches in a public repository must not become
+a licensed-SDK distribution channel.
+
+Manual release backfills run sequentially to keep temporary SDK tunnels gentle.
+Automatic public-SDK tag builds use up to four concurrent jobs.
 
 ### Temporary Private SDK URL
 
@@ -124,6 +166,13 @@ The workflow masks both fields in logs before downloading. If a private SDK is
 requested without a reachable `private_sdk_base_url`, the build fails with a
 clear setup error instead of silently skipping the asset.
 
+Microsoft Dev Tunnels can expose the same localhost server. Keep private
+backfills deferred until the public-SDK staging matrix is green. An optional
+local `.env.private-sdk` is ignored by Git; never commit tunnel credentials.
+Use tunnel client authentication or the SDK server's independent bearer token,
+and stop hosting when the backfill completes. Public dependencies and completed
+plugin artifacts should be reused before spending more tunnel bandwidth.
+
 Private SDK downloads retry transient tunnel failures such as HTTP 429 and 5xx
 responses. The workflow defaults are intentionally patient for long `all`
 backfills. Locally, use `tools/ida_sdk.py fetch-private --retries N
@@ -134,7 +183,7 @@ Legacy SDK backfills should be built locally from licensed SDK archives and then
 uploaded to the tagged GitHub Release, for example:
 
 ```bash
-python tools/ida_sdk.py release-backfill --tag v1.0
+python tools/ida_sdk.py release-backfill --tag v1.1
 ```
 
 By default, `release-backfill` builds every private/local SDK target for the
@@ -145,6 +194,25 @@ a packaging-only dry run.
 
 This keeps permanent release assets available to everyone without redistributing
 IDA SDK source material.
+
+Each new GhidraDec tag needs newly compiled legacy plugin binaries. Do not copy
+v1.0 plugin ZIPs into v1.1: they still embed the old Ghidra support sources.
+The private set currently includes **6.x through 9.1**, not just pre-9.0.
+To minimize reverse-tunnel data, build on a licensed local/self-hosted machine
+with a persistent `GHIDRADEC_IDA_SDK_CACHE` and upload only the plugin ZIPs.
+If using hosted runners instead, fetch each SDK on demand through the temporary
+authenticated tunnel and stop it once all jobs finish. Do not leave the SDK
+server exposed for future backfills.
+
+SDK-free helper/policy checks are registered with CTest after configuration:
+
+```bash
+python -m unittest discover -s tests/unit -p "test_*.py"
+ctest --test-dir build/matrix/ida-9.5 -C Release --output-on-failure
+```
+
+For licensed runtime selection and the difference between idat and idalib, see
+[`ida-windows-test-grid.md`](ida-windows-test-grid.md).
 
 Release package names include the IDA SDK version, target OS, linked IDA host
 architecture, and included EA modes, for example

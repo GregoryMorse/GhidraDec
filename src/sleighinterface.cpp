@@ -44,6 +44,8 @@
 #include <iomanip>
 
 #include "sleighinterface.h"
+#include "command_timeout.h"
+#include "function_mapping.h"
 
 using namespace ghidra;
 using namespace std;
@@ -1143,12 +1145,13 @@ uchar DecompInterface::readToBurst() {
 	return -1;
 }
 
-uchar DecompInterface::readToBuffer(std::vector<uchar>& buf) {
+uchar DecompInterface::readToBuffer(std::vector<uchar>& buf, size_t maxBytes) {
+	const size_t limit = maxBytes != 0 ? maxBytes : static_cast<size_t>(maxResultSizeMBYtes) * 1024 * 1024;
 	uchar cur;
 	for (;;) {
 		cur = read();
 		while (cur > 0) {
-			if (buf.size() >= (maxResultSizeMBYtes << 20))
+			if (buf.size() >= limit)
 				throw DecompError("Maximum payload size exceeded");
 			buf.push_back((uchar)cur);
 			cur = read();
@@ -2212,6 +2215,7 @@ std::vector<uchar> DecompInterface::readResponse() {
 	std::vector<uchar> buf;
 	bool bufferActive = false;
 	std::string addrstring;
+	std::string nativeError;
 	while (type != 7) {
 		switch (type) {
 		case 4:
@@ -2402,7 +2406,19 @@ std::vector<uchar> DecompInterface::readResponse() {
 							escapeCStr(msi.name) + "\")", false);
 						std::ostringstream packedResponse;
 						PackedEncode encoder(packedResponse);
-						if (msi.kind == KIND_FUNCTION && msi.entryPoint == addr.offset) {
+						FunctionQueryMapping functionMapping{false, 0, addr.offset};
+						if (msi.kind == KIND_FUNCTION) {
+							functionMapping = functionQueryMapping(msi, addr);
+							if (functionMapping.symbol && msi.entryPoint != addr.offset) {
+								MappedSymbolInfo entryInfo = { KIND_HOLE };
+								callback->getMappedSymbol(AddrInfo{addr.space, msi.entryPoint}, entryInfo);
+								if (entryInfo.kind == KIND_FUNCTION && entryInfo.entryPoint == msi.entryPoint)
+									msi = entryInfo;
+								else
+									functionMapping.symbol = false;
+							}
+						}
+						if (msi.kind == KIND_FUNCTION && functionMapping.symbol) {
 							std::string symbolName = getFunctionSymbolName(msi.name, msi.entryPoint);
 							ScopedSymbolName scopedName = getScopedSymbolName(symbolName);
 							std::string symbolKey = std::to_string(scopedName.scopeId) + ":" + scopedName.name;
@@ -2413,30 +2429,15 @@ std::vector<uchar> DecompInterface::readResponse() {
 							encoder.openElement(ELEM_RESPONSE_FUNCTION);
 							encoder.writeString(ATTRIB_NAME, scopedName.name);
 							encoder.writeUnsignedInteger(ATTRIB_ID, symbolIds[symbolKey]);
-							// Match Ghidra's DecompileCallback.encodeFunction(): the function
-							// symbol is mapped only over the queried entry byte, not the whole
-							// function body. Interior body queries are represented as holes.
-							uintb mapSize = (addr.space == queryAddr.getSpace()->getName() &&
-								addr.offset >= msi.entryPoint && addr.offset < msi.entryPoint + 8)
-								? (addr.offset - msi.entryPoint + 1) : 1;
+							uintb mapSize = functionMapping.size;
+							Address functionAddr(queryAddr.getSpace(), msi.entryPoint);
 							encoder.writeSignedInteger(ATTRIB_SIZE, mapSize);
-							queryAddr.encode(encoder);
+							functionAddr.encode(encoder);
 							if (msi.func.isNoReturn)
 								encodePackedNoReturnPrototype(encoder, msi.func);
 							encoder.closeElement(ELEM_RESPONSE_FUNCTION);
-							queryAddr.encode(encoder, mapSize);
+							functionAddr.encode(encoder, mapSize);
 							encoder.openElement(ELEM_RESPONSE_RANGELIST);
-							for (std::vector<RangeInfo>::iterator iter = msi.ranges.begin();
-								iter != msi.ranges.end(); ++iter) {
-								AddrSpace* rangeSpace = trans->getSpaceByName(iter->space);
-								if (rangeSpace == nullptr || iter->endoffset < iter->beginoffset)
-									continue;
-								encoder.openElement(ELEM_RESPONSE_RANGE);
-								encoder.writeSpace(ATTRIB_SPACE, rangeSpace);
-								encoder.writeUnsignedInteger(ATTRIB_FIRST, iter->beginoffset);
-								encoder.writeUnsignedInteger(ATTRIB_LAST, iter->endoffset);
-								encoder.closeElement(ELEM_RESPONSE_RANGE);
-							}
 							encoder.closeElement(ELEM_RESPONSE_RANGELIST);
 							encoder.closeElement(ELEM_RESPONSE_MAPSYM);
 							encoder.closeElement(ELEM_RESPONSE_SCOPE);
@@ -2493,17 +2494,10 @@ std::vector<uchar> DecompInterface::readResponse() {
 								uintb last = queryAddr.getOffset();
 								bool readOnly = msi.readonly;
 								bool volatil = msi.volatil;
-								if (msi.kind == KIND_FUNCTION && msi.entryPoint != addr.offset) {
-									std::vector<RangeInfo>::iterator iter = msi.ranges.begin();
-									for (; iter != msi.ranges.end(); iter++) {
-										if (addr.offset >= iter->beginoffset && addr.offset <= iter->endoffset) {
-											first = iter->beginoffset;
-											last = iter->endoffset;
-											readOnly = true;
-											volatil = false;
-											break;
-										}
-									}
+								if (msi.kind == KIND_FUNCTION) {
+									last = functionMapping.holeEnd;
+									readOnly = true;
+									volatil = false;
 								}
 								if (msi.kind == KIND_HOLE)
 									registerContainingHole(trans, queryAddr, first, last);
@@ -3515,12 +3509,13 @@ query_response_written:
 			buf.shrink_to_fit();
 			bufferActive = false;
 			break;
-		case 16:			// Beginning of any native message from the decompiler
+		case 16:			// Ghidra 12.2 error channel (warnings use 18/19).
 			//if (buf.capacity() != 0)
 				//throw DecompError(("Nested decompiler output");
 					// if buf is non-null, then res was interrupted
 					// so we just throw out the partial result
 					//buf = LimitedByteBuffer(64, 1 << 20);
+			buf.clear();
 			buf.reserve(64);
 			bufferActive = true;
 			break;
@@ -3528,24 +3523,19 @@ query_response_written:
 			if (!bufferActive) { //== nullptr...
 				throw DecompError("Mismatched message header");
 			}
-			//callback.setNativeMessage(buf.toString());
-			//callback->status("Decompiler response: " + std::string(buf.begin(), buf.end()));
-			//this is the one case where the process does not need to be relaunched...
-			if (buf.size() != 0) { //can enhance if resbuf contains partial output?
-				//always "\r\n" at start of message?
-				//need to replace all new lines with "//"
-				size_t msgStart = (buf.size() >= 2 && buf[0] == '\r' && buf[1] == '\n') ? 2 : 0;
-				std::replace_if(buf.begin() + msgStart, buf.end(),
-					[](uchar it) { return it == '\n'; }, ' ');
-				std::string str = "\n\n\n<doc><function/><function><comment color=\"comment\">\n"
-					"//Decompiler native message: " + std::string(buf.begin() + msgStart, buf.end()) +
-					"\n</comment></function></doc>";
-				retbuf = std::vector<uchar>(str.begin(), str.end());
-			}
+			nativeError.assign(buf.begin(), buf.end());
 			buf.clear();
 			buf.shrink_to_fit();
 			bufferActive = false;
 			break;
+		case 18:
+		{
+			std::vector<uchar> warning;
+			if (readToBuffer(warning, 1 << 16) != 19)
+				throw DecompError("Mismatched informational message header");
+			callback->decompilerWarning(std::string(warning.begin(), warning.end()));
+			break;
+		}
 		default:
 			throw DecompError("GHIDRA/decompiler alignment error");
 
@@ -3564,6 +3554,8 @@ query_response_written:
 			callback->protocolRecorder("buffereddata(\"" + escapeCStr(std::string(buf.begin() + pos, buf.end())) + "\")", false);
 		}
 	}
+	if (!nativeError.empty())
+		throw DecompError(nativeError);
 	return retbuf;
 }
 
@@ -4428,9 +4420,8 @@ std::vector<uchar> DecompInterface::sendCommand1ParamTimeout(std::string command
 		throw DecompError(command + " called on bad process");
 	}
 	std::vector<uchar> resbuf;
-	auto err = std::make_shared<std::string>();
-	std::packaged_task<std::vector<uchar>(std::string, std::string)>
-		task([err, this] (std::string command, std::string param) -> std::vector<uchar> {
+	std::string err;
+	auto task = [&err, this] (std::string command, std::string param) -> std::vector<uchar> {
 		try {
 			write(command_start, sizeof(command_start));
 			writeString(command);
@@ -4440,41 +4431,36 @@ std::vector<uchar> DecompInterface::sendCommand1ParamTimeout(std::string command
 			callback->protocolRecorder("command(\"" + escapeCStr(command) + "\", \"" + escapeCStr(std::to_string(archId)) + "\", \"" + escapeCStr(param) + "\")", true);
 			return readResponse();
 		} catch (BadDataError& e) {
-			*err = e.explain;
+			err = e.explain;
 			statusGood = false;
 			return std::vector<uchar>();
 		} catch (SleighError& e) { //register lookup error
-			*err = e.explain;
+			err = e.explain;
 			statusGood = false;
 			return std::vector<uchar>();
 		} catch (DecompError& e) {
-			*err = e.explain;
+			err = e.explain;
 			statusGood = false;
 			return std::vector<uchar>();
 		} catch (std::exception& e) {
-			*err = e.what();
+			err = e.what();
 			statusGood = false;
 			return std::vector<uchar>();
 		} catch (...) {
-			*err = "Unknown decompiler worker exception";
+			err = "Unknown decompiler command exception";
 			statusGood = false;
 			return std::vector<uchar>();
 		}
-	});
-	std::future<std::vector<uchar>> future = task.get_future();
-	std::thread t(std::move(task), command, param);
-	//GetProcessMemoryInfo?
-	std::future_status status = future.wait_for(std::chrono::seconds(timeoutSecs));
-	if (status != std::future_status::ready) {
+	};
+	CommandDeadline deadline(std::chrono::seconds(timeoutSecs), [this]() { callback->interrupt(); });
+	resbuf = task(command, param);
+	if (deadline.finish()) {
 		callback->protocolRecorder("exception(\"Timeout\", \"" + escapeCStr(command) + " timed out after " + std::to_string(timeoutSecs) + " seconds\")", true);
 		callback->terminate();
-		t.detach();
 		statusGood = false;
 		throw DecompError("process timeout");
 	}
-	resbuf = future.get();
-	t.join();
-	if (err->size() != 0) throw DecompError(*err);
+	if (!err.empty()) throw DecompError(err);
 	return resbuf;
 }
 
@@ -4920,7 +4906,7 @@ std::string DecompInterface::convertSourceDoc(Element* el,
 			//"funcname"
 			s += el->getContent();
 			displayXml += callback->emit(el->getName(), getHasAttributeValue(el, "color"), el->getContent());
-		} else if (el->getName() == "label") {
+		} else if (el->getName() == "label" || el->getName() == "value") {
 			s += el->getContent();
 			displayXml += callback->emit(el->getName(), getHasAttributeValue(el, "color"), el->getContent());
 		} else if (el->getName() == "field") {

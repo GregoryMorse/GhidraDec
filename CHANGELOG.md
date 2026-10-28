@@ -2,6 +2,26 @@
 
 All notable user-facing changes are tracked here.
 
+## v1.1 - 2026-10-28
+
+* Updated the supported Ghidra runtime and build sources to 12.2.
+* Matched 12.2 warning/error framing and function-entry/offcut mapping rules;
+  added real-parser protocol regressions and a documented upstream boundary audit.
+* Fixed dropped switch case/default label tokens and reject empty case labels
+  in the regression output-quality gate.
+* Fixed text-mode/autonomous IDA worker deadlocks (issue #9); headless runs
+  no longer need a regression-test flag. Added `GHIDRADEC_NO_THREADS=1`.
+  Protocol callbacks now stay on the invoking thread; a watchdog only interrupts
+  the child process on timeout, with no detached protocol worker.
+* Added SDK revision aliases such as `9.4sp1` and exact upstream tag inputs,
+  including the exceptional `9.3sp1` -> `v9.3.1-sdk.1` mapping.
+* Pinned the default public SDK to 9.5 and included 9.3/9.4 SDK-only revisions
+  in the manifest. CMake and Actions now share one SDK resolver.
+* Made generated Ghidra sources version-aware, separated the 9.0sp1 SDK cache,
+  and added public-only Actions dependency caches. Private SDKs are not cached.
+* Added build-helper and execution-policy regression tests and a recommended
+  minimal Windows IDA runtime grid in `docs/ida-windows-test-grid.md`.
+
 ## v1.0 - 2026-07-03
 
 This is the first major release after `v0.4`. The project has been substantially

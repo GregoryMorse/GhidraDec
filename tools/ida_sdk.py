@@ -56,10 +56,14 @@ def host_platform() -> str:
 
 
 def find_sdk(manifest: dict, version: str) -> dict:
+    selector = version.strip().removeprefix("v").lower()
     for sdk in manifest["idaSdks"]:
-        if sdk["version"] == version:
+        if selector in {sdk["version"], *sdk.get("aliases", [])}:
             return sdk
-    if sdk := synthesize_public_tagged_sdk(version):
+    if sdk := synthesize_public_tagged_sdk(selector):
+        for known in manifest["idaSdks"]:
+            if known["version"] == sdk["version"]:
+                return known
         return sdk
     raise SystemExit(f"IDA SDK {version} is not defined in {MANIFEST}")
 
@@ -121,18 +125,18 @@ def synthesize_public_tagged_sdk(selector: str) -> dict | None:
     value = selector.strip()
     if value.startswith("v"):
         value = value[1:]
-    match = re.fullmatch(r"9\.(\d+)(?:\.(\d+))?(?:-(release|sdk\.\d+))?", value)
+    match = re.fullmatch(r"(\d+)\.(\d+)(?:\.(\d+))?(?:(?:-(release|sdk\.\d+))|(?:sp([1-9]\d*)))?", value)
     if not match:
         return None
 
-    minor = int(match.group(1))
-    patch = int(match.group(2) or "0")
-    suffix = match.group(3) or "release"
-    if (9, minor) < PUBLIC_TAGGED_SDK_MINIMUM:
+    major, minor = int(match.group(1)), int(match.group(2))
+    patch = int(match.group(3) or "0")
+    suffix = match.group(4) or (f"sdk.{match.group(5)}" if match.group(5) else "release")
+    if (major, minor) < PUBLIC_TAGGED_SDK_MINIMUM:
         return None
 
-    tag = f"v9.{minor}.{patch}-{suffix}"
-    version = f"9.{minor}" if patch == 0 and suffix == "release" else f"9.{minor}.{patch}-{suffix}"
+    tag = f"v{major}.{minor}.{patch}-{suffix}"
+    version = f"{major}.{minor}" if patch == 0 and suffix == "release" else f"{major}.{minor}.{patch}-{suffix}"
     directory_suffix = re.sub(r"[^0-9A-Za-z]+", "", version)
     return {
         "version": version,
@@ -148,25 +152,28 @@ def synthesize_public_tagged_sdk(selector: str) -> dict | None:
     }
 
 
-def expand_version_selectors(selectors: set[str], known_versions: set[str]) -> tuple[set[str], dict[str, dict]]:
+def expand_version_selectors(selectors: set[str], manifest: dict) -> tuple[set[str], dict[str, dict]]:
+    known_versions = {sdk["version"] for sdk in manifest["idaSdks"]}
     expanded = set()
     dynamic_sdks = {}
     unknown = set()
     for selector in selectors:
-        if selector in known_versions:
-            expanded.add(selector)
-        elif selector in {"6", "7", "8", "9"}:
+        if selector in {"6", "7", "8", "9", "10"}:
             expanded.update(version for version in known_versions if sdk_version_major(version) == selector)
-        elif sdk := synthesize_public_tagged_sdk(selector):
-            expanded.add(sdk["version"])
-            dynamic_sdks[sdk["version"]] = sdk
         else:
-            unknown.add(selector)
+            try:
+                sdk = find_sdk(manifest, selector)
+            except SystemExit:
+                unknown.add(selector)
+                continue
+            expanded.add(sdk["version"])
+            if sdk["version"] not in known_versions:
+                dynamic_sdks[sdk["version"]] = sdk
     if unknown:
         raise SystemExit(
             "Unknown IDA SDK version selector(s): "
             + ", ".join(sorted(unknown))
-            + ". Use exact versions, future public tags such as 9.4, latest, major groups 6/7/8/9, or all."
+            + ". Use versions such as 9.5, 9.4sp1, exact public tags, latest, major groups 6/7/8/9/10, or all."
         )
     return expanded, dynamic_sdks
 
@@ -270,7 +277,7 @@ def selected_matrix_entries(
 
     sdk_entries = list(manifest["idaSdks"])
     known_versions = {sdk["version"] for sdk in sdk_entries}
-    versions, dynamic_sdks = expand_version_selectors(versions, known_versions)
+    versions, dynamic_sdks = expand_version_selectors(versions, manifest)
     for version, sdk in dynamic_sdks.items():
         if version not in known_versions:
             sdk_entries.append(sdk)
@@ -333,13 +340,13 @@ def has_existing_release_asset(entry: dict, existing_assets: set[str]) -> bool:
     return entry.get("asset_name", "") in existing_assets
 
 
-def extract_archive(archive: Path, destination_root: Path, directory: str) -> Path:
+def extract_archive(archive: Path, destination_root: Path, directory: str, refresh: bool = False) -> Path:
     if not archive.exists():
         raise SystemExit(f"Archive not found: {archive}")
 
     destination_root.mkdir(parents=True, exist_ok=True)
     sdk_dir = destination_root / directory
-    if sdk_dir.exists() and (sdk_dir / "include" / "ida.hpp").exists():
+    if not refresh and sdk_dir.exists() and (sdk_dir / "include" / "ida.hpp").exists():
         return sdk_dir
 
     scratch = destination_root / f".extract-{directory}"
@@ -380,13 +387,18 @@ def extract_archive(archive: Path, destination_root: Path, directory: str) -> Pa
     return sdk_dir
 
 
-def download(url: str, output: Path) -> Path:
+def download(url: str, output: Path, refresh: bool = False) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
-    if output.exists():
+    if output.exists() and not refresh:
         return output
     print(f"Downloading {url}")
-    with urllib.request.urlopen(url) as response, output.open("wb") as handle:
-        shutil.copyfileobj(response, handle)
+    temporary = output.with_name(output.name + ".tmp")
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response, temporary.open("wb") as handle:
+            shutil.copyfileobj(response, handle)
+        temporary.replace(output)
+    finally:
+        temporary.unlink(missing_ok=True)
     return output
 
 
@@ -497,9 +509,13 @@ def ensure_sdk(args: argparse.Namespace) -> None:
     manifest = load_manifest()
     sdk = find_sdk(manifest, args.version or manifest["project"]["defaultIdaSdk"])
     destination_root = Path(args.destination).resolve() if args.destination else default_sdk_dir()
+    sdk_dir = destination_root / sdk["directory"]
+    if sdk["source"] != "public-branch" and (sdk_dir / "include" / "ida.hpp").exists():
+        print(sdk_dir)
+        return
 
     if sdk["source"] in PUBLIC_SDK_SOURCES:
-        archive = download(sdk["url"], destination_root / sdk["archive"])
+        archive = download(sdk["url"], destination_root / sdk["archive"], refresh=sdk["source"] == "public-branch")
     else:
         archive = destination_root / sdk["archive"]
         if not archive.exists():
@@ -508,7 +524,7 @@ def ensure_sdk(args: argparse.Namespace) -> None:
                 f"Place {sdk['archive']} in {destination_root} or pass --destination."
             )
 
-    sdk_dir = extract_archive(archive, destination_root, sdk["directory"])
+    sdk_dir = extract_archive(archive, destination_root, sdk["directory"], refresh=sdk["source"] == "public-branch")
     print(sdk_dir)
 
 
@@ -647,6 +663,12 @@ def release_backfill(args: argparse.Namespace) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
+
+    describe = sub.add_parser("describe", help="Resolve a version/alias to canonical SDK metadata as JSON")
+    describe.add_argument("--version", required=True)
+    describe.add_argument("--manifest", type=Path, default=MANIFEST)
+    describe.set_defaults(func=lambda args: print(json.dumps(find_sdk(
+        json.loads(args.manifest.read_text(encoding="utf-8")), args.version))))
 
     ensure = sub.add_parser("ensure", help="Download/extract a target IDA SDK")
     ensure.add_argument("--version")

@@ -6,7 +6,12 @@ fixes rather than to replace live regression testing.
 
 ## Scope
 
-The local generated dependency tree contains the Ghidra 12.1.2 native
+The current generated dependency target is Ghidra 12.2. Query and option IDs
+are compared against the provisioned upstream source by
+`tests/unit/test_ghidra_protocol.py`; licensed IDA decompilation tests remain
+necessary to validate behavior beyond these wire constants.
+
+The original audit below examined the Ghidra 12.1.2 native
 decompiler sources, but not the full Ghidra Java client source tree. This first
 pass therefore audits against the native protocol contract used by the Java
 client: `ghidra_arch.*`, `ghidra_process.*`, and related C++ decompiler code.

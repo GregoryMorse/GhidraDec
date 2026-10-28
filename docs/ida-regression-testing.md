@@ -1,11 +1,41 @@
 # IDA Regression Testing
 
+Current release target: **Ghidra 12.2**. The detailed 12.1.2 corpus results below
+are historical baselines, not a claim that the whole corpus has been recertified
+on 12.2. See [the Windows runtime grid](ida-windows-test-grid.md) for installation
+priorities and the distinction between text/batch IDA and idalib.
+
+Text-mode and autonomous/batch invocations automatically run the plugin
+synchronously starting in v1.1. No `GHIDRADEC_TEST_LIVE_CALLBACKS` workaround is
+needed. The `--live-callbacks` test option still disables broad preloads, so it
+remains useful as an independent callback-fidelity check.
+
 The next regression layer should exercise IDA's loader and autoanalysis first,
 then run GhidraDec's full decompilation path against the scanned database. This
 is closer to user behavior than feeding synthetic function selections to the
 plugin, and it gives us reusable IDB/I64 artifacts for debugging failures.
 
 ## Corpus Strategy
+
+### Ghidra 12.2 Release Checks
+
+On Windows with licensed IDA 9.3, the final no-workaround text-mode run passed
+six public inputs: x86-64 `fauxware` and `test_arrays`, plus x86-32, AArch64,
+MIPS big-endian and PowerPC `test_arrays`. A second live-callback run with
+parameter identification enabled passed x86-64 `cfg_switches`,
+`struct_member_access` and `test_loops`. Both produced clean exits and useful
+output, with zero graceful/dangerous failures in their summaries:
+
+* `build/release-1.1/headless-final-summary.json`
+* `build/release-1.1/live-paramid-labels-summary.json`
+
+The SDK-free runtime checks cover execution policy, watchdog deadlines and the
+actual protocol reader/function mapping behavior, alongside Python provisioning
+and upstream-ID checks. They do not replace licensed GUI testing or certify
+Linux idat behavior by themselves; the reported Linux deadlock was addressed
+through the shared callback-thread execution path and Windows text-mode tests.
+
+### Corpus Selection
 
 Use small, pinned, legally redistributable binaries first:
 
@@ -106,8 +136,8 @@ Use `--no-stage` when the selected corpus files are already present under
 3. Wait for IDA autoanalysis to finish.
 4. Optionally save the scanned database before plugin execution.
 5. Run the plugin with argument `5`, the unattended full decompile-all
-   regression command. This keeps the decompiler worker thread enabled for
-   IDA callback dispatch and skips parameter identification by default.
+   regression command. This uses synchronous execution in text/autonomous
+   mode and skips parameter identification by default.
 6. Wait for a stable C output file and fail if it is missing, tiny, or late.
 
 For cache honesty checks, add `--live-callbacks`. This disables broad batch
@@ -378,8 +408,8 @@ dialog handling on some platforms.
 IDA-backed corpus runs should be manual or scheduled on a private licensed
 machine outside GitHub-hosted CI:
 
-* default public CI: build and package the latest official IDA SDK target,
-  currently 9.3.
+* default public CI: build and package the pinned official IDA SDK target,
+  currently 9.5, with SDK-free helper/policy tests.
 * manual corpus run: execute `tools/ida_batch.py` locally or from private CI
   with IDA Pro 9.3 installed and licensed.
 * scheduled corpus run: broader public corpus sweep with artifacts retained for

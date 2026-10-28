@@ -1114,7 +1114,7 @@ inline bool ghidradec_trace_enabled()
 #define WARNING_GUI(body) { std::stringstream ss; ss << std::showbase << body; warning("%s", ss.str().c_str()); }
 
 #ifndef RELEASE_VERSION
-#define RELEASE_VERSION "1.0"
+#define RELEASE_VERSION "1.1"
 #endif
 
 class FunctionInfo

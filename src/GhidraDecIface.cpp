@@ -385,10 +385,14 @@ class MyCallback : public DecompileCallback
 public:
 	std::string ghidraPath;
 	intptr_t decompPid = 0;
+#if defined(_WINDOWS)
+	HANDLE decompHandle = nullptr;
+#endif
 	int rdHandle = -1;
 	int wrHandle = -1;
 	virtual ~MyCallback()
 	{
+		terminate();
 		if (rdHandle != -1) {
 			_close(rdHandle); rdHandle = -1;
 		}
@@ -465,6 +469,7 @@ public:
 		if (!CreateProcessA(cmd.c_str(), NULL, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi))
 			traceIface("CreateProcessA failed: " + std::to_string(GetLastError()));
 		p = pi.hProcess;
+		decompHandle = pi.hProcess;
 		CloseHandle(g_hChildStd_IN_Rd);
 		//CloseHandle(g_hChildStd_IN_Wr);
 		//CloseHandle(g_hChildStd_OUT_Rd);
@@ -556,6 +561,24 @@ public:
 	}
 	void terminate()
 	{
+		interrupt();
+#if defined(_WINDOWS)
+		if (decompHandle != nullptr) {
+			CloseHandle(decompHandle);
+			decompHandle = nullptr;
+		}
+#endif
+	}
+	void interrupt() override
+	{
+#if defined(_WINDOWS)
+		if (decompHandle != nullptr)
+			TerminateProcess(decompHandle, 1);
+#endif
+	}
+	void decompilerWarning(const std::string& message) override
+	{
+		traceIface(message);
 	}
 	void getInits(std::vector<InitStateItem>& inits)
 	{

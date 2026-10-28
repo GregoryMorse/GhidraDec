@@ -72,8 +72,13 @@ def download(url: str, output: Path, refresh: bool) -> Path:
     if output.exists() and not refresh:
         return output
     print(f"[ghidradec-deps] downloading {url}")
-    with urllib.request.urlopen(url) as response, output.open("wb") as handle:
-        shutil.copyfileobj(response, handle)
+    temporary = output.with_name(output.name + ".tmp")
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response, temporary.open("wb") as handle:
+            shutil.copyfileobj(response, handle)
+        temporary.replace(output)
+    finally:
+        temporary.unlink(missing_ok=True)
     return output
 
 
@@ -142,12 +147,20 @@ def ensure_ghidra_sources(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir).resolve() if args.output_dir else DEFAULT_GHIDRA_OUTPUT
     ghidra_dir = output_dir / "Ghidra"
     decompile_dir = output_dir / "decompile"
-    if (decompile_dir / "sleigh.cc").exists() and not args.refresh:
+    stamp_path = output_dir / "source-version.json"
+    source = str(Path(args.source_dir).resolve()) if args.source_dir else (
+        [args.url] if args.url else ghidra_source_urls(version))
+    stamp = {"schema": 1, "version": version, "source": source}
+    try:
+        current_stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        current_stamp = None
+    explicit_source = args.source_dir or args.url or os.environ.get("GHIDRA_SOURCE_URL")
+    matching_version = isinstance(current_stamp, dict) and current_stamp.get("version") == version
+    reusable = current_stamp == stamp or (matching_version and not explicit_source)
+    if reusable and (decompile_dir / "sleigh.cc").exists() and not args.refresh:
         print(f"[ghidradec-deps] Ghidra decompiler subset already exists in {output_dir}")
         return
-    if output_dir.exists() and args.refresh:
-        shutil.rmtree(output_dir)
-
     if args.source_dir:
         cpp_dir = Path(args.source_dir).resolve()
     else:
@@ -159,6 +172,12 @@ def ensure_ghidra_sources(args: argparse.Namespace) -> None:
     if not (cpp_dir / "address.cc").exists():
         raise SystemExit(f"Ghidra decompiler C++ source directory is invalid: {cpp_dir}")
 
+    # Only replace generated trees after a valid replacement is available.
+    for directory in (ghidra_dir, decompile_dir):
+        if directory.resolve() == cpp_dir.resolve():
+            raise SystemExit("The Ghidra source and generated output directories must differ.")
+        if directory.exists():
+            shutil.rmtree(directory)
     ghidra_dir.mkdir(parents=True, exist_ok=True)
     decompile_dir.mkdir(parents=True, exist_ok=True)
 
@@ -175,6 +194,7 @@ def ensure_ghidra_sources(args: argparse.Namespace) -> None:
             shutil.rmtree(target)
         shutil.copytree(zlib_dir, target)
 
+    stamp_path.write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
     print(f"[ghidradec-deps] refreshed Ghidra decompiler subset from {cpp_dir} into {output_dir}")
 
 
